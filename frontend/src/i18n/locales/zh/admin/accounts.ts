@@ -368,6 +368,13 @@ export default {
         noBalanceEndpoint: '该平台暂无余额查询接口',
       },
       opencodeGo: {
+        free: {
+          title: '免费模型（Bun v2）',
+          hint: '仅用于 API Key 为 public 的专用账号。只支持 big-pickle 纯文本，不支持调用方工具，temperature 为 0；须启用后端 worker。',
+          publicRequired: '免费模式要求 API Key 为 public。请为此专用账号明确输入 public。',
+          officialBaseRequired: '免费模式要求 Chat 端点为 https://opencode.ai/inference/openai/v1。启用前请明确修改端点。',
+          unsupportedProtocol: '免费模式仅支持自适应或 Chat Completions 协议。',
+        },
         accountMode: {
           zen: 'Zen',
           zenDesc: '按量付费网关，消耗账户余额，按 Token 计费。',

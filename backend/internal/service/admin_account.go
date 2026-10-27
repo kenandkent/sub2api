@@ -437,6 +437,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	if err := validateOpenCodeFreeAccount(account); err != nil {
+		return nil, err
+	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
@@ -662,6 +665,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		// Strip SSO/password residue that must never sit next to OAuth tokens.
 		account.Credentials = SanitizeStoredCredentials(account.Platform, account.Credentials)
+	}
+	if err := validateOpenCodeFreeAccount(account); err != nil {
+		return nil, err
 	}
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
@@ -1111,6 +1117,24 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// only when platform is known Grok — empty platform still strips password/*).
 	if input.Credentials != nil {
 		input.Credentials = SanitizeStoredCredentials("", input.Credentials)
+	}
+	if len(input.Credentials) > 0 {
+		for _, target := range cachedTargets {
+			if target == nil || target.Platform != PlatformOpenCodeGo {
+				continue
+			}
+			candidate := *target
+			candidate.Credentials = maps.Clone(target.Credentials)
+			if candidate.Credentials == nil {
+				candidate.Credentials = map[string]any{}
+			}
+			for key, value := range input.Credentials {
+				candidate.Credentials[key] = value
+			}
+			if err := validateOpenCodeFreeAccount(&candidate); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Prepare bulk updates for columns and JSONB fields.

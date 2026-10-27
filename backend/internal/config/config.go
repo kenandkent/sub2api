@@ -65,7 +65,17 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 // 可通过 gateway.models_list_read_max_bytes 配置项覆盖。
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
+type OpenCodeFreeBunConfig struct {
+	Enabled               bool   `mapstructure:"enabled"`
+	WorkerEndpoint        string `mapstructure:"worker_endpoint"`
+	Token                 string `mapstructure:"token"`
+	RequestTimeoutSeconds int    `mapstructure:"request_timeout_seconds"`
+	MaxResponseBytes      int64  `mapstructure:"max_response_bytes"`
+	MaxEventBytes         int    `mapstructure:"max_event_bytes"`
+}
+
 type Config struct {
+	OpenCodeFreeBun         OpenCodeFreeBunConfig         `mapstructure:"opencode_free_bun"`
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
@@ -2037,6 +2047,12 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+	viper.SetDefault("opencode_free_bun.enabled", false)
+	viper.SetDefault("opencode_free_bun.worker_endpoint", "http://127.0.0.1:19090")
+	viper.SetDefault("opencode_free_bun.token", "")
+	viper.SetDefault("opencode_free_bun.request_timeout_seconds", 120)
+	viper.SetDefault("opencode_free_bun.max_response_bytes", int64(8*1024*1024))
+	viper.SetDefault("opencode_free_bun.max_event_bytes", 256*1024)
 	viper.SetDefault("run_mode", RunModeStandard)
 	viper.SetDefault("gateway.min_output_tokens", 128)
 	viper.SetDefault("simple_mode.auto_create_default_groups", true)
@@ -2711,6 +2727,15 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.OpenCodeFreeBun.Enabled {
+		u, err := url.Parse(c.OpenCodeFreeBun.WorkerEndpoint)
+		if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("opencode_free_bun.worker_endpoint must be loopback HTTP")
+		}
+		if len(c.OpenCodeFreeBun.Token) < 32 || c.OpenCodeFreeBun.RequestTimeoutSeconds <= 0 || c.OpenCodeFreeBun.MaxResponseBytes <= 0 || c.OpenCodeFreeBun.MaxEventBytes <= 0 {
+			return fmt.Errorf("invalid opencode_free_bun configuration")
+		}
+	}
 	if c.Gateway.MinOutputTokens < 16 {
 		return fmt.Errorf("gateway.min_output_tokens must be at least 16")
 	}

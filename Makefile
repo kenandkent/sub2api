@@ -1,4 +1,17 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
+.PHONY: dev dev-setup dev-stop dev-status
+
+dev:
+	@python3 -B "$(CURDIR)/deploy/dev.py" up
+
+dev-setup:
+	@python3 -B "$(CURDIR)/deploy/dev.py" setup
+
+dev-stop:
+	@python3 -B "$(CURDIR)/deploy/dev.py" stop
+
+dev-status:
+	@python3 -B "$(CURDIR)/deploy/dev.py" status
 
 FRONTEND_CRITICAL_VITEST := \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \

@@ -1,0 +1,6 @@
+# TEST ONLY: mounted mock uses the worker factory; no arbitrary upstream in production.
+services:
+  opencode-free-worker:
+    command: ["bun", "/test-opencode/e2e/mock-worker.ts"]
+    volumes:
+      - ./opencode:/test-opencode:ro

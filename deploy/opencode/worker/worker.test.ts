@@ -1,0 +1,244 @@
+import { test, expect } from 'bun:test';
+
+test('worker exposes an authenticated transport factory', async () => {
+  let factory: unknown;
+  try { factory = (await import('./worker')).createWorker; } catch {}
+  expect(typeof factory).toBe('function');
+});
+
+const TOKEN = 'a'.repeat(32);
+const PROFILE = new URL('../balanced-text-profile.v2.json', import.meta.url).pathname;
+const HASH = 'da80fdbfd8112be5433856044945bbf09f926d06c1a4dc59b70624ab8bd9a0a9';
+const ID = 'opencode-big-pickle-text-balanced-20261027-v2';
+const envelope = () => ({version: 1, request_id: 'req-1', profile_id: ID, profile_sha256: HASH, target: 'console', account_id: 1, session_id: 'ses_0123456789ab0123456789abcd', deadline_unix_ms: Date.now()+5000, body: {model:'big-pickle', messages:[{role:'user',content:'hello'}]}});
+const request = (body: unknown, token = TOKEN) => new Request('http://localhost/v1/transport/chat', {method:'POST', headers:{authorization:`Bearer ${token}`, 'content-type':'application/json'}, body:JSON.stringify(body)});
+
+test('injects pinned profile once and preserves caller messages', async () => {
+  const {createWorker} = await import('./worker');
+  let payload: any, options: any, url: any;
+  const worker = createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async (u: any,o: any) => {url=u; options=o; payload=JSON.parse(o.body); return new Response('data: [DONE]\n\n',{headers:{'content-type':'text/event-stream','x-sub2api-transport-result':'evil'}});}});
+  const response = await worker(request(envelope()));
+  expect(response.status).toBe(200);
+  expect(response.headers.get('x-sub2api-transport-result')).toBe('upstream');
+  expect(response.headers.get('x-sub2api-dispatched')).toBe('true');
+  expect(await response.text()).toBe('data: [DONE]\n\n');
+  expect(url).toBe('https://opencode.ai/inference/openai/v1/chat/completions');
+  expect(payload.messages).toEqual([{role:'system',content:expect.stringContaining('You are an AI agent running in OpenCode')},{role:'user',content:'hello'}]);
+  expect(payload.tools).toEqual([{type:'function',function:{name:'read'}}]);
+  expect(payload.temperature).toBe(0);
+  expect(payload.tool_choice).toBe('none');
+  expect(payload.stream_options).toEqual({include_usage:true});
+  expect(options.keepalive).toBe(false);
+  expect(options.redirect).toBe('error');
+});
+
+test('rejects unauthorized and unsupported requests before dispatch', async () => {
+  const {createWorker} = await import('./worker');
+  let calls = 0;
+  const worker = createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async () => {calls++; return new Response();}});
+  expect((await worker(request(envelope(),'wrong'))).status).toBe(401);
+  for (const body of [
+    {model:'big-pickle',messages:[{role:'user',content:'hello'}],temperature:0.1},
+    {model:'big-pickle',messages:[{role:'tool',content:'hello'}]},
+    {model:'big-pickle',messages:[{role:'user',content:[{type:'text',text:'hello'}]}]},
+    {model:'big-pickle',messages:[{role:'user',content:'hello'}],tools:[{type:'function'}]},
+    {model:'big-pickle',messages:[{role:'user',content:'hello'}],top_p:0.5},
+    {model:'big-pickle',messages:[{role:'user',content:'hello'}],n:2},
+  ]) {
+    const res = await worker(request({...envelope(),body}));
+    expect(res.status).toBe(400);
+    expect(res.headers.get('x-sub2api-dispatched')).toBe('false');
+  }
+  expect(calls).toBe(0);
+});
+
+test('rejects corrupted profile at startup and identity mismatch before dispatch', async () => {
+  const {createWorker} = await import('./worker');
+  expect(() => createWorker({token:TOKEN,profilePath:new URL('../minimal-text-profile.v1.json',import.meta.url).pathname})).toThrow();
+  let calls=0;
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>{calls++; return new Response();}});
+  expect((await worker(request({...envelope(),profile_sha256:'wrong'}))).status).toBe(400);
+  expect(calls).toBe(0);
+});
+
+test('rejects unsupported proxy protocols without dispatch', async () => {
+  const {createWorker} = await import('./worker'); let calls=0;
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>{calls++;return new Response();}});
+  for (const url of ['socks5://127.0.0.1:1080','https://127.0.0.1:8080']) {
+    const res=await worker(request({...envelope(),proxy:{id:1,generation:'1',url}}));
+    expect(res.status).toBe(400); expect(res.headers.get('x-sub2api-dispatched')).toBe('false');
+  }
+  expect(calls).toBe(0);
+});
+
+test('aborts upstream when the real downstream socket disconnects', async () => {
+  const {createWorker} = await import('./worker');
+  let aborted = false;
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async (_:any, opts:any) => {
+    opts.signal.addEventListener('abort',()=>{aborted=true;});
+    return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('data: first\n\n'));}}),{headers:{'content-type':'text/event-stream'}});
+  }});
+  const server=Bun.serve({port:0,hostname:'127.0.0.1',fetch:worker});
+  const client=await import('node:net');
+  try {
+    const socket=client.connect(server.port,'127.0.0.1');
+    const body=JSON.stringify(envelope());
+    socket.write(`POST /v1/transport/chat HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    await new Promise<void>((resolve,reject)=>{socket.once('data',()=>resolve());socket.once('error',reject);});
+    socket.destroy();
+    for(let i=0;i<100 && !aborted;i++) await Bun.sleep(10);
+    expect(aborted).toBe(true);
+  } finally {server.stop(true);}
+});
+
+test('deadline aborts an in-progress upstream response', async () => {
+  const {createWorker} = await import('./worker'); let aborted=false;
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async (_:any, opts:any) => {opts.signal.addEventListener('abort',()=>{aborted=true;});return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('data: x\n\n'));}}),{headers:{'content-type':'text/event-stream'}});}});
+  const res=await worker(request({...envelope(),deadline_unix_ms:Date.now()+50}));
+  const reader=res.body!.getReader(); await reader.read(); await Bun.sleep(100);
+  expect(aborted).toBe(true); await reader.cancel().catch(()=>{});
+});
+
+test('worker health probes never invoke upstream', async () => {
+  const {createWorker} = await import('./worker'); let calls=0;
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>{calls++;return new Response();}});
+  for(const path of ['/health/live','/health/ready']) expect((await worker(new Request(`http://localhost${path}`))).status).toBe(200);
+  expect(calls).toBe(0);
+});
+
+test('concurrent HTTP proxy requests reach their own CONNECT sockets', async () => {
+  const {createWorker} = await import('./worker'); const net=await import('node:net');
+  const seen:string[]=[];
+  const proxies=await Promise.all(['one','two'].map(label=>new Promise<any>(resolve=>{const s=net.createServer(socket=>{socket.once('data',data=>{seen.push(`${label}:${data.toString().split('\r\n')[0]}`);socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');});});s.listen(0,'127.0.0.1',()=>resolve(s));})));
+  try {
+    const worker=createWorker({token:TOKEN,profilePath:PROFILE});
+    const results=await Promise.all(proxies.map((s,i)=>worker(request({...envelope(),request_id:`req-${i}`,proxy:{id:i+1,generation:'1',url:`http://127.0.0.1:${s.address().port}`}}))));
+    expect(results.map(r=>r.status)).toEqual([502,502]);
+    expect(seen.sort()).toEqual(['one:CONNECT opencode.ai:443 HTTP/1.1','two:CONNECT opencode.ai:443 HTTP/1.1']);
+  } finally {for(const s of proxies) s.close();}
+});
+
+test('oversized SSE frame terminates the stream without a synthetic DONE', async () => {
+  const {createWorker} = await import('./worker');
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>new Response(new ReadableStream({start(c){c.enqueue(new Uint8Array(256*1024+1).fill(97));c.close();}}),{headers:{'content-type':'text/event-stream'}})});
+  const res=await worker(request(envelope()));
+  await expect(res.text()).rejects.toThrow();
+});
+
+test('slow socket reader eventually stops upstream pulls', async () => {
+  const {createWorker} = await import('./worker'); const net=await import('node:net'); let pulls=0;
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>new Response(new ReadableStream({pull(c){pulls++;c.enqueue(new TextEncoder().encode(`data: ${'x'.repeat(16000)}\n\n`));}}, {highWaterMark:0}),{headers:{'content-type':'text/event-stream'}})});
+  const server=Bun.serve({port:0,hostname:'127.0.0.1',fetch:worker});
+  const socket=net.connect(server.port,'127.0.0.1');
+  try {
+    const body=JSON.stringify(envelope()); socket.write(`POST /v1/transport/chat HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    await new Promise<void>((resolve,reject)=>{socket.once('data',()=>{socket.pause();resolve();});socket.once('error',reject);});
+    await Bun.sleep(250); const first=pulls; await Bun.sleep(250);
+    expect(first).toBeGreaterThan(0); expect(pulls).toBeLessThan(512); expect(pulls-first).toBeLessThan(20);
+  } finally {socket.destroy(); server.stop(true);}
+});
+
+test('HTTP proxy credentials are sent only to the selected proxy', async () => {
+  const {createWorker}=await import('./worker'); const net=await import('node:net'); let first='';
+  const server=net.createServer(socket=>socket.once('data',data=>{first=data.toString();socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');}));
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+    const worker=createWorker({token:TOKEN,profilePath:PROFILE});
+    await worker(request({...envelope(),proxy:{id:1,generation:'1',url:`http://demo:demo@127.0.0.1:${(server.address() as any).port}`}}));
+    expect(first.toLowerCase()).toContain('proxy-authorization: basic zgvtbzpkzw1v');
+  } finally {server.close();}
+});
+
+test('HTTP proxy carries a verified TLS tunnel and preserves its response', async () => {
+  const net=await import('node:net'); const fs=await import('node:fs'); const path=await import('node:path');
+  const dir=fs.mkdtempSync(path.join(import.meta.dir,'tls-test-'));
+  let tlsServer:any, proxy:any;
+  try {
+    const cert=path.join(dir,'cert.pem'), key=path.join(dir,'key.pem');
+    const make=Bun.spawnSync(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=opencode.ai','-addext','subjectAltName=DNS:opencode.ai','-keyout',key,'-out',cert],{stdout:'ignore',stderr:'ignore'});
+    expect(make.exitCode).toBe(0);
+    tlsServer=Bun.serve({port:0,hostname:'127.0.0.1',tls:{key:fs.readFileSync(key),cert:fs.readFileSync(cert)},fetch:()=>new Response('data: verified\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}})});
+    proxy=net.createServer(socket=>socket.once('data',data=>{if(!data.toString().startsWith('CONNECT opencode.ai:443 ')) {socket.destroy(); return;} const upstream=net.connect(tlsServer.port,'127.0.0.1',()=>{socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');socket.pipe(upstream);upstream.pipe(socket);});}));
+    await new Promise<void>(resolve=>proxy.listen(0,'127.0.0.1',resolve));
+    const data={...envelope(),proxy:{id:1,generation:'1',url:`http://127.0.0.1:${(proxy.address() as any).port}`}};
+    const script=`import {createWorker} from ${JSON.stringify(path.join(import.meta.dir,'worker.ts'))}; const worker=createWorker({token:${JSON.stringify(TOKEN)},profilePath:${JSON.stringify(PROFILE)}}); const response=await worker(new Request('http://localhost/v1/transport/chat',{method:'POST',headers:{authorization:${JSON.stringify('Bearer '+TOKEN)}},body:${JSON.stringify(JSON.stringify(data))}})); console.log(JSON.stringify({status:response.status,body:await response.text()}));`;
+    const child=Bun.spawn([process.execPath,'-e',script],{env:{...process.env,SSL_CERT_FILE:cert,BUN_RUNTIME_TRANSPILER_CACHE_PATH:'0'},stdout:'pipe',stderr:'pipe'});
+    const output=await new Response(child.stdout).text(); const err=await new Response(child.stderr).text();
+    expect(await child.exited).toBe(0);
+    expect(JSON.parse(output)).toEqual({status:200,body:'data: verified\n\ndata: [DONE]\n\n'});
+    const untrusted=Bun.spawn([process.execPath,'-e',script],{env:{...process.env,SSL_CERT_FILE:'',BUN_RUNTIME_TRANSPILER_CACHE_PATH:'0'},stdout:'pipe',stderr:'ignore'});
+    const rejected=JSON.parse(await new Response(untrusted.stdout).text());
+    expect(await untrusted.exited).toBe(0); expect(rejected.status).toBe(502);
+  } finally {proxy?.close();tlsServer?.stop(true);fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('response frame bound applies even when upstream mislabels content type', async () => {
+  const {createWorker}=await import('./worker');
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>new Response(new Uint8Array(256*1024+1).fill(97),{headers:{'content-type':'application/json'}})});
+  await expect((await worker(request(envelope()))).text()).rejects.toThrow();
+});
+
+test('deadline interrupts a stalled response read and cancels its source', async () => {
+  const {createWorker}=await import('./worker'); let cancelled=false;
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>new Response(new ReadableStream({cancel(){cancelled=true;}}))});
+  const response=await worker(request({...envelope(),deadline_unix_ms:Date.now()+40}));
+  const read=response.body!.getReader().read().then(()=> 'completed',()=> 'rejected');
+  expect(await Promise.race([read,Bun.sleep(150).then(()=> 'stalled')])).toBe('rejected');
+  expect(cancelled).toBe(true);
+});
+
+test('proxy CONNECT rejection is a dispatched worker error without proxy body', async () => {
+  const {createWorker}=await import('./worker'); const net=await import('node:net');
+  for (const status of [403,429]) {
+    const proxy=net.createServer(socket=>socket.once('data',()=>socket.end(`HTTP/1.1 ${status} Rejected\r\nContent-Length: 14\r\n\r\nsecret-from-proxy`)));
+    await new Promise<void>(resolve=>proxy.listen(0,'127.0.0.1',resolve));
+    try {
+      const worker=createWorker({token:TOKEN,profilePath:PROFILE});
+      const res=await worker(request({...envelope(),proxy:{id:1,generation:'1',url:`http://127.0.0.1:${(proxy.address() as any).port}`}}));
+      expect(res.status).toBe(502);
+      expect(res.headers.get('x-sub2api-transport-result')).toBe('worker-error');
+      expect(res.headers.get('x-sub2api-dispatched')).toBe('true');
+      const data=await res.json(); expect(data.error.code).toBe('proxy_or_upstream_http_error');
+      expect(JSON.stringify(data)).not.toContain('secret-from-proxy');
+    } finally {proxy.close();}
+  }
+});
+
+test('slow real socket uploads release all slots after the body timeout', async () => {
+  const {createWorker}=await import('./worker'); const net=await import('node:net');
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,bodyReadTimeoutMs:100,fetchImpl:async()=>new Response('ok')});
+  const server=Bun.serve({port:0,hostname:'127.0.0.1',fetch:worker});
+  const sockets: import('node:net').Socket[]=[];
+  try {
+    await Promise.all(Array.from({length:64},()=>new Promise<void>((resolve,reject)=>{
+      const socket=net.connect(server.port,'127.0.0.1',()=>{socket.write(`POST /v1/transport/chat HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Length: 1000\r\n\r\n{`);resolve();}); socket.on('error',reject); sockets.push(socket);
+    })));
+    await Bun.sleep(300);
+    const response=await fetch(`http://127.0.0.1:${server.port}/v1/transport/chat`,{method:'POST',headers:{authorization:`Bearer ${TOKEN}`},body:JSON.stringify(envelope())});
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('ok');
+  } finally {for(const socket of sockets) socket.destroy();server.stop(true);}
+});
+
+test('aborted partial socket uploads release slots before body timeout', async () => {
+  const {createWorker}=await import('./worker'); const net=await import('node:net');
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>new Response('ok')});
+  const server=Bun.serve({port:0,hostname:'127.0.0.1',fetch:worker}); const sockets: import('node:net').Socket[]=[];
+  try {
+    await Promise.all(Array.from({length:64},()=>new Promise<void>((resolve,reject)=>{
+      const socket=net.connect(server.port,'127.0.0.1',()=>{socket.write(`POST /v1/transport/chat HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Length: 1000\r\n\r\n{`);resolve();}); socket.on('error',reject);sockets.push(socket);
+    })));
+    await Bun.sleep(75); for (const socket of sockets) socket.destroy();
+    await Bun.sleep(100);
+    const response=await fetch(`http://127.0.0.1:${server.port}/v1/transport/chat`,{method:'POST',headers:{authorization:`Bearer ${TOKEN}`},body:JSON.stringify(envelope())});
+    expect(response.status).toBe(200); expect(await response.text()).toBe('ok');
+  } finally {for(const socket of sockets) socket.destroy();server.stop(true);}
+});
+
+test('direct upstream errors preserve their upstream provenance', async () => {
+  const {createWorker}=await import('./worker');
+  const worker=createWorker({token:TOKEN,profilePath:PROFILE,fetchImpl:async()=>new Response('unavailable',{status:429})});
+  const res=await worker(request(envelope()));
+  expect(res.status).toBe(429); expect(res.headers.get('x-sub2api-transport-result')).toBe('upstream');
+  expect(await res.text()).toBe('unavailable');
+});

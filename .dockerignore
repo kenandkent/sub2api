@@ -64,6 +64,9 @@ logs/
 tmp/
 temp/
 *.tmp
+/.cache/
+/.superpowers/
+/.dev/
 
 # Deploy files (not needed in image)
 deploy/install.sh

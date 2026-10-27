@@ -32,6 +32,7 @@
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
+            @input="openCodeFreeBaseEdited = true"
             type="text"
             class="input"
             :placeholder="
@@ -69,7 +70,7 @@
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
               </label>
-              <input v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
+              <input v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" :data-testid="`edit-cn-adaptive-base-url-${item.value}`" @input="openCodeFreeAdaptiveEdited.add(item.value)" />
             </div>
           </div>
           <p v-if="!cnSupportsNativeResponses(account.platform, currentOpenCodeOrCNMode())" class="input-hint">
@@ -127,6 +128,13 @@
               </div>
             </button>
           </div>
+        </div>
+        <div v-if="account.platform === 'opencode_go' && editOpenCodeAccountMode === 'zen'" class="flex items-start justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.opencodeGo.free.title') }}</label>
+            <p class="input-hint">{{ t('admin.accounts.opencodeGo.free.hint') }}</p>
+          </div>
+          <Toggle v-model="editOpenCodeFreeEnabled" data-testid="opencode-free-toggle" :aria-label="t('admin.accounts.opencodeGo.free.title')" />
         </div>
         <!-- Account Mode Selection (providers using the generic form) -->
         <div v-if="isGenericMultiProtocolAccount && genericAccountModes.length > 1" data-testid="edit-generic-account-mode">
@@ -193,6 +201,10 @@
         <OpenCodeGoProtocolRulesEditor
           v-if="isCNApiKeyAccount && providerRoutesByModel(account.platform) && editApiProtocol === 'adaptive'"
           v-model:rows="editOpenCodeGoProtocolRules"
+          @update:rows="openCodeFreeRulesEdited = true"
+          @input="openCodeFreeRulesEdited = true"
+          @change="openCodeFreeRulesEdited = true"
+          @click="markOpenCodeFreeRuleButtonEdit"
           :platform="account.platform"
           :plan="currentOpenCodeOrCNMode()"
         />
@@ -447,6 +459,7 @@
             </div>
             <button
               type="button"
+              data-testid="edit-pool-mode-toggle"
               @click="poolModeEnabled = !poolModeEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -3525,6 +3538,28 @@ const editOpenCodeGoProtocolRules = ref<OpenCodeGoProtocolRule[]>(cloneOpenCodeG
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 editOpenCodeAccountMode。
 const editAccountMode = ref<string>('payg')
 const editOpenCodeAccountMode = ref<OpenCodeAccountMode>('go')
+const editOpenCodeFreeEnabled = ref(false)
+let openCodeFreeInitialHeaders = ''
+let openCodeFreeInitialMode: OpenCodeAccountMode = 'go'
+let openCodeFreeInitialProtocol: CnApiProtocol = 'adaptive'
+let openCodeFreeInitialPool = ''
+let openCodeFreeInitialErrors = ''
+let openCodeFreeInitialModels = ''
+let openCodeFreeInitialWarmup = false
+let openCodeFreeInitialUnsched = ''
+let openCodeFreeInitialScheduling = ''
+let openCodeFreeBaseEdited = false
+let openCodeFreeRulesEdited = false
+const openCodeFreeAdaptiveEdited = new Set<CnNativeApiProtocol>()
+const markOpenCodeFreeRuleButtonEdit = (event: MouseEvent) => {
+  if ((event.target as Element).closest('button')) openCodeFreeRulesEdited = true
+}
+const openCodeFreeHeaderState = () => JSON.stringify({ enabled: headerOverrideEnabled.value, rows: headerOverrideRows.value })
+const openCodeFreePoolState = () => JSON.stringify([poolModeEnabled.value, poolModeRetryCount.value, poolModeRetryStatusCodesInput.value])
+const openCodeFreeErrorsState = () => JSON.stringify([customErrorCodesEnabled.value, selectedErrorCodes.value])
+const openCodeFreeModelsState = () => JSON.stringify([modelRestrictionMode.value, allowedModels.value, modelMappings.value])
+const openCodeFreeUnschedState = () => JSON.stringify([tempUnschedEnabled.value, tempUnschedRules.value])
+const openCodeFreeSchedulingState = () => JSON.stringify([accountSchedulingThresholdOverrideEnabled.value, accountSchedulingThresholdOverrideValue.value])
 // 国产厂商的接入模式只有 payg / coding。
 const cnPresetMode = computed<CnAccountMode>(() => (editAccountMode.value === 'coding' ? 'coding' : 'payg'))
 function currentOpenCodeOrCNMode(): string {
@@ -3623,6 +3658,9 @@ watch(editAccountMode, (mode, previousMode) => {
 })
 watch(editOpenCodeAccountMode, (mode, previousMode) => {
   if (!isCNApiKeyAccount.value || props.account?.platform !== 'opencode_go' || syncingForm.value) return
+  const freeInvolved = editOpenCodeFreeEnabled.value ||
+    (props.account.credentials as Record<string, unknown> | undefined)?.opencode_free_transport === 'bun'
+  if (mode !== 'zen') editOpenCodeFreeEnabled.value = false
   if (editApiProtocol.value === 'adaptive') {
     const previousDefaults = defaultCNAdaptiveBaseUrls('opencode_go', previousMode)
     const nextDefaults = defaultCNAdaptiveBaseUrls('opencode_go', mode)
@@ -3633,7 +3671,10 @@ watch(editOpenCodeAccountMode, (mode, previousMode) => {
     }
     editBaseUrl.value = editAdaptiveBaseUrls.value.chat_completions
   } else {
-    editBaseUrl.value = defaultCNBaseUrl('opencode_go', mode, editApiProtocol.value)
+    const previousDefault = defaultCNBaseUrl('opencode_go', previousMode, editApiProtocol.value)
+    if (!freeInvolved || !editBaseUrl.value || editBaseUrl.value === previousDefault) {
+      editBaseUrl.value = defaultCNBaseUrl('opencode_go', mode, editApiProtocol.value)
+    }
   }
   const previousRules = JSON.stringify(defaultOpenCodeProtocolRules(previousMode))
   if (JSON.stringify(editOpenCodeGoProtocolRules.value) === previousRules) {
@@ -4547,6 +4588,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   }
 
   // Initialize API Key fields for apikey type
+  editOpenCodeFreeEnabled.value = newAccount.platform === 'opencode_go' && newAccount.type === 'apikey' &&
+    (newAccount.credentials as Record<string, unknown> | undefined)?.opencode_free_transport === 'bun'
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
     // 国产供应商：读取 account_mode 与 api_protocol 作为可编辑初始值
@@ -4573,6 +4616,22 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       const adaptiveDefaults = defaultCNAdaptiveBaseUrls(newAccount.platform, currentOpenCodeOrCNMode())
       const storedBaseUrls = (credentials.api_base_urls as Record<string, unknown> | undefined) || {}
       const legacyBaseUrl = typeof credentials.base_url === 'string' ? credentials.base_url.trim() : ''
+      // Old Zen accounts may only have base_url (or a partial protocol map).
+      // Derive missing protocol addresses from that official legacy endpoint.
+      if (newAccount.platform === 'opencode_go' && currentOpenCodeOrCNMode() === 'zen' && legacyBaseUrl) {
+        try {
+          const url = new URL(legacyBaseUrl)
+          const path = url.pathname.replace(/\/+$/, '')
+          if (url.protocol === 'https:' && url.host === 'opencode.ai' && (path === '/zen' || path === '/zen/v1')) {
+            url.pathname = '/zen'
+            adaptiveDefaults.anthropic = url.toString()
+            url.pathname = '/zen/v1'
+            adaptiveDefaults.responses = url.toString()
+          }
+        } catch {
+          // Invalid and custom URLs keep the standard default handling.
+        }
+      }
       const storedChatBaseUrl = typeof storedBaseUrls.chat_completions === 'string'
         ? storedBaseUrls.chat_completions.trim()
         : ''
@@ -4722,6 +4781,18 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
+  openCodeFreeBaseEdited = false
+  openCodeFreeRulesEdited = false
+  openCodeFreeAdaptiveEdited.clear()
+  openCodeFreeInitialHeaders = openCodeFreeHeaderState()
+  openCodeFreeInitialMode = editOpenCodeAccountMode.value
+  openCodeFreeInitialProtocol = editApiProtocol.value
+  openCodeFreeInitialPool = openCodeFreePoolState()
+  openCodeFreeInitialErrors = openCodeFreeErrorsState()
+  openCodeFreeInitialModels = openCodeFreeModelsState()
+  openCodeFreeInitialWarmup = interceptWarmupRequests.value
+  openCodeFreeInitialUnsched = openCodeFreeUnschedState()
+  openCodeFreeInitialScheduling = openCodeFreeSchedulingState()
 }
 
 async function loadTLSProfiles() {
@@ -5422,6 +5493,31 @@ const handleSubmit = async () => {
         return
       }
 
+      const useOpenCodeFree = props.account.platform === 'opencode_go' && editOpenCodeAccountMode.value === 'zen' && editOpenCodeFreeEnabled.value
+      if (useOpenCodeFree) {
+        if (editApiProtocol.value !== 'adaptive' && editApiProtocol.value !== 'chat_completions') {
+          appStore.showError(t('admin.accounts.opencodeGo.free.unsupportedProtocol'))
+          return
+        }
+        const suppliedKey = editApiKey.value.trim()
+        const storedKey = typeof currentCredentials.api_key === 'string' ? currentCredentials.api_key.trim() : ''
+        const alreadyEnabled = currentCredentials.opencode_free_transport === 'bun'
+        if ((suppliedKey && suppliedKey !== 'public') || (!suppliedKey && storedKey && storedKey !== 'public') || (!suppliedKey && !storedKey && !alreadyEnabled)) {
+          appStore.showError(t('admin.accounts.opencodeGo.free.publicRequired'))
+          return
+        }
+        const chatBase = editApiProtocol.value === 'adaptive' ? editAdaptiveBaseUrls.value.chat_completions : editBaseUrl.value
+        if (chatBase.trim().replace(/\/+$/, '') !== 'https://opencode.ai/inference/openai/v1') {
+          appStore.showError(t('admin.accounts.opencodeGo.free.officialBaseRequired'))
+          return
+        }
+        newCredentials.opencode_free_transport = 'bun'
+        newCredentials.opencode_free_profile = 'opencode-big-pickle-text-balanced-20261027-v2'
+      } else if (props.account.platform === 'opencode_go') {
+        delete newCredentials.opencode_free_transport
+        delete newCredentials.opencode_free_profile
+      }
+
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
       if (shouldApplyModelMapping) {
         const modelMapping = buildModelRestrictionMapping()
@@ -5491,6 +5587,37 @@ const handleSubmit = async () => {
       applyAccountSchedulingThresholdOverridePatch(newCredentials, currentCredentials)
       if (!applyTempUnschedConfig(newCredentials)) {
         return
+      }
+
+      // Turning off this transport alone must not normalize unrelated legacy settings.
+      if (props.account.platform === 'opencode_go' && currentCredentials.opencode_free_transport === 'bun' && !useOpenCodeFree) {
+        const restore = (keys: string[]) => {
+          for (const key of keys) {
+            if (Object.prototype.hasOwnProperty.call(currentCredentials, key)) newCredentials[key] = currentCredentials[key]
+            else delete newCredentials[key]
+          }
+        }
+        if (!openCodeFreeBaseEdited && !openCodeFreeAdaptiveEdited.has('chat_completions')) restore(['base_url'])
+        if (editOpenCodeAccountMode.value === openCodeFreeInitialMode) restore(['account_mode'])
+        if (editApiProtocol.value === openCodeFreeInitialProtocol) restore(['api_protocol'])
+        if (openCodeFreeAdaptiveEdited.size === 0) restore(['api_base_urls'])
+        else {
+          const original = currentCredentials.api_base_urls
+          const baseUrls = original && typeof original === 'object' ? { ...original as Record<string, unknown> } : {}
+          for (const protocol of openCodeFreeAdaptiveEdited) baseUrls[protocol] = editAdaptiveBaseUrls.value[protocol].trim()
+          newCredentials.api_base_urls = baseUrls
+        }
+        if (!openCodeFreeRulesEdited) restore(['protocol_rules'])
+        if (openCodeFreeHeaderState() === openCodeFreeInitialHeaders) {
+          restore([HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY, HEADER_OVERRIDES_CREDENTIAL_KEY])
+        }
+        if (openCodeFreePoolState() === openCodeFreeInitialPool) restore(['pool_mode', 'pool_mode_retry_count', 'pool_mode_retry_status_codes'])
+        if (openCodeFreeErrorsState() === openCodeFreeInitialErrors) restore(['custom_error_codes_enabled', 'custom_error_codes'])
+        if (openCodeFreeModelsState() === openCodeFreeInitialModels) restore(['model_mapping'])
+        if (interceptWarmupRequests.value === openCodeFreeInitialWarmup) restore(['intercept_warmup_requests'])
+        if (openCodeFreeUnschedState() === openCodeFreeInitialUnsched) restore(['temp_unschedulable_enabled', 'temp_unschedulable_rules'])
+        if (openCodeFreeSchedulingState() === openCodeFreeInitialScheduling) restore([ACCOUNT_SCHEDULING_THRESHOLD_CREDENTIAL_KEY])
+        restore(['explicit_cache_upstream', 'explicit_cache_upstream_max_ttl_seconds'])
       }
 
       updatePayload.credentials = newCredentials

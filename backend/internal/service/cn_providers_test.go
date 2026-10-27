@@ -649,7 +649,7 @@ func TestBuildUpstreamModelsRequest_CNProviders(t *testing.T) {
 		{"minimax default", PlatformMiniMax, "", "https://api.minimaxi.com/v1/models"},
 		{"minimax coding", PlatformMiniMax, AccountModeCoding, "https://api.minimaxi.com/v1/models"},
 		{"opencode go", PlatformOpenCodeGo, AccountModeGo, "https://opencode.ai/zen/go/v1/models"},
-		{"opencode zen", PlatformOpenCodeGo, AccountModeZen, "https://opencode.ai/zen/v1/models"},
+		{"opencode zen", PlatformOpenCodeGo, AccountModeZen, "https://opencode.ai/inference/v1/models"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,0 +1,221 @@
+name: mysubapi CI/CD
+
+on:
+  push:
+    branches: [mysubapi]
+  pull_request:
+    branches: [mysubapi]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize branch pipelines; do not interrupt an in-progress deployment.
+concurrency:
+  group: mysubapi-${{ github.event.pull_request.number || 'branch' }}
+  cancel-in-progress: false
+
+jobs:
+  deployment-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate deployment scripts and Compose modes
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.cache/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/.cache/tmp"
+          export PYTHONDONTWRITEBYTECODE=1
+          bash -n deploy/deploy-mysubapi.sh
+          python3 -B -m unittest discover -s deploy/tests -p 'test_mysubapi_deploy.py'
+          python3 -B -m unittest discover -s deploy/tests -p 'test_dev_environment.py'
+          sh deploy/tests/docker-compose-dependencies-test.sh
+          sh deploy/tests/docker-compose-production-test.sh
+          sh deploy/tests/docker-compose-security-test.sh
+          sh deploy/tests/docker-compose-gateway-env-test.sh
+          sh deploy/tests/docker-compose-simple-mode-env-test.sh
+          sh deploy/tests/docker-runtime-resources-test.sh
+          sh deploy/test-caddyfile-cache.sh
+
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Unit and integration tests
+        working-directory: backend
+        run: |
+          make test-unit
+          make test-integration
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: make test-frontend
+
+  image:
+    needs: [deployment-checks, backend, frontend]
+    if: >-
+      github.repository == 'kenandkent/sub2api' &&
+      github.ref == 'refs/heads/mysubapi' &&
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DOCKER_CONFIG: ${{ github.workspace }}/.cache/docker-auth
+    outputs:
+      image: ${{ steps.result.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Image metadata
+        id: metadata
+        run: |
+          echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "version=$(tr -d '\r\n' < backend/cmd/server/VERSION)-mysubapi.${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish this commit
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.metadata.outputs.repository }}:sha-${{ github.sha }}
+            ${{ steps.metadata.outputs.repository }}:mysubapi
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.metadata.outputs.date }}
+            GOPROXY=https://proxy.golang.org,direct
+            GOSUMDB=sum.golang.org
+          cache-from: type=gha,scope=mysubapi
+          cache-to: type=gha,mode=max,scope=mysubapi
+      - name: Record immutable deployment image
+        id: result
+        env:
+          REPOSITORY: ${{ steps.metadata.outputs.repository }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "image=$REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Published image: $REPOSITORY@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: image
+    if: >-
+      github.repository == 'kenandkent/sub2api' &&
+      github.ref == 'refs/heads/mysubapi' &&
+      github.event_name != 'pull_request' &&
+      vars.MYSUBAPI_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: mysubapi-production
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: mysubapi-production
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '167.114.210.84' }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/home/workspace/subapi' }}
+      DEPLOY_IMAGE: ${{ needs.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Skip superseded commits
+        id: current
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          current_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/mysubapi" --jq .object.sha)
+          if [[ "$current_sha" == "$GITHUB_SHA" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Skipped deployment: this commit has been superseded." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload release and deploy by digest
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" ]] || {
+            echo "Configure DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS in mysubapi-production." >&2
+            exit 1
+          }
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]] && (( DEPLOY_PORT > 0 && DEPLOY_PORT < 65536 ))
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ && "$DEPLOY_PATH" != / ]]
+          case "/$DEPLOY_PATH/" in */../*|*/./*) exit 1;; esac
+          [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
+          umask 077
+          mkdir -p "$GITHUB_WORKSPACE/.cache"
+          ssh_dir=$(mktemp -d "$GITHUB_WORKSPACE/.cache/ssh.XXXXXX")
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          options=(-i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes
+            -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts"
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4)
+          server="$DEPLOY_USER@$DEPLOY_HOST"
+          release_id="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          release_path="$DEPLOY_PATH/releases/$release_id"
+          incoming_path="$DEPLOY_PATH/incoming/$release_id"
+          ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
+            "umask 077; test -s '$DEPLOY_PATH/.env' || { echo 'Configure the private server .env first.' >&2; exit 1; }; mkdir -p -- '$DEPLOY_PATH/releases' '$DEPLOY_PATH/incoming'; test ! -e '$release_path' && mkdir -- '$incoming_path'"
+          scp "${options[@]}" -P "$DEPLOY_PORT" \
+            deploy/docker-compose.local.yml deploy/docker-compose.production.yml \
+            deploy/deploy-mysubapi.sh deploy/.env.example "$server:$incoming_path/"
+          ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
+            "test ! -e '$release_path' && mv -T -- '$incoming_path' '$release_path'"
+          printf '%s\n' "$GHCR_TOKEN" | ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
+            "bash '$release_path/deploy-mysubapi.sh' '$DEPLOY_PATH' '$release_id' '$DEPLOY_IMAGE' '$GITHUB_ACTOR'"
+          echo "Deployed $DEPLOY_IMAGE to $DEPLOY_HOST ($release_id)." >> "$GITHUB_STEP_SUMMARY"

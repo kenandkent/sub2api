@@ -71,6 +71,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 ) (returnErr error) {
+	if account.UsesOpenCodeFreeBun() {
+		return errors.New("OpenCode free supports native chat only")
+	}
 	if s == nil {
 		return errors.New("service is nil")
 	}

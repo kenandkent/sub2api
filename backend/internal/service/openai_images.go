@@ -604,6 +604,9 @@ func (s *OpenAIGatewayService) ForwardImages(
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.UsesOpenCodeFreeBun() {
+		return nil, freeReject(c, http.StatusBadRequest, "OpenCode free supports native chat only")
+	}
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}

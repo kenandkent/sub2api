@@ -1,0 +1,422 @@
+[
+  {
+    "pair": 11,
+    "profile": "full",
+    "temperature": "omitted",
+    "expected": "NONCE_CAPTURE_1380",
+    "observed": "NONCE_CAPTURE_1380",
+    "exact_match": true,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NONCE\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"_CAPTURE_1380\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  },
+  {
+    "pair": 11,
+    "profile": "minimal",
+    "temperature": "omitted",
+    "expected": "NONCE_CAPTURE_1380",
+    "observed": "NONCE_C新时代文明实践中心_1380",
+    "exact_match": false,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NONCE_C新时代文明实践\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"中心\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"_\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"1380\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  },
+  {
+    "pair": 12,
+    "profile": "minimal",
+    "temperature": "omitted",
+    "expected": "NONCE_CAPTURE_1859",
+    "observed": "NONCE_CAPTURE_1859.",
+    "exact_match": false,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"N\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ON\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"CE\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"_C\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"APTURE_1859.\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  },
+  {
+    "pair": 12,
+    "profile": "full",
+    "temperature": "omitted",
+    "expected": "NONCE_CAPTURE_1859",
+    "observed": "NONCE_CAPTURE_1859.",
+    "exact_match": false,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"N\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ON\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"CE\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"_C\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"APTURE_1859.\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  },
+  {
+    "pair": 13,
+    "profile": "minimal",
+    "temperature": "omitted",
+    "expected": "NONCE_CAPTURE_1380",
+    "observed": "NONCE_Cpackage_1380",
+    "exact_match": false,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NONCE_Cpackage\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"_138\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"0\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  },
+  {
+    "pair": 13,
+    "profile": "balanced",
+    "temperature": "omitted",
+    "expected": "NONCE_CAPTURE_1380",
+    "observed": "NONCE_CAPTURE_1380",
+    "exact_match": true,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NONCE\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"_CAPTURE_1380\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  },
+  {
+    "pair": 14,
+    "profile": "balanced",
+    "temperature": 0,
+    "expected": "NONCE_CAPTURE_1380",
+    "observed": "NONCE_CAPTURE_1380",
+    "exact_match": true,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NONCE_CAPTURE\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"_1380\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  },
+  {
+    "pair": 14,
+    "profile": "minimal",
+    "temperature": 0,
+    "expected": "NONCE_CAPTURE_1380",
+    "observed": "NONCE_C# 380",
+    "exact_match": false,
+    "note": "Content/finish event subset only; metadata and reasoning omitted. Full UTF-8 capture remains in local raw_file.",
+    "events": [
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NONCE_C#\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\" \"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"380\"}}]}"
+      },
+      {
+        "event": "message",
+        "data": "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}"
+      },
+      {
+        "id": null,
+        "event": "message",
+        "data": "[DONE]"
+      }
+    ]
+  }
+]

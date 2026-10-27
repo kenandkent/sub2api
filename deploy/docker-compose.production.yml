@@ -1,0 +1,8 @@
+# Requires Docker Compose >= 2.24.4 for !reset.
+# Merge after docker-compose.local.yml with --project-directory set to the
+# deployment root so persistent bind mounts stay outside releases/<sha>.
+services:
+  sub2api:
+    image: ${SUB2API_IMAGE:?SUB2API_IMAGE is required}
+    pull_policy: missing
+    build: !reset null

@@ -2,21 +2,21 @@
 # Sub2API Docker Compose - Local Directory Version
 # =============================================================================
 # This configuration uses local directories for data storage instead of named
-# volumes, making it easy to migrate the entire deployment by simply copying
-# the deploy directory.
+# volumes. The application is built from the current repository checkout;
+# keep the full repository alongside the deployment data when migrating.
 #
 # Quick Start:
-#   1. Copy .env.example to .env and configure
+#   1. Use a full repository checkout, cd deploy, copy .env.example to .env
 #   2. mkdir -p data postgres_data redis_data
-#   3. docker-compose -f docker-compose.local.yml up -d
-#   4. Check logs: docker-compose -f docker-compose.local.yml logs -f sub2api
+#   3. docker compose -f docker-compose.local.yml up -d (builds current code)
+#   4. Check logs: docker compose -f docker-compose.local.yml logs -f sub2api
 #   5. Access: http://localhost:8080
 #
 # Migration to New Server:
-#   1. docker-compose -f docker-compose.local.yml down
-#   2. tar czf sub2api-deploy.tar.gz deploy/
-#   3. Transfer to new server and extract
-#   4. docker-compose -f docker-compose.local.yml up -d
+#   1. docker compose -f docker-compose.local.yml down
+#   2. Back up the full repository, including deploy/.env and data directories
+#   3. Restore on the new server, then cd to the repository's deploy directory
+#   4. docker compose -f docker-compose.local.yml up -d
 # =============================================================================
 
 services:
@@ -24,9 +24,16 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    image: sub2api:mysubapi
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-}
     container_name: sub2api
     restart: unless-stopped
+    stop_grace_period: 60s
     security_opt:
       - no-new-privileges:true
     ulimits:
@@ -217,7 +224,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   # ===========================================================================
   # PostgreSQL Database
@@ -242,11 +249,15 @@ services:
     networks:
       - sub2api-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} && psql -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} -Atqc 'SELECT 1' >/dev/null",
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 18
+      start_period: 60s
     # 注意：不暴露端口到宿主机，应用通过内部网络连接
     # 如需调试，可临时添加：ports: ["127.0.0.1:5433:5432"]
 

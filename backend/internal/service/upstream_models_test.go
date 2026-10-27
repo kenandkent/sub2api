@@ -1185,3 +1185,55 @@ func TestMatchModelsDevProviderOfficialHostsWithoutAPI(t *testing.T) {
 	}}
 	require.False(t, upstreamCatalogNeedsRegistry(capabilitySyncModelIDs([]string{"gpt-6-astra", "gpt-image-2"}), metadata))
 }
+
+func TestOpenCodeConsoleModelsRequestAndLegacyURLs(t *testing.T) {
+	cases := []struct {
+		name, platform, mode, base, want string
+	}{
+		{"zen default", PlatformOpenCodeGo, AccountModeZen, "", "https://opencode.ai/inference/v1/models"},
+		{"console explicit", PlatformOpenAI, "", "https://opencode.ai/inference/openai/v1", "https://opencode.ai/inference/v1/models"},
+		{"legacy zen", PlatformOpenCodeGo, AccountModeZen, "https://opencode.ai/zen/v1", "https://opencode.ai/zen/v1/models"},
+		{"go", PlatformOpenCodeGo, AccountModeGo, "https://opencode.ai/zen/go/v1", "https://opencode.ai/zen/go/v1/models"},
+		{"custom relay", PlatformOpenCodeGo, AccountModeZen, "https://relay.example.com/inference/openai/v1", "https://relay.example.com/inference/openai/v1/models"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &Account{Platform: tc.platform, Type: AccountTypeAPIKey, Credentials: map[string]any{
+				"account_mode": tc.mode, "base_url": tc.base, "api_key": "public",
+			}}
+			req, err := buildOpenAIAPIKeyModelsRequest(context.Background(), account, func(s string) (string, error) { return s, nil })
+			require.NoError(t, err)
+			require.Equal(t, tc.want, req.URL.String())
+			require.Equal(t, "Bearer public", req.Header.Get("Authorization"))
+		})
+	}
+}
+
+func TestOpenCodeModelsRequestUsesClientUserAgentBeforeOverrides(t *testing.T) {
+	account := &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"account_mode": AccountModeZen, "api_key": "public",
+	}}
+	identity := func(s string) (string, error) { return s, nil }
+	req, err := buildOpenAIAPIKeyModelsRequest(context.Background(), account, identity)
+	require.NoError(t, err)
+	require.Contains(t, req.Header.Get("User-Agent"), "opencode/")
+
+	account.Credentials["header_override_enabled"] = true
+	account.Credentials["header_overrides"] = map[string]any{"User-Agent": "my-client"}
+	req, err = buildOpenAIAPIKeyModelsRequest(context.Background(), account, identity)
+	require.NoError(t, err)
+	require.Equal(t, "my-client", req.Header.Get("User-Agent"))
+}
+
+func TestMatchModelsDevProviderConsoleUsesZenMetadata(t *testing.T) {
+	registry := map[string]modelsDevProvider{
+		"opencode":    {ID: "opencode", API: "https://opencode.ai/zen/v1", Models: map[string]modelsDevModel{"zen": {ID: "zen"}}},
+		"opencode-go": {ID: "opencode-go", API: "https://opencode.ai/zen/go/v1", Models: map[string]modelsDevModel{"go": {ID: "go"}}},
+	}
+	provider, ok := matchModelsDevProvider(registry, "https://opencode.ai/inference/openai/v1")
+	require.True(t, ok)
+	require.Equal(t, "opencode", provider.ID)
+	provider, ok = matchModelsDevProvider(registry, "https://opencode.ai/zen/go/v1")
+	require.True(t, ok)
+	require.Equal(t, "opencode-go", provider.ID)
+}

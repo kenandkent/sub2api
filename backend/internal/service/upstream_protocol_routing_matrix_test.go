@@ -310,6 +310,26 @@ func matchesKnownZhipuNonAPIKeyDifference(tc routingMatrixCase, want, got routin
 		reflect.DeepEqual(got, routingObservation{Error: "account 801 missing api_key", Status: http.StatusOK})
 }
 
+// Zen defaults moved to Console; only the three exact official paths may
+// differ from the main baseline. The rest of each observation must match.
+func matchesOpenCodeZenConsoleEndpointDifference(tc routingMatrixCase, want, got routingObservation) bool {
+	if tc.platform != PlatformOpenCodeGo || tc.mode != AccountModeZen || len(want.Requests) != 1 {
+		return false
+	}
+	want.Requests = append([]routingUpstreamRequest(nil), want.Requests...)
+	switch want.Requests[0].URL {
+	case "https://opencode.ai/zen/v1/chat/completions":
+		want.Requests[0].URL = "https://opencode.ai/inference/openai/v1/chat/completions"
+	case "https://opencode.ai/zen/v1/responses":
+		want.Requests[0].URL = "https://opencode.ai/inference/openai/v1/responses"
+	case "https://opencode.ai/zen/v1/messages":
+		want.Requests[0].URL = "https://opencode.ai/inference/anthropic/v1/messages"
+	default:
+		return false
+	}
+	return reflect.DeepEqual(want, got)
+}
+
 func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	data, err := os.ReadFile(routingMatrixGoldenPath)
@@ -325,6 +345,7 @@ func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 	var differences []string
 	mismatched := 0
 	knownDifferences := 0
+	consoleDifferences := 0
 	for i, tc := range cases {
 		index := golden.Results[i]
 		require.GreaterOrEqual(t, index, 0)
@@ -332,6 +353,10 @@ func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 		want := golden.Observations[index]
 		got := observeRouting(tc)
 		if reflect.DeepEqual(want, got) {
+			continue
+		}
+		if matchesOpenCodeZenConsoleEndpointDifference(tc, want, got) {
+			consoleDifferences++
 			continue
 		}
 		if matchesKnownZhipuNonAPIKeyDifference(tc, want, got) {
@@ -347,4 +372,5 @@ func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 	// 2 account types × 4 modes × 3 probe states × 4 address configurations ×
 	// 2 model spellings. A disappeared or expanded exception requires review.
 	require.Equal(t, 192, knownDifferences, "unexpected change to the declared Zhipu non-API-Key difference")
+	require.Positive(t, consoleDifferences, "expected Console endpoint differences")
 }

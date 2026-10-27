@@ -165,6 +165,13 @@ export default {
         noBalanceEndpoint: 'This platform has no balance query endpoint',
       },
       opencodeGo: {
+        free: {
+          title: 'Free models (Bun v2)',
+          hint: 'Use a dedicated account with API key public. Supports big-pickle text only, without caller tools, at temperature 0. The backend worker must be enabled.',
+          publicRequired: 'Free mode requires the API key public. Enter public explicitly for this dedicated account.',
+          officialBaseRequired: 'Free mode requires the official Chat endpoint https://opencode.ai/inference/openai/v1. Update the endpoint explicitly before enabling it.',
+          unsupportedProtocol: 'Free mode supports only adaptive or Chat Completions protocol.',
+        },
         accountMode: {
           zen: 'Zen',
           zenDesc: 'Pay-as-you-go gateway. Consumes account credits, billed per token.',

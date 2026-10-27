@@ -86,8 +86,8 @@ const (
 	DefaultMiniMaxBaseURL = "https://api.minimaxi.com/v1"
 	// OpenCode Go：Chat Completions / Responses / models 共用 /v1 基址。
 	DefaultOpenCodeGoBaseURL = "https://opencode.ai/zen/go/v1"
-	// OpenCode Zen：按量付费网关，模型列表为 /zen/v1/models。
-	DefaultOpenCodeZenBaseURL = "https://opencode.ai/zen/v1"
+	// OpenCode Zen Console：OpenAI 推理端点；模型列表使用 /inference/v1/models。
+	DefaultOpenCodeZenBaseURL = "https://opencode.ai/inference/openai/v1"
 	// Command Code Provider API：Chat Completions / Responses / models 共用 /provider/v1 基址。
 	DefaultCommandCodeBaseURL = "https://api.commandcode.ai/provider/v1"
 	// Cline API：只提供 Chat Completions（{base}/chat/completions）与模型列表。
@@ -104,7 +104,7 @@ const (
 	DefaultMiniMaxAnthropicBaseURL    = "https://api.minimaxi.com/anthropic"
 	// OpenCode Go Anthropic 基址不含 /v1：nativeAnthropicTargetURL 会再拼 /v1/messages。
 	DefaultOpenCodeGoAnthropicBaseURL  = "https://opencode.ai/zen/go"
-	DefaultOpenCodeZenAnthropicBaseURL = "https://opencode.ai/zen"
+	DefaultOpenCodeZenAnthropicBaseURL = "https://opencode.ai/inference/anthropic"
 	// Command Code 的 Anthropic 端点为 /provider/v1/messages（Claude 系模型只在此端点提供）。
 	DefaultCommandCodeAnthropicBaseURL = "https://api.commandcode.ai/provider"
 )

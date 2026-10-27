@@ -1,0 +1,25 @@
+import { test, expect } from 'bun:test';
+import { parseSse, createSseParser, classify, validateRequest } from './quality-capture.mjs';
+const event = value => `data: ${JSON.stringify(value)}\n\n`;
+test('aggregates only index zero and preserves reasoning and tool calls', () => {
+  const raw = event({id:'response1',model:'model',system_fingerprint:'fp',choices:[{index:1,delta:{content:'WRONG'}},{index:0,delta:{role:'assistant',reasoning_content:'think',content:'NONCE',tool_calls:[{index:0,id:'call'}]}}]}) + event({choices:[{index:0,delta:{content:'_OK'},finish_reason:'stop'}],usage:{total_tokens:2}}) + 'data: [DONE]\n\n';
+  const p = parseSse(raw); expect(p.text).toBe('NONCE_OK'); expect(p.reasoning.reasoning_content).toBe('think'); expect(p.role).toBe('assistant'); expect(p.tool_calls).toHaveLength(1); expect(p.finish_reason).toBe('stop'); expect(p.done).toBe(true); expect(p.upstream.model).toBe('model'); expect(p.usage.total_tokens).toBe(2);
+});
+test('handles CRLF, multiline JSON data, comments and event ids across every character boundary', () => {
+ const raw=': hello\r\nid: abc\r\ndata: {"choices":\r\ndata: [{"index":0,"delta":{"content":"你好"}}]}\r\n\r\ndata: [DONE]\r\n\r\n';
+ const p=createSseParser(); for (const c of raw) p.feed(c); p.end(); expect(p.result.text).toBe('你好'); expect(p.result.events[0].id).toBe('abc'); expect(p.result.done).toBe(true); expect(p.result.errors).toEqual([]);
+});
+test('does not dispatch unterminated event and records malformed JSON',()=>{const p=parseSse('data: {bad}\n\ndata: [DONE]'); expect(p.done).toBe(false); expect(p.errors).toHaveLength(1);});
+test('strict exact match is distinct from optional period and substring',()=>{expect(classify('X','X')).toEqual({exact_match:true,optional_terminal_period:false,contains_expected:true,extra_text:false}); expect(classify('X.','X').optional_terminal_period).toBe(true); expect(classify('hello X bye','X').extra_text).toBe(true); expect(classify(' X ','X').exact_match).toBe(false);});
+test('rejects redirects in URL, secrets, and excessive timeout before any fetch',()=>{const base={url:'https://opencode.ai/inference/openai/v1/chat/completions',headers:{authorization:'Bearer public'},body:'{}',expected:'X',timeout_ms:1000,keepalive:false}; expect(()=>validateRequest(base)).not.toThrow(); for(const bad of [{...base,url:base.url+'?x'}, {...base,headers:{Authorization:'Bearer secret'}},{...base,headers:{'x-api-key':'secret'}},{...base,timeout_ms:60001}]) expect(()=>validateRequest(bad)).toThrow();});
+const valid = {url:'https://opencode.ai/inference/openai/v1/chat/completions',headers:{authorization:'Bearer public'},body:'{}',expected:'你好',timeout_ms:1000,keepalive:false};
+test('captures byte-split UTF-8 through exactly one mocked fetch', async()=>{
+ const {captureOnce}=await import('./quality-capture.mjs'); const original=globalThis.fetch; let calls=0, seen;
+ const raw=event({choices:[{index:0,delta:{content:'你好'},finish_reason:'stop'}]})+'data: [DONE]\n\n';
+ const bytes=new TextEncoder().encode(raw);
+ globalThis.fetch=async (url,options)=>{calls++;seen={url,options};return new Response(new ReadableStream({start(c){for(const b of bytes)c.enqueue(Uint8Array.of(b));c.close();}}),{status:200,headers:{'content-type':'text/event-stream','set-cookie':'secret'}})};
+ try {const result=await captureOnce(valid);expect(calls).toBe(1);expect(seen.options.redirect).toBe('error');expect(seen.options.keepalive).toBe(false);expect(result.raw).toBe(raw);expect(result.text).toBe('你好');expect(result.exact_match).toBe(true);expect(result.protocol_complete).toBe(true);expect(result.headers['set-cookie']).toBeUndefined();expect(result.first_content_ms).not.toBeNull();} finally {globalThis.fetch=original;}
+});
+test('does not parse a non-200 body as SSE',async()=>{const {captureOnce}=await import('./quality-capture.mjs');const old=globalThis.fetch;const raw='data: [DONE]\n\n';globalThis.fetch=async()=>new Response(raw,{status:429});try{const result=await captureOnce(valid);expect(result.raw).toBe(raw);expect(result.done).toBe(false);expect(result.events).toEqual([]);expect(result.error.name).toBe('HttpError');expect(result.http_accepted).toBe(false);}finally{globalThis.fetch=old;}});
+test('aborts oversized responses without retries',async()=>{const {captureOnce}=await import('./quality-capture.mjs');const old=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;return new Response(new Uint8Array(2*1024*1024+1));};try{const result=await captureOnce(valid);expect(calls).toBe(1);expect(result.protocol_complete).toBe(false);expect(result.error.message).toContain('2 MiB');}finally{globalThis.fetch=old;}});
+test('requires finish reason as well as DONE',async()=>{const {captureOnce}=await import('./quality-capture.mjs');const old=globalThis.fetch;globalThis.fetch=async()=>new Response(event({choices:[{index:0,delta:{content:'你好'}}]})+'data: [DONE]\n\n');try{const result=await captureOnce(valid);expect(result.done).toBe(true);expect(result.exact_match).toBe(true);expect(result.protocol_complete).toBe(false);}finally{globalThis.fetch=old;}});

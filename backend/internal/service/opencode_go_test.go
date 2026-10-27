@@ -221,7 +221,7 @@ func TestOpenCodeGoQuotaURL(t *testing.T) {
 		{"chat base trailing slash", DefaultOpenCodeGoBaseURL + "/", want},
 		{"anthropic base (no /v1)", DefaultOpenCodeGoAnthropicBaseURL, want},
 		{"anthropic base trailing slash", DefaultOpenCodeGoAnthropicBaseURL + "/", want},
-		{"zen base stays idempotent", DefaultOpenCodeZenBaseURL, "https://opencode.ai/zen/v1/usage"},
+		{"legacy zen base stays idempotent", "https://opencode.ai/zen/v1", "https://opencode.ai/zen/v1/usage"},
 		{"custom base with /v1", "https://custom.example/v1", "https://custom.example/v1/usage"},
 		{"custom base with /v1 trailing slash", "https://custom.example/v1/", "https://custom.example/v1/usage"},
 		// 与 kimiQuotaURL 同语义：无条件补 /v1，非官方域名同样归一。
@@ -265,4 +265,37 @@ func TestIsOpenCodeUnsupportedModel(t *testing.T) {
 	for _, tc := range cases {
 		require.Equal(t, tc.want, IsOpenCodeUnsupportedModel(tc.model), "model=%s", tc.model)
 	}
+}
+
+func TestOpenCodeZenConsoleProtocolBaseURLs(t *testing.T) {
+	account := &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"account_mode": AccountModeZen, "api_protocol": APIProtocolAdaptive,
+	}}
+	require.Equal(t, "https://opencode.ai/inference/openai/v1", account.GetCNProtocolBaseURL(APIProtocolChatCompletions))
+	require.Equal(t, "https://opencode.ai/inference/openai/v1", account.GetCNProtocolBaseURL(APIProtocolResponses))
+	require.Equal(t, "https://opencode.ai/inference/anthropic", account.GetAnthropicProtocolBaseURL())
+
+	account.Credentials["api_base_urls"] = map[string]any{
+		APIProtocolChatCompletions: "https://opencode.ai/zen/v1",
+		APIProtocolResponses:       "https://relay.example.com/v1",
+		APIProtocolAnthropic:       "https://opencode.ai/zen",
+	}
+	require.Equal(t, "https://opencode.ai/zen/v1", account.GetCNProtocolBaseURL(APIProtocolChatCompletions))
+	require.Equal(t, "https://relay.example.com/v1", account.GetCNProtocolBaseURL(APIProtocolResponses))
+	require.Equal(t, "https://opencode.ai/zen", account.GetAnthropicProtocolBaseURL())
+}
+
+func TestOpenCodeZenLegacySingleBaseKeepsOverrideAndRelaySemantics(t *testing.T) {
+	account := &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"account_mode": AccountModeZen, "api_protocol": APIProtocolAdaptive, "base_url": "https://opencode.ai/zen/v1",
+		"api_base_urls": map[string]any{APIProtocolAnthropic: "https://relay.example.com/anthropic", APIProtocolResponses: "https://relay.example.com/v1"},
+	}}
+	require.Equal(t, "https://relay.example.com/anthropic", account.GetCNProtocolBaseURL(APIProtocolAnthropic))
+	require.Equal(t, "https://relay.example.com/v1", account.GetCNProtocolBaseURL(APIProtocolResponses))
+
+	delete(account.Credentials, "api_base_urls")
+	account.Credentials["base_url"] = "https://relay.example.com/zen/v1"
+	require.Equal(t, "https://relay.example.com/zen/v1", account.GetCNProtocolBaseURL(APIProtocolChatCompletions))
+	require.Equal(t, "https://opencode.ai/inference/anthropic", account.GetCNProtocolBaseURL(APIProtocolAnthropic))
+	require.Equal(t, "https://opencode.ai/inference/openai/v1", account.GetCNProtocolBaseURL(APIProtocolResponses))
 }

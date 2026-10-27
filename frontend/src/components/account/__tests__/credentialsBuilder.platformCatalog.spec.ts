@@ -31,13 +31,13 @@ import {
   type CnApiProtocol
 } from '../credentialsBuilder'
 
-// ===== 改为读取平台清单之前的实现，作为等价基准（补入之后内置登记的 Command Code） =====
+// ===== 改为读取平台清单之前的实现，作为基准（包含后续 OpenCode Zen 端点变更） =====
 
-const legacyOpenCode = {
+const openCodeDefaults = {
   goBase: 'https://opencode.ai/zen/go/v1',
   goAnthropic: 'https://opencode.ai/zen/go',
-  zenBase: 'https://opencode.ai/zen/v1',
-  zenAnthropic: 'https://opencode.ai/zen'
+  zenBase: 'https://opencode.ai/inference/openai/v1',
+  zenAnthropic: 'https://opencode.ai/inference/anthropic'
 }
 
 const legacyGoRules = [
@@ -52,6 +52,7 @@ const legacyZenRules = [
   { pattern: 'grok-*', protocol: 'responses' },
   { pattern: 'gpt-*', protocol: 'responses' },
   { pattern: 'muse-spark-*', protocol: 'responses' },
+  { pattern: 'muse-wonder-1.0', protocol: 'responses' },
   { pattern: 'claude-*', protocol: 'anthropic' },
   { pattern: 'qwen3.8-max', protocol: 'chat_completions' },
   { pattern: 'qwen*', protocol: 'anthropic' }
@@ -85,7 +86,7 @@ function legacyDefaultCNBaseUrl(platform: string, mode: string, protocol: CnApiP
       case 'minimax':
         return 'https://api.minimaxi.com/anthropic'
       case 'opencode_go':
-        return mode === 'zen' ? legacyOpenCode.zenAnthropic : legacyOpenCode.goAnthropic
+        return mode === 'zen' ? openCodeDefaults.zenAnthropic : openCodeDefaults.goAnthropic
       default:
         return ''
     }
@@ -100,7 +101,7 @@ function legacyDefaultCNBaseUrl(platform: string, mode: string, protocol: CnApiP
     case 'minimax':
       return 'https://api.minimaxi.com/v1'
     case 'opencode_go':
-      return mode === 'zen' ? legacyOpenCode.zenBase : legacyOpenCode.goBase
+      return mode === 'zen' ? openCodeDefaults.zenBase : openCodeDefaults.goBase
     default:
       return ''
   }
@@ -147,7 +148,7 @@ describe('credentialsBuilder derives multi-protocol data from the platform catal
     }
   })
 
-  it('matches the legacy default endpoints for every platform, mode and protocol', () => {
+  it('matches default endpoints for every platform, mode and protocol', () => {
     for (const [platform, modes] of Object.entries(legacyModes)) {
       for (const mode of [...modes, 'unknown-mode']) {
         const legacyMode = modes.includes(mode) ? mode : modes[0]
@@ -167,10 +168,10 @@ describe('credentialsBuilder derives multi-protocol data from the platform catal
   })
 
   it('keeps the exported OpenCode constants and default rules', () => {
-    expect(OPENCODE_GO_BASE_URL).toBe(legacyOpenCode.goBase)
-    expect(OPENCODE_GO_ANTHROPIC_BASE_URL).toBe(legacyOpenCode.goAnthropic)
-    expect(OPENCODE_ZEN_BASE_URL).toBe(legacyOpenCode.zenBase)
-    expect(OPENCODE_ZEN_ANTHROPIC_BASE_URL).toBe(legacyOpenCode.zenAnthropic)
+    expect(OPENCODE_GO_BASE_URL).toBe(openCodeDefaults.goBase)
+    expect(OPENCODE_GO_ANTHROPIC_BASE_URL).toBe(openCodeDefaults.goAnthropic)
+    expect(OPENCODE_ZEN_BASE_URL).toBe(openCodeDefaults.zenBase)
+    expect(OPENCODE_ZEN_ANTHROPIC_BASE_URL).toBe(openCodeDefaults.zenAnthropic)
     expect(DEFAULT_OPENCODE_GO_PROTOCOL_RULES).toEqual(legacyGoRules)
     expect(DEFAULT_OPENCODE_ZEN_PROTOCOL_RULES).toEqual(legacyZenRules)
     expect(defaultOpenCodeProtocolRules('go')).toEqual(legacyGoRules)

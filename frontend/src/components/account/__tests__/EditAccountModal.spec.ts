@@ -7,15 +7,16 @@ import {
   setPlatformCatalog
 } from '@/constants/platformCatalog'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode, showErrorMock } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
-  authIsSimpleMode: { value: true }
+  authIsSimpleMode: { value: true },
+  showErrorMock: vi.fn()
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError: showErrorMock,
     showSuccess: vi.fn(),
     showInfo: vi.fn()
   })
@@ -513,6 +514,93 @@ describe('EditAccountModal', () => {
         { pattern: 'claude-*', protocol: 'anthropic' },
         { pattern: 'qwen*', protocol: 'anthropic' }
       ]
+    })
+  })
+
+  it('preserves explicitly configured OpenCode Zen relay endpoints on submit', async () => {
+    const account = buildAccount()
+    account.platform = 'opencode_go'
+    account.credentials = {
+      api_key: 'sk-opencode',
+      account_mode: 'zen',
+      api_protocol: 'adaptive',
+      base_url: 'https://relay.example.com/openai/v1',
+      api_base_urls: {
+        chat_completions: 'https://relay.example.com/openai/v1',
+        anthropic: 'https://relay.example.com/anthropic',
+        responses: 'https://relay.example.com/openai/v1'
+      }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://relay.example.com/openai/v1',
+      api_base_urls: {
+        chat_completions: 'https://relay.example.com/openai/v1',
+        anthropic: 'https://relay.example.com/anthropic',
+        responses: 'https://relay.example.com/openai/v1'
+      }
+    })
+  })
+
+  it.each([
+    { baseUrl: 'https://opencode.ai/zen', stored: undefined, anthropic: 'https://opencode.ai/zen', responses: 'https://opencode.ai/zen/v1' },
+    { baseUrl: 'https://opencode.ai/zen/v1', stored: {}, anthropic: 'https://opencode.ai/zen', responses: 'https://opencode.ai/zen/v1' },
+    {
+      baseUrl: 'https://opencode.ai/zen/v1',
+      stored: { anthropic: 'https://relay.example.com/anthropic' },
+      anthropic: 'https://relay.example.com/anthropic',
+      responses: 'https://opencode.ai/zen/v1'
+    },
+    {
+      baseUrl: 'https://opencode.ai/zen/v1',
+      stored: { responses: 'https://relay.example.com/v1' },
+      anthropic: 'https://opencode.ai/zen',
+      responses: 'https://relay.example.com/v1'
+    }
+  ])('keeps legacy Zen endpoints when editing an account with $baseUrl and $stored', async ({ baseUrl, stored, anthropic, responses }) => {
+    const account = buildAccount()
+    account.platform = 'opencode_go'
+    const rules = [{ pattern: 'custom-*', protocol: 'chat_completions' }]
+    account.credentials = {
+      api_key: 'sk-opencode',
+      account_mode: 'zen',
+      api_protocol: 'adaptive',
+      base_url: baseUrl,
+      ...(stored === undefined ? {} : { api_base_urls: stored }),
+      protocol_rules: rules
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    const protocolInput = (protocol: string) => {
+      const label = wrapper.findAll('form#edit-account-form label').find(item =>
+        item.text() === `admin.accounts.cnProviders.apiProtocol.${protocol}`
+      )
+      return (label?.element.parentElement?.querySelector('input') as HTMLInputElement | null)?.value
+    }
+    expect(protocolInput('anthropic')).toBe(anthropic)
+    expect(protocolInput('responses')).toBe(responses)
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Renamed Zen')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      name: 'Renamed Zen',
+      credentials: {
+        base_url: baseUrl,
+        api_base_urls: {
+          chat_completions: baseUrl,
+          anthropic,
+          responses
+        },
+        protocol_rules: rules
+      }
     })
   })
 
@@ -2056,5 +2144,254 @@ describe('EditAccountModal temp-unschedulable rule scope', () => {
 
     expect(checkedScopes(wrapper)).toEqual(['temp-unsched-scope-model'])
     wrapper.unmount()
+  })
+})
+
+describe('OpenCode free account editing', () => {
+  const profile = 'opencode-big-pickle-text-balanced-20261027-v2'
+  function freeAccount() {
+    const account = buildAccount()
+    account.platform = 'opencode_go'
+    account.credentials = {
+      api_key: 'public', account_mode: 'zen', api_protocol: 'adaptive',
+      base_url: 'https://relay.example/v1',
+      api_base_urls: { chat_completions: 'https://relay.example/v1', anthropic: 'https://relay.example/a', responses: 'https://relay.example/r' },
+      protocol_rules: [{ pattern: 'custom-*', protocol: 'chat_completions' }],
+      custom_field: 'keep', opencode_free_transport: 'bun', opencode_free_profile: profile
+    }
+    return account
+  }
+  function officialFreeAccount() {
+    const account = freeAccount()
+    account.credentials.base_url = 'https://opencode.ai/inference/openai/v1'
+    account.credentials.api_base_urls.chat_completions = 'https://opencode.ai/inference/openai/v1'
+    return account
+  }
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    updateAccountMock.mockReset().mockImplementation(async () => freeAccount())
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+  })
+
+  it('loads and saves an enabled free account', async () => {
+    const wrapper = mountModal(officialFreeAccount())
+    expect(wrapper.get('[data-testid="opencode-free-toggle"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      api_key: 'public', opencode_free_transport: 'bun', opencode_free_profile: profile
+    })
+  })
+
+  it('removes only free fields while preserving custom credentials when disabled', async () => {
+    const account = freeAccount()
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials).not.toHaveProperty('opencode_free_transport')
+    expect(credentials).not.toHaveProperty('opencode_free_profile')
+    expect(credentials).toMatchObject({ api_key: 'public', base_url: account.credentials.base_url, api_base_urls: account.credentials.api_base_urls, protocol_rules: account.credentials.protocol_rules, custom_field: 'keep' })
+  })
+
+  it('keeps inactive custom endpoints and headers when only free mode is disabled', async () => {
+    const account = freeAccount()
+    account.credentials.api_protocol = 'chat_completions'
+    account.credentials.header_override_enabled = false
+    account.credentials.header_overrides = { 'X-Custom': 'keep' }
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials.api_base_urls).toEqual(account.credentials.api_base_urls)
+    expect(credentials.header_overrides).toEqual({ 'X-Custom': 'keep' })
+    expect(credentials.header_override_enabled).toBe(false)
+  })
+
+  it('saves an intentional endpoint edit while disabling free mode', async () => {
+    const account = freeAccount()
+    account.credentials.api_protocol = 'chat_completions'
+    const wrapper = mountModal(account)
+    const input = wrapper.findAll('input').find(i => (i.element as HTMLInputElement).value === 'https://relay.example/v1')
+    expect(input).toBeDefined()
+    await input!.setValue('https://new-relay.example/v1')
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.base_url).toBe('https://new-relay.example/v1')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.api_base_urls).toEqual(account.credentials.api_base_urls)
+  })
+
+  it('preserves hidden settings when only free mode is disabled', async () => {
+    const account = freeAccount()
+    Object.assign(account.credentials, {
+      pool_mode: false, pool_mode_retry_count: 3, pool_mode_retry_status_codes: [429],
+      custom_error_codes_enabled: false, custom_error_codes: [503],
+      explicit_cache_upstream: true, explicit_cache_upstream_max_ttl_seconds: 1800
+    })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      pool_mode: false, pool_mode_retry_count: 3, pool_mode_retry_status_codes: [429],
+      custom_error_codes_enabled: false, custom_error_codes: [503],
+      explicit_cache_upstream: true, explicit_cache_upstream_max_ttl_seconds: 1800
+    })
+    const expected = { ...account.credentials }
+    delete expected.opencode_free_transport
+    delete expected.opencode_free_profile
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toEqual(expected)
+  })
+
+  it('saves a pool setting deliberately changed while free mode is disabled', async () => {
+    const account = freeAccount()
+    account.credentials.pool_mode = false
+    account.credentials.pool_mode_retry_count = 3
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-pool-mode-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.pool_mode).toBe(true)
+  })
+
+  it('saves a deliberately edited routing rule while disabling free mode', async () => {
+    const wrapper = mountModal(freeAccount())
+    await wrapper.get('[data-testid="opencode-go-protocol-pattern-0"]').setValue('updated-*')
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.protocol_rules).toEqual([{ pattern: 'updated-*', protocol: 'chat_completions' }])
+  })
+
+  it('updates one adaptive endpoint without rewriting the other stored endpoints', async () => {
+    const account = freeAccount()
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-cn-adaptive-base-url-chat_completions"]').setValue('https://new-relay.example/v1')
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://new-relay.example/v1',
+      api_base_urls: { ...account.credentials.api_base_urls, chat_completions: 'https://new-relay.example/v1' }
+    })
+  })
+
+  it('does not add absent legacy protocol fields when only disabling free mode', async () => {
+    const account = freeAccount()
+    delete account.credentials.api_protocol
+    delete account.credentials.api_base_urls
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials).not.toHaveProperty('api_protocol')
+    expect(credentials).not.toHaveProperty('api_base_urls')
+  })
+
+  it('retains custom endpoints when switching from Zen to Go', async () => {
+    const account = freeAccount()
+    account.credentials.api_protocol = 'chat_completions'
+    const wrapper = mountModal(account)
+    const button = wrapper.findAll('button').find(b => b.text().includes('admin.accounts.opencodeGo.accountMode.go'))
+    await button!.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: account.credentials.base_url, api_base_urls: account.credentials.api_base_urls
+    })
+  })
+
+  it('uses the Go default on mode change for an ordinary paid Zen account', async () => {
+    const account = freeAccount()
+    account.credentials.api_protocol = 'chat_completions'
+    account.credentials.api_key = 'sk-paid'
+    delete account.credentials.opencode_free_transport
+    delete account.credentials.opencode_free_profile
+    const wrapper = mountModal(account)
+    const button = wrapper.findAll('button').find(b => b.text().includes('admin.accounts.opencodeGo.accountMode.go'))
+    await button!.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.base_url).toBe('https://opencode.ai/zen/go/v1')
+  })
+
+  it('rejects unsupported free protocols without switching the protocol', async () => {
+    const account = officialFreeAccount()
+    account.credentials.api_protocol = 'anthropic'
+    account.credentials.base_url = 'https://relay.example/a'
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(showErrorMock).toHaveBeenCalledWith('admin.accounts.opencodeGo.free.unsupportedProtocol')
+    expect((wrapper.findAll('input').find(i => (i.element as HTMLInputElement).value === 'https://relay.example/a'))).toBeDefined()
+  })
+
+  it('rejects a custom Chat endpoint when free mode is enabled', async () => {
+    const wrapper = mountModal(freeAccount())
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(showErrorMock).toHaveBeenCalledWith('admin.accounts.opencodeGo.free.officialBaseRequired')
+  })
+
+  it('does not remove unrelated platform credentials with the same names', async () => {
+    const account = buildAccount()
+    account.credentials.opencode_free_transport = 'custom'
+    account.credentials.opencode_free_profile = 'custom-profile'
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      opencode_free_transport: 'custom', opencode_free_profile: 'custom-profile'
+    })
+  })
+
+  it('rejects enabling free mode with an existing private key', async () => {
+    const account = freeAccount()
+    account.credentials.api_key = 'sk-private'
+    delete account.credentials.opencode_free_transport
+    delete account.credentials.opencode_free_profile
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('requires an explicit public key when enabling on a redacted account', async () => {
+    const account = officialFreeAccount()
+    delete account.credentials.api_key
+    delete account.credentials.opencode_free_transport
+    delete account.credentials.opencode_free_profile
+    account.credentials_status = { has_api_key: true }
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    await wrapper.get('form#edit-account-form input[type="password"]').setValue('public')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({ api_key: 'public', opencode_free_transport: 'bun', opencode_free_profile: profile })
+  })
+
+  it('keeps a redacted key when an already enabled account is saved', async () => {
+    const account = officialFreeAccount()
+    delete account.credentials.api_key
+    account.credentials_status = { has_api_key: true }
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials).not.toHaveProperty('api_key')
+    expect(credentials).toMatchObject({ opencode_free_transport: 'bun', opencode_free_profile: profile })
+  })
+
+  it('does not add markers to a legacy account that remains opted out', async () => {
+    const account = freeAccount()
+    delete account.credentials.opencode_free_transport
+    delete account.credentials.opencode_free_profile
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty('opencode_free_transport')
+  })
+
+  it('removes markers when switching to Go', async () => {
+    const wrapper = mountModal(freeAccount())
+    const button = wrapper.findAll('button').find(b => b.text().includes('admin.accounts.opencodeGo.accountMode.go'))
+    await button!.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials.account_mode).toBe('go')
+    expect(credentials).not.toHaveProperty('opencode_free_transport')
+    expect(credentials).not.toHaveProperty('opencode_free_profile')
   })
 })

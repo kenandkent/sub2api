@@ -1,0 +1,55 @@
+# Development dependencies for a host-run Go backend and Vite frontend.
+# Run from the repository root with the dedicated development environment:
+# docker compose -p sub2api-dev --project-directory deploy --env-file .dev/.env \
+#   -f deploy/docker-compose.dependencies.yml up -d
+# Data lives in .dev and is independent of every full deployment Compose file.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:${DEV_POSTGRES_PORT:-15433}:5432"
+    environment:
+      POSTGRES_USER: ${DEV_POSTGRES_USER:-sub2api_dev}
+      POSTGRES_DB: ${DEV_POSTGRES_DB:-sub2api_dev}
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:?DEV_POSTGRES_PASSWORD is required}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - ../.dev/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" &&
+          psql -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -Atqc 'SELECT 1' >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:${DEV_REDIS_PORT:-16380}:6379"
+    environment:
+      REDISCLI_AUTH: ${DEV_REDIS_PASSWORD:?DEV_REDIS_PASSWORD is required}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${DEV_REDIS_PASSWORD:?DEV_REDIS_PASSWORD is required}
+    volumes:
+      - ../.dev/redis_data:/data
+    healthcheck:
+      test: [CMD-SHELL, "redis-cli ping | grep -qx PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s

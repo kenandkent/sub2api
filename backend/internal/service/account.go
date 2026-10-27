@@ -1618,8 +1618,40 @@ func (a *Account) GetCNProtocolBaseURL(protocol string) string {
 				return baseURL
 			}
 		}
+		if baseURL := a.legacyOpenCodeZenProtocolBaseURL(protocol); baseURL != "" {
+			return baseURL
+		}
 	}
 	return a.defaultProviderBaseURL(protocol)
+}
+
+// legacyOpenCodeZenProtocolBaseURL keeps historical single-base Zen
+// accounts on the old endpoint when adaptive routing selects another protocol.
+// Callers first check the requested protocol's explicit address; non-official
+// relays retain their existing semantics.
+func (a *Account) legacyOpenCodeZenProtocolBaseURL(protocol string) string {
+	if !a.IsOpenCodeGo() || a.GetOpenCodeAccountMode() != AccountModeZen {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(a.GetCredential("base_url")))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Host, "opencode.ai") {
+		return ""
+	}
+	switch strings.TrimRight(parsed.Path, "/") {
+	case "/zen", "/zen/v1":
+	default:
+		return ""
+	}
+	switch protocol {
+	case APIProtocolAnthropic:
+		parsed.Path = "/zen"
+	case APIProtocolResponses:
+		parsed.Path = "/zen/v1"
+	default:
+		return ""
+	}
+	parsed.RawPath = ""
+	return parsed.String()
 }
 
 // IsAnthropicProtocol 报告账号是否以原生 Anthropic 协议接入上游
@@ -3371,4 +3403,9 @@ func (a *Account) QuotaDimensionOrDefault() string {
 		return QuotaDimensionGlobal
 	}
 	return a.QuotaDimension
+}
+
+// UsesOpenCodeFreeBun reports an explicit transport selection, including invalid accounts.
+func (a *Account) UsesOpenCodeFreeBun() bool {
+	return a != nil && a.Platform == PlatformOpenCodeGo && a.GetCredential("opencode_free_transport") == "bun"
 }

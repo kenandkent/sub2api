@@ -185,9 +185,9 @@
           {
             "mode": "zen",
             "base_urls": {
-              "anthropic": "https://opencode.ai/zen",
-              "chat_completions": "https://opencode.ai/zen/v1",
-              "responses": "https://opencode.ai/zen/v1"
+              "anthropic": "https://opencode.ai/inference/anthropic",
+              "chat_completions": "https://opencode.ai/inference/openai/v1",
+              "responses": "https://opencode.ai/inference/openai/v1"
             },
             "protocol_rules": [
               {
@@ -200,6 +200,10 @@
               },
               {
                 "pattern": "muse-spark-*",
+                "protocol": "responses"
+              },
+              {
+                "pattern": "muse-wonder-1.0",
                 "protocol": "responses"
               },
               {

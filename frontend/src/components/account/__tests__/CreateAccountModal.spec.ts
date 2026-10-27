@@ -14,7 +14,7 @@ const {
   showWarningMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
-  authIsSimpleMode,
+  authIsSimpleMode, showErrorMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
@@ -23,11 +23,12 @@ const {
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
   authIsSimpleMode: { value: true },
+  showErrorMock: vi.fn(),
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError: showErrorMock,
     showSuccess: vi.fn(),
     showWarning: showWarningMock,
   }),
@@ -463,21 +464,26 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
       account_mode: 'zen',
       api_protocol: 'adaptive',
-      base_url: 'https://opencode.ai/zen/v1',
+      base_url: 'https://opencode.ai/inference/openai/v1',
       api_base_urls: {
-        chat_completions: 'https://opencode.ai/zen/v1',
-        anthropic: 'https://opencode.ai/zen',
-        responses: 'https://opencode.ai/zen/v1'
+        chat_completions: 'https://opencode.ai/inference/openai/v1',
+        anthropic: 'https://opencode.ai/inference/anthropic',
+        responses: 'https://opencode.ai/inference/openai/v1'
       },
       protocol_rules: [
         { pattern: 'grok-*', protocol: 'responses' },
         { pattern: 'gpt-*', protocol: 'responses' },
         { pattern: 'muse-spark-*', protocol: 'responses' },
+        { pattern: 'muse-wonder-1.0', protocol: 'responses' },
         { pattern: 'claude-*', protocol: 'anthropic' },
         { pattern: 'qwen3.8-max', protocol: 'chat_completions' },
         { pattern: 'qwen*', protocol: 'anthropic' }
       ]
     })
+    const submittedRules = createAccountMock.mock.calls[0]?.[0]?.credentials?.protocol_rules as { pattern: string }[]
+    expect(submittedRules.some(rule => rule.pattern === 'muse-future' || (
+      rule.pattern.endsWith('*') && 'muse-future'.startsWith(rule.pattern.slice(0, -1))
+    ))).toBe(false)
   })
 
   it('submits OpenCode GO endpoints after switching account type', async () => {
@@ -1039,5 +1045,67 @@ describe('CreateAccountModal Vertex API key auth', () => {
     await selectButtonByText(wrapper, 'admin.accounts.vertexLabel')
     expect(wrapper.find('[data-testid="vertex-auth-mode-apikey"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="vertex-api-key-input"]').exists()).toBe(false)
+  })
+})
+
+describe('OpenCode free account creation', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    createAccountMock.mockReset().mockResolvedValue({ id: 44, platform: 'opencode_go', type: 'apikey' })
+    probeUpstreamBillingMock.mockReset().mockResolvedValue({})
+    syncUpstreamModelsMock.mockReset().mockResolvedValue({ models: [], metadata: {} })
+  })
+
+  async function openFreeForm(key: string) {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenCode')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('free')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue(key)
+    await wrapper.get('[data-testid="opencode-free-toggle"]').trigger('click')
+    return wrapper
+  }
+
+  it('sends the Bun profile only for an opted-in public Zen account', async () => {
+    const wrapper = await openFreeForm('public')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      api_key: 'public', account_mode: 'zen', opencode_free_transport: 'bun',
+      opencode_free_profile: 'opencode-big-pickle-text-balanced-20261027-v2'
+    })
+  })
+
+  it('rejects a private key rather than replacing it', async () => {
+    const wrapper = await openFreeForm('sk-private')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect((wrapper.get('form#create-account-form input[type="password"]').element as HTMLInputElement).value).toBe('sk-private')
+  })
+
+  it('clears the free selection on switching to Go', async () => {
+    const wrapper = await openFreeForm('public')
+    await selectButtonByText(wrapper, 'admin.accounts.opencodeGo.accountMode.go')
+    expect(wrapper.find('[data-testid="opencode-free-toggle"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('opencode_free_transport')
+  })
+
+  it('rejects a custom Chat endpoint without changing it', async () => {
+    const wrapper = await openFreeForm('public')
+    await wrapper.get('[data-testid="cn-adaptive-base-url-chat_completions"]').setValue('https://relay.example/v1')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(showErrorMock).toHaveBeenCalledWith('admin.accounts.opencodeGo.free.officialBaseRequired')
+    expect((wrapper.get('[data-testid="cn-adaptive-base-url-chat_completions"]').element as HTMLInputElement).value).toBe('https://relay.example/v1')
+  })
+
+  it('rejects unsupported free protocols without changing the selected endpoint', async () => {
+    const wrapper = await openFreeForm('public')
+    await selectButtonByText(wrapper, 'admin.accounts.cnProviders.apiProtocol.anthropic')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(showErrorMock).toHaveBeenCalledWith('admin.accounts.opencodeGo.free.unsupportedProtocol')
   })
 })

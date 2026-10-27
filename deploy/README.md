@@ -2,6 +2,8 @@
 
 This directory contains files for deploying Sub2API on Linux servers and Apple-silicon Macs.
 
+For daily editing with Vite HMR and native Go/Air reload, use `make dev` from the repository root. See [local development](./LOCAL_DEVELOPMENT.md); the full-image deployment methods below remain available.
+
 ## Deployment Methods
 
 | Method | Best For | Setup Wizard |
@@ -14,9 +16,11 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 
 | File | Description |
 |------|-------------|
-| `docker-compose.yml` | Docker Compose configuration (named volumes) |
-| `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
-| `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
+| `docker-compose.yml` | Build current checkout, with PostgreSQL/Redis and named volumes |
+| `docker-compose.local.yml` | Build current checkout, with PostgreSQL/Redis and local data directories |
+| `docker-compose.standalone.yml` | Build current checkout, using external PostgreSQL/Redis |
+| `docker-compose.dev.yml` | Source build with development settings |
+| `docker-deploy.sh` | Legacy upstream download script; not used for this branch's source deployment |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
 | `.env.example` | Container environment variables template |
@@ -50,49 +54,17 @@ See [APPLE_CONTAINER.md](./APPLE_CONTAINER.md) for configuration, upgrades, pers
 
 ## Docker Deployment (Recommended)
 
-### Method 1: One-Click Deployment (Recommended)
+For branch-specific GHCR builds and the opt-in Linux server deployment pipeline, see [mysubapi CI/CD](./CICD_MYSUBAPI.md). The production override uses CI-built images; the local instructions below continue to build the working tree.
 
-Use the automated preparation script for the easiest setup:
+### Build and Deploy the Current Branch
 
-```bash
-# Download and run the preparation script
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+On `mysubapi`, all three production Compose configurations build the application from the full repository checkout using the root `Dockerfile`. The local image is named `sub2api:mysubapi`; `pull_policy: build` rebuilds it during `docker compose up`, reusing build cache when possible. The build includes the working tree's frontend and backend, including uncommitted source changes.
 
-# Or download first, then run
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh -o docker-deploy.sh
-chmod +x docker-deploy.sh
-./docker-deploy.sh
-```
-
-**What the script does:**
-- Downloads `docker-compose.local.yml` and `.env.example`
-- Automatically generates secure secrets (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
-- Creates `.env` file with generated secrets
-- Creates necessary data directories (data/, postgres_data/, redis_data/)
-- **Displays generated credentials** (POSTGRES_PASSWORD, JWT_SECRET, etc.)
-
-**After running the script:**
-```bash
-# Start services
-docker compose -f docker-compose.local.yml up -d
-
-# View logs
-docker compose -f docker-compose.local.yml logs -f sub2api
-
-# If admin email/password were auto-generated, find them in logs:
-docker compose -f docker-compose.local.yml logs sub2api | grep "Generated admin"
-
-# Access Web UI
-# http://localhost:8080
-```
-
-### Method 2: Manual Deployment
-
-If you prefer manual control:
+Use Docker Engine/Desktop with the Docker Compose plugin (`docker compose`). Keep the full repository available; downloading only the Compose file or copying only `deploy/` is insufficient. The legacy `docker-deploy.sh` still downloads upstream files and is not the deployment entry point for this branch.
 
 ```bash
-# Clone repository
-git clone https://github.com/Wei-Shaw/sub2api.git
+# For a new checkout, clone this branch (skip if already using this repository)
+git clone --branch mysubapi --single-branch https://github.com/kenandkent/sub2api.git
 cd sub2api/deploy
 
 # Configure environment
@@ -109,7 +81,7 @@ echo "TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY}" >> .env
 # Create data directories
 mkdir -p data postgres_data redis_data
 
-# Start all services using local directory version
+# Build the current checkout and start the three services
 docker compose -f docker-compose.local.yml up -d
 
 # View logs (check for auto-generated admin email and password)
@@ -126,7 +98,7 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 | **docker-compose.local.yml** | Local directories (./data, ./postgres_data, ./redis_data) | ✅ Easy (tar entire directory) | Production, need frequent backups/migration |
 | **docker-compose.yml** | Named volumes (/var/lib/docker/volumes/) | ⚠️ Requires docker commands | Simple setup, don't need migration |
 
-**Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
+Both versions build the current checkout. Use `docker-compose.local.yml` when you prefer deployment data in local directories, or `docker-compose.yml` for Docker-managed named volumes. For external PostgreSQL and Redis, configure their connection settings and use `docker-compose.standalone.yml`.
 
 ### How Auto-Setup Works
 
@@ -217,9 +189,8 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 # Restart Sub2API only
 docker compose -f docker-compose.local.yml restart sub2api
 
-# Update to latest version
-docker compose -f docker-compose.local.yml pull
-docker compose -f docker-compose.local.yml up -d
+# After updating the checked-out branch/source, rebuild and replace the app
+docker compose -f docker-compose.local.yml up -d --build --no-deps sub2api
 
 # Remove all data (caution!)
 docker compose -f docker-compose.local.yml down
@@ -241,9 +212,8 @@ docker compose logs -f sub2api
 # Restart Sub2API only
 docker compose restart sub2api
 
-# Update to latest version
-docker compose pull
-docker compose up -d
+# After updating the checked-out branch/source, rebuild and replace the app
+docker compose up -d --build --no-deps sub2api
 
 # Remove all data (caution!)
 docker compose down -v
@@ -268,29 +238,29 @@ docker compose down -v
 
 See `.env.example` for all available options.
 
-> **Note:** The `docker-deploy.sh` script automatically generates `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, and `POSTGRES_PASSWORD` for you.
+> **Note:** Set `POSTGRES_PASSWORD`, `JWT_SECRET`, and `TOTP_ENCRYPTION_KEY` in your private `.env` before the first deployment. The legacy upstream preparation script is not used by this branch's source deployment.
 
 ### Easy Migration (Local Directory Version)
 
-When using `docker-compose.local.yml`, all data is stored in local directories, making migration simple:
+When using `docker-compose.local.yml`, data is stored in local directories. Source builds also require the full repository, so migrate the checkout together with `deploy/.env` and its data directories:
 
 ```bash
 # On source server: Stop services and create archive
-cd /path/to/deployment
+cd /path/to/sub2api/deploy
 docker compose -f docker-compose.local.yml down
-cd ..
-tar czf sub2api-complete.tar.gz deployment/
+cd ../..
+tar czf sub2api-complete.tar.gz sub2api/
 
 # Transfer to new server
 scp sub2api-complete.tar.gz user@new-server:/path/to/destination/
 
 # On new server: Extract and start
 tar xzf sub2api-complete.tar.gz
-cd deployment/
+cd sub2api/deploy
 docker compose -f docker-compose.local.yml up -d
 ```
 
-Your entire deployment (configuration + data) is migrated!
+The archive includes the source checkout, configuration, and stopped services' data. Keep it private because it contains deployment secrets.
 
 ---
 

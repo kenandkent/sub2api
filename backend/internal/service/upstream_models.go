@@ -653,6 +653,18 @@ func matchModelsDevProvider(registry map[string]modelsDevProvider, accountBaseUR
 	if provider, ok := matchModelsDevProviderByAPIURL(registry, accountBaseURL); ok {
 		return provider, true
 	}
+	// models.dev may still advertise the legacy Zen API while Console uses
+	// a separate inference endpoint. Do not attribute Zen models to Go.
+	if openCodeConsoleModelsBaseURL(accountBaseURL) != accountBaseURL {
+		provider, ok := registry["opencode"]
+		if !ok || len(provider.Models) == 0 {
+			return modelsDevProvider{}, false
+		}
+		if strings.TrimSpace(provider.ID) == "" {
+			provider.ID = "opencode"
+		}
+		return provider, true
+	}
 	return matchModelsDevProviderByKnownHost(registry, accountBaseURL)
 }
 
@@ -1145,12 +1157,13 @@ func buildOpenAIAPIKeyModelsRequest(ctx context.Context, account *Account, valid
 		return nil, newUpstreamModelSyncConfigError("Invalid OpenAI base URL", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, buildOpenAIModelsURL(normalizedBaseURL), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, buildOpenAIModelsURL(openCodeConsoleModelsBaseURL(normalizedBaseURL)), nil)
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Invalid OpenAI model list URL", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	applyOpenCodeUpstreamUserAgent(account, req.URL.String(), req.Header)
 	// 账号级请求头覆写：模型列表探测与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
@@ -1332,6 +1345,19 @@ func buildV1ModelsURL(base string) string {
 		return normalized + "/models"
 	}
 	return normalized + "/v1/models"
+}
+
+// Console exposes its catalogue separately from the OpenAI inference endpoint.
+// Restrict the rewrite to the official endpoint so legacy and relay URLs keep
+// their configured routing semantics, including query parameters.
+func openCodeConsoleModelsBaseURL(base string) string {
+	parsed, err := url.Parse(base)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Host, "opencode.ai") || strings.TrimRight(parsed.Path, "/") != "/inference/openai/v1" {
+		return base
+	}
+	parsed.Path = "/inference/v1"
+	parsed.RawPath = ""
+	return parsed.String()
 }
 
 func buildOpenAIModelsURL(base string) string {

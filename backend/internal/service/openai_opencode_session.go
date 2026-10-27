@@ -14,14 +14,12 @@ import (
 const (
 	openCodeSessionHeader         = "X-OpenCode-Session"
 	openCodeInboundBodyContextKey = "opencode_inbound_body"
+	openCodeGeneratedSessionKey   = "opencode_generated_session"
 
-	// openCodeUpstreamUserAgent 是发往官方 OpenCode 上游的规范 User-Agent。
-	// opencode.ai 前置 Cloudflare 按客户端 UA 签名做 bot 拦截：Python-urllib 等
-	// 编程库 UA 会被 CF error code 1010 拒绝并返回 403。网关透传白名单放行
-	// user-agent，客户端自报身份原样到达上游会命中 WAF；该 403 再被计入账号
-	// 凭证类 strike，健康账号因此被自动禁用。取值沿用真实 opencode 客户端的
-	// UA 格式（opencode/<version>）。
-	openCodeUpstreamUserAgent = "opencode/1.0.0"
+	// Public CLI format from anomalyco/opencode commit dae4077a, App.useragent.
+	// Matching public client metadata is compatibility, not proof of access to
+	// restricted models; upstream authorization and quota errors still apply.
+	openCodeUpstreamUserAgent = "opencode/dev/2.1.4/cli"
 )
 
 // rememberOpenCodeInboundBody keeps the client request body so protocol
@@ -75,6 +73,43 @@ func applyOpenCodeSessionHeader(c *gin.Context, account *Account, targetURL stri
 		}
 	}
 	headers.Set(openCodeSessionHeader, sessionID)
+	if isOfficialOpenCodeHost(targetURL) {
+		applyOpenCodeClientMetadata(c, headers, sessionID)
+	}
+}
+
+// The official client separates a conversation's affinity from a child session
+// ID. Preserve supplied values and never invent a parent session. Account
+// overrides for these optional fields retain precedence over caller metadata.
+func applyOpenCodeClientMetadata(c *gin.Context, headers http.Header, sessionID string) {
+	set := func(name, fallback string) string {
+		value := sanitizeSessionID(getHeaderRaw(headers, name))
+		if value == "" && c != nil && c.Request != nil {
+			value = sanitizeSessionID(c.GetHeader(name))
+		}
+		if value == "" {
+			value = fallback
+		}
+		if value == "" {
+			return ""
+		}
+		for key := range headers {
+			if strings.EqualFold(key, name) {
+				delete(headers, key)
+			}
+		}
+		headers.Set(name, value)
+		return value
+	}
+	set("x-opencode-client", "cli")
+	set("x-opencode-project", "global")
+	set("x-opencode-session-id", sessionID)
+	affinity := set("x-session-affinity", sessionID)
+	set("X-Session-Id", affinity)
+	parent := set("x-opencode-parent-session-id", "")
+	if parent != "" {
+		set("x-parent-session-id", parent)
+	}
 }
 
 func shouldSendOpenCodeSessionHeader(account *Account, targetURL string) bool {
@@ -94,7 +129,7 @@ func shouldGenerateOpenCodeSession(account *Account, targetURL string) bool {
 	}
 	return strings.EqualFold(parsed.Scheme, "https") &&
 		strings.EqualFold(parsed.Hostname(), "opencode.ai") &&
-		strings.Contains(parsed.Path, "/zen/go")
+		(strings.Contains(parsed.Path, "/zen/go") || strings.HasPrefix(parsed.Path, "/inference/"))
 }
 
 func isOfficialOpenCodeHost(targetURL string) bool {
@@ -165,8 +200,24 @@ func resolveOpenCodeSessionID(c *gin.Context, headers http.Header, generate bool
 	if sessionID := sanitizeSessionID(existingOpenCodeSessionHeader(headers)); sessionID != "" {
 		return sessionID
 	}
+	if c != nil && c.Request != nil {
+		if sessionID := sanitizeSessionID(c.GetHeader("x-opencode-session-id")); sessionID != "" {
+			return sessionID
+		}
+	}
 	if generate {
-		return uuid.NewString()
+		if c != nil {
+			if existing, ok := c.Get(openCodeGeneratedSessionKey); ok {
+				if value, ok := existing.(string); ok && sanitizeSessionID(value) != "" {
+					return value
+				}
+			}
+		}
+		value := uuid.NewString()
+		if c != nil {
+			c.Set(openCodeGeneratedSessionKey, value)
+		}
+		return value
 	}
 	return ""
 }

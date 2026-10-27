@@ -160,6 +160,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
+	if result.OpenCodeFree != nil {
+		if err := validateOpenCodeFreeResult(result); err != nil {
+			return err
+		}
+	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
@@ -357,6 +362,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
+	if result.OpenCodeFree != nil {
+		requestID = result.OpenCodeFree.RequestID
+	}
+
 	// 确定 RequestedModel（渠道映射前的原始模型）
 	requestedModel := result.Model
 	if input.OriginalModel != "" {
@@ -493,6 +502,21 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
+	if result.OpenCodeFree != nil {
+		quotaPlatform := input.QuotaPlatform
+		if quotaPlatform == "" {
+			quotaPlatform = PlatformFromAPIKey(apiKey)
+		}
+		params := &postUsageBillingParams{
+			Cost: cost, User: user, APIKey: apiKey, Account: account, Subscription: subscription,
+			RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+			IsSubscriptionBill:    isSubscriptionBilling && !simpleModeKeyRateLimitOnly,
+			AccountRateMultiplier: accountRateMultiplier, APIKeyService: input.APIKeyService,
+			Platform: quotaPlatform, SimpleModeKeyRateLimitOnly: simpleModeKeyRateLimitOnly,
+		}
+		return s.settleOpenCodeFreeUsage(ctx, result.OpenCodeFree, usageLog, params,
+			s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly)
+	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())

@@ -2,12 +2,15 @@
 
 > 本文档记录项目环境配置、常见坑点和注意事项，供 Claude Code 和团队成员参考。
 
+本分支日常开发统一使用 `make dev`：Vite 热更新、Go/Air 增量编译与自动重启，PostgreSQL/Redis 使用独立 Docker 容器。地址、账号、缓存与停止命令见 [本地开发环境](deploy/LOCAL_DEVELOPMENT.md)。下文历史 Windows 手工环境配置可作为参考，不是当前开发环境的启动入口。
+
 ## 一、项目基本信息
 
 | 项目 | 说明 |
 |------|------|
 | **上游仓库** | Wei-Shaw/sub2api |
-| **Fork 仓库** | bayma888/sub2api-bmai |
+| **Fork 仓库** | kenandkent/sub2api |
+| **本地开发分支** | mysubapi |
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
 | **数据库** | PostgreSQL 16 + Redis |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
@@ -34,8 +37,8 @@
 ### 开发工具
 
 ```bash
-# golangci-lint（CI 用 v2.13，本地建议装同一版以免版本差异带来的噪音）
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13
+# golangci-lint（原流水线使用 v2.14.0，新流水线应与本地工具保持一致）
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 
 # pnpm (前端包管理)
 npm install -g pnpm
@@ -43,18 +46,25 @@ npm install -g pnpm
 
 ## 三、CI/CD 流水线
 
-### GitHub Actions Workflows
+### 当前分支状态
 
-| Workflow | 触发条件 | 检查内容 |
-|----------|----------|----------|
-| **backend-ci.yml** | push, pull_request | 单元测试 + 集成测试 + golangci-lint v2.13 |
-| **security-scan.yml** | push, pull_request, 每周一 | govulncheck + gosec + pnpm audit |
-| **release.yml** | tag `v*` | 构建发布（PR 不触发） |
+`mysubapi` 是独立开发分支，已移除继承的 `backend-ci.yml`、`security-scan.yml`、`cla.yml` 和 `release.yml`，改用专用的 `.github/workflows/mysubapi-ci-cd.yml`。工作流仅针对本分支执行检查和镜像发布；服务器部署需要显式启用。
 
-### CI 要求
+本地构建、部署脚本、GoReleaser 配置、发布辅助工具和安全检查工具继续保留，供手动使用和后续编写专用流水线时参考。它们不会自行触发自动化任务。
 
-- Go 版本必须是 **1.27.0**：三个 workflow 都用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.0'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）。前者漏了 CI 会在版本校验步骤直接失败；**后者漏了 CI 不会报，而是等到有人用这些 Dockerfile 构建时才失败**（`go.mod requires go >= X (running Y; GOTOOLCHAIN=local)`）。
-- 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
+### 专用 CI/CD 的约定
+
+- 目标环境为 `root@167.114.210.84:22`，部署根目录 `/home/workspace/subapi`；只允许可信 `mysubapi` 分支推送或手动运行进行发布。默认不执行部署，仓库变量 `MYSUBAPI_DEPLOY_ENABLED=true` 后才启用。
+- 三份常规 Compose 从当前检出的完整仓库和根 `Dockerfile` 构建本地镜像 `sub2api:mysubapi`，通过 `pull_policy: build` 在启动时重新构建。服务器结合 `docker-compose.production.yml` 覆盖配置后，移除 build 并使用 GHCR 的不可变镜像 digest，无需上传源码。
+- Go 版本以 `backend/go.mod` 为准，当前声明为 **1.27.3**；根 `Dockerfile` 已使用相同版本。`deploy/Dockerfile` 和 `backend/Dockerfile` 仍使用 **1.27.2**，若要采用这些入口，需先统一构建工具链。
+- 前端使用 pnpm 9 和 `pnpm install --frozen-lockfile`，必须提交 `frontend/pnpm-lock.yaml`；根镜像使用 Node.js 24。
+- 流水线应先执行后端单元/集成测试、前端检查和部署脚本检查，再构建镜像。部署时等待健康检查，并验证登录和实际网关请求；`/health` 只返回应用存活状态，不检查运行期间的数据库或 Redis 连接。
+- 数据库迁移随服务启动执行，更新前需备份数据库并记录可回退的镜像版本；镜像回退不会自动回退数据库结构。
+- 服务器连接、镜像仓库认证和运行密钥通过部署环境或 GitHub Secrets 配置，不写入仓库。
+- 首次部署固定 `JWT_SECRET` 和 `TOTP_ENCRYPTION_KEY`，将运行配置、密钥和数据一同备份。JWT 已在数据库中持久化，后续修改环境变量不等于轮换数据库中的现有密钥。
+- `deploy/docker-deploy.sh`、二进制安装脚本和后台更新服务仍面向上游仓库；定制版本接入专用 CI/CD 后应统一通过自有镜像升级，避免这些入口覆盖分支修改。
+
+完整配置、首次服务器准备和应用恢复边界见 [mysubapi CI/CD](deploy/CICD_MYSUBAPI.md)。本轮只准备工作流与配置，不连接服务器或执行远程部署。
 
 ### 本地测试命令
 
@@ -340,6 +350,12 @@ sub2api-bmai/
 
 ## 七、参考资源
 
+- [OpenCode 接入、免费模型验证与 serve 方案边界](deploy/OPENCODE.md)
+- [OpenCode 最小请求组合与实验限制](deploy/OPENCODE_MINIMIZATION.md)
+- [OpenCode 模板配对质量对照与 v2 候选](deploy/OPENCODE_QUALITY_COMPARISON.md)
+- [本项目 OpenCode Bun 上游接入设计](deploy/OPENCODE_BUN_UPSTREAM_DESIGN.md)
+- [OpenCode 免费模型 Bun 本地接入与验证](deploy/opencode/LOCAL_FREE.md)
+- [OmniRoute 免费模型 Bun 接入设计](deploy/OMNIROUTE_FREE_MODELS_DESIGN.md)
 - [上游仓库](https://github.com/Wei-Shaw/sub2api)
 - [Ent 文档](https://entgo.io/docs/getting-started)
 - [Vue3 文档](https://vuejs.org/)

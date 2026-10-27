@@ -1561,6 +1561,13 @@
           />
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
+        <div v-if="isOpenCodeGoPlatform && openCodeAccountMode === 'zen'" class="flex items-start justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.opencodeGo.free.title') }}</label>
+            <p class="input-hint">{{ t('admin.accounts.opencodeGo.free.hint') }}</p>
+          </div>
+          <Toggle v-model="openCodeFreeEnabled" data-testid="opencode-free-toggle" :aria-label="t('admin.accounts.opencodeGo.free.title')" />
+        </div>
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
         <div
@@ -4401,6 +4408,7 @@ const upstreamBillingAutoProbeEnabled = ref(true)
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 openCodeAccountMode。
 const accountMode = ref<string>('payg')
 const openCodeAccountMode = ref<OpenCodeAccountMode>('zen')
+const openCodeFreeEnabled = ref(false)
 // API 协议决定转发端点与格式：cc=现有转换链，anthropic=原生直通（Claude Code），
 // responses=deepseek / kimi 原生 Responses 端点（Codex）。与账号类型正交。
 const apiProtocol = ref<CnApiProtocol>('adaptive')
@@ -4542,6 +4550,7 @@ function selectGenericMultiProtocolPlatform(platform: string) {
 // 账号类型 / 协议变更时同步默认 base url。
 watch(openCodeAccountMode, (mode, previousMode) => {
   if (!isOpenCodeGoPlatform.value) return
+  if (mode !== 'zen') openCodeFreeEnabled.value = false
   if (apiProtocol.value === 'adaptive') {
     const previousDefaults = defaultCNAdaptiveBaseUrls('opencode_go', previousMode)
     const nextDefaults = defaultCNAdaptiveBaseUrls('opencode_go', mode)
@@ -5135,6 +5144,7 @@ watch(
 watch(
   () => form.platform,
   (newPlatform) => {
+    if (newPlatform !== 'opencode_go') openCodeFreeEnabled.value = false
     // Reset base URL based on platform
     if (isMultiProtocolApiKeyPlatform(newPlatform)) {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
@@ -5626,6 +5636,7 @@ const resetForm = () => {
   addMethod.value = 'oauth'
   accountMode.value = 'payg'
   openCodeAccountMode.value = 'zen'
+  openCodeFreeEnabled.value = false
   apiProtocol.value = 'adaptive'
   openCodeGoProtocolRules.value = cloneOpenCodeGoProtocolRules(defaultOpenCodeProtocolRules('zen'))
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
@@ -6105,6 +6116,21 @@ const handleSubmit = async () => {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
     return
   }
+  if (form.platform === 'opencode_go' && openCodeAccountMode.value === 'zen' && openCodeFreeEnabled.value && apiKeyValue.value.trim() !== 'public') {
+    appStore.showError(t('admin.accounts.opencodeGo.free.publicRequired'))
+    return
+  }
+  if (form.platform === 'opencode_go' && openCodeAccountMode.value === 'zen' && openCodeFreeEnabled.value) {
+    if (apiProtocol.value !== 'adaptive' && apiProtocol.value !== 'chat_completions') {
+      appStore.showError(t('admin.accounts.opencodeGo.free.unsupportedProtocol'))
+      return
+    }
+    const chatBase = apiProtocol.value === 'adaptive' ? adaptiveBaseUrls.value.chat_completions : apiKeyBaseUrl.value
+    if (chatBase.trim().replace(/\/+$/, '') !== 'https://opencode.ai/inference/openai/v1') {
+      appStore.showError(t('admin.accounts.opencodeGo.free.officialBaseRequired'))
+      return
+    }
+  }
 
   // Determine default base URL based on platform
   const defaultBaseUrl =
@@ -6122,6 +6148,10 @@ const handleSubmit = async () => {
   const credentials: Record<string, unknown> = {
     base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
+  }
+  if (form.platform === 'opencode_go' && openCodeAccountMode.value === 'zen' && openCodeFreeEnabled.value) {
+    credentials.opencode_free_transport = 'bun'
+    credentials.opencode_free_profile = 'opencode-big-pickle-text-balanced-20261027-v2'
   }
   if (form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl.value)) {
     credentials.tier_id = geminiTierAIStudio.value

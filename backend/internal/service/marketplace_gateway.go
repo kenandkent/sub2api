@@ -32,7 +32,6 @@ func NewMarketplaceGateway(c MarketplaceGatewayCatalog, s MarketplaceGatewayStor
 }
 
 var ErrMarketplaceUnsupportedRequest = errors.New("unsupported shared request")
-var ErrMarketplaceAccountIneligible = errors.New("marketplace account ineligible")
 
 type marketplaceBuyerContextKey struct{}
 type marketplaceModelContextKey struct{}

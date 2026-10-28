@@ -543,7 +543,7 @@ func (r *accountRepository) updateLockedAccount(
 		schedulable = false
 	}
 
-	builder := client.Account.UpdateOneID(account.ID).
+	builder := client.Account.UpdateOneID(account.ID).Where(dbaccount.OwnerUserIDIsNil()).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
@@ -941,7 +941,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				ELSE extra
 			END,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
+		WHERE id = $2 AND deleted_at IS NULL AND owner_user_id IS NULL
 	`, string(payload), id)
 	if err != nil {
 		return err
@@ -1328,7 +1328,8 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 		FROM accounts
 		WHERE deleted_at IS NULL
 			AND platform = ANY($1)
-			AND id > $2`
+			AND id > $2
+			AND owner_user_id IS NULL`
 	if options.ActiveOnly {
 		query += `
 			AND status = 'active'`
@@ -1627,6 +1628,7 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 			updated_at = NOW()
 		WHERE a.id = $2
 			AND a.deleted_at IS NULL
+			AND a.owner_user_id IS NULL
 			AND a.platform = $3
 			AND a.type = $4
 			AND a.credentials = $5::jsonb
@@ -3260,7 +3262,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
-	whereClause := " WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
+	whereClause := " WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL AND owner_user_id IS NULL"
 	args = append(args, pq.Array(ids))
 	idx++
 	if updates.ProbeEnabled != nil {
@@ -3661,6 +3663,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 
 	return &service.Account{
 		ID:                      m.ID,
+		OwnerUserID:             m.OwnerUserID,
 		Name:                    m.Name,
 		Notes:                   m.Notes,
 		Platform:                m.Platform,

@@ -112,6 +112,13 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 		return
 	}
 
+	for i := range accounts {
+		if accounts[i].OwnerUserID != nil {
+			response.Forbidden(c, "Supplier-owned accounts cannot be exported")
+			return
+		}
+	}
+
 	// 排除 spark 影子账号:影子不持凭据,通用凭据型导出无法表达父子链接、导入侧又强制 credentials
 	// 非空——若混入会产出无法还原的坏备份(导入即失败)。影子的独立调度配置(priority/并发/分组/
 	// status,管理员可单独调)随之不进备份,还原后需在重建的影子上重新调优;前端按 skipped_shadows

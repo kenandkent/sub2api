@@ -611,6 +611,9 @@ func (s *TokenRefreshService) processCandidatePage(
 	groups := make(map[string][]*Account)
 	for i := range accounts {
 		account := &accounts[i]
+		if account.OwnerUserID != nil {
+			continue
+		}
 		state := providerStates[account.Platform]
 		if state == nil || state.registration.refresher == nil || !state.registration.refresher.CanRefresh(account) {
 			continue

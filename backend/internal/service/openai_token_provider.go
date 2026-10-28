@@ -140,6 +140,16 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		return "", errors.New("not an openai oauth account")
 	}
 
+	// Supplier credentials must be prepared in an ephemeral account before this call.
+	// Never consult or populate the shared token cache for an owner account.
+	if account.OwnerUserID != nil {
+		token := strings.TrimSpace(account.GetOpenAIAccessToken())
+		if token == "" {
+			return "", errors.New("supplier account credentials not prepared")
+		}
+		return token, nil
+	}
+
 	cacheKey := OpenAITokenCacheKey(account)
 
 	// 1) Try cache first.

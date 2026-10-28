@@ -24,6 +24,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
+	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -35,7 +37,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
+	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -165,7 +169,7 @@ func init() {
 	// account.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	account.UpdateDefaultUpdatedAt = accountDescUpdatedAt.UpdateDefault.(func() time.Time)
 	// accountDescName is the schema descriptor for name field.
-	accountDescName := accountFields[0].Descriptor()
+	accountDescName := accountFields[1].Descriptor()
 	// account.NameValidator is a validator for the "name" field. It is called by the builders before save.
 	account.NameValidator = func() func(string) error {
 		validators := accountDescName.Validators
@@ -183,7 +187,7 @@ func init() {
 		}
 	}()
 	// accountDescPlatform is the schema descriptor for platform field.
-	accountDescPlatform := accountFields[2].Descriptor()
+	accountDescPlatform := accountFields[3].Descriptor()
 	// account.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	account.PlatformValidator = func() func(string) error {
 		validators := accountDescPlatform.Validators
@@ -201,7 +205,7 @@ func init() {
 		}
 	}()
 	// accountDescType is the schema descriptor for type field.
-	accountDescType := accountFields[3].Descriptor()
+	accountDescType := accountFields[4].Descriptor()
 	// account.TypeValidator is a validator for the "type" field. It is called by the builders before save.
 	account.TypeValidator = func() func(string) error {
 		validators := accountDescType.Validators
@@ -219,41 +223,41 @@ func init() {
 		}
 	}()
 	// accountDescCredentials is the schema descriptor for credentials field.
-	accountDescCredentials := accountFields[4].Descriptor()
+	accountDescCredentials := accountFields[5].Descriptor()
 	// account.DefaultCredentials holds the default value on creation for the credentials field.
 	account.DefaultCredentials = accountDescCredentials.Default.(func() map[string]interface{})
 	// accountDescExtra is the schema descriptor for extra field.
-	accountDescExtra := accountFields[5].Descriptor()
+	accountDescExtra := accountFields[6].Descriptor()
 	// account.DefaultExtra holds the default value on creation for the extra field.
 	account.DefaultExtra = accountDescExtra.Default.(func() map[string]interface{})
 	// accountDescConcurrency is the schema descriptor for concurrency field.
-	accountDescConcurrency := accountFields[8].Descriptor()
+	accountDescConcurrency := accountFields[9].Descriptor()
 	// account.DefaultConcurrency holds the default value on creation for the concurrency field.
 	account.DefaultConcurrency = accountDescConcurrency.Default.(int)
 	// accountDescPriority is the schema descriptor for priority field.
-	accountDescPriority := accountFields[10].Descriptor()
+	accountDescPriority := accountFields[11].Descriptor()
 	// account.DefaultPriority holds the default value on creation for the priority field.
 	account.DefaultPriority = accountDescPriority.Default.(int)
 	// accountDescRateMultiplier is the schema descriptor for rate_multiplier field.
-	accountDescRateMultiplier := accountFields[11].Descriptor()
+	accountDescRateMultiplier := accountFields[12].Descriptor()
 	// account.DefaultRateMultiplier holds the default value on creation for the rate_multiplier field.
 	account.DefaultRateMultiplier = accountDescRateMultiplier.Default.(float64)
 	// accountDescStatus is the schema descriptor for status field.
-	accountDescStatus := accountFields[12].Descriptor()
+	accountDescStatus := accountFields[13].Descriptor()
 	// account.DefaultStatus holds the default value on creation for the status field.
 	account.DefaultStatus = accountDescStatus.Default.(string)
 	// account.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	account.StatusValidator = accountDescStatus.Validators[0].(func(string) error)
 	// accountDescAutoPauseOnExpired is the schema descriptor for auto_pause_on_expired field.
-	accountDescAutoPauseOnExpired := accountFields[16].Descriptor()
+	accountDescAutoPauseOnExpired := accountFields[17].Descriptor()
 	// account.DefaultAutoPauseOnExpired holds the default value on creation for the auto_pause_on_expired field.
 	account.DefaultAutoPauseOnExpired = accountDescAutoPauseOnExpired.Default.(bool)
 	// accountDescSchedulable is the schema descriptor for schedulable field.
-	accountDescSchedulable := accountFields[17].Descriptor()
+	accountDescSchedulable := accountFields[18].Descriptor()
 	// account.DefaultSchedulable holds the default value on creation for the schedulable field.
 	account.DefaultSchedulable = accountDescSchedulable.Default.(bool)
 	// accountDescSessionWindowStatus is the schema descriptor for session_window_status field.
-	accountDescSessionWindowStatus := accountFields[25].Descriptor()
+	accountDescSessionWindowStatus := accountFields[26].Descriptor()
 	// account.SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	account.SessionWindowStatusValidator = accountDescSessionWindowStatus.Validators[0].(func(string) error)
 	accountgroupFields := schema.AccountGroup{}.Fields()
@@ -1307,6 +1311,64 @@ func init() {
 	identityadoptiondecisionDescDecidedAt := identityadoptiondecisionFields[4].Descriptor()
 	// identityadoptiondecision.DefaultDecidedAt holds the default value on creation for the decided_at field.
 	identityadoptiondecision.DefaultDecidedAt = identityadoptiondecisionDescDecidedAt.Default.(func() time.Time)
+	marketplacepolicyMixin := schema.MarketplacePolicy{}.Mixin()
+	marketplacepolicyMixinFields0 := marketplacepolicyMixin[0].Fields()
+	_ = marketplacepolicyMixinFields0
+	marketplacepolicyFields := schema.MarketplacePolicy{}.Fields()
+	_ = marketplacepolicyFields
+	// marketplacepolicyDescCreatedAt is the schema descriptor for created_at field.
+	marketplacepolicyDescCreatedAt := marketplacepolicyMixinFields0[0].Descriptor()
+	// marketplacepolicy.DefaultCreatedAt holds the default value on creation for the created_at field.
+	marketplacepolicy.DefaultCreatedAt = marketplacepolicyDescCreatedAt.Default.(func() time.Time)
+	// marketplacepolicyDescUpdatedAt is the schema descriptor for updated_at field.
+	marketplacepolicyDescUpdatedAt := marketplacepolicyMixinFields0[1].Descriptor()
+	// marketplacepolicy.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	marketplacepolicy.DefaultUpdatedAt = marketplacepolicyDescUpdatedAt.Default.(func() time.Time)
+	// marketplacepolicy.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	marketplacepolicy.UpdateDefaultUpdatedAt = marketplacepolicyDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// marketplacepolicyDescVersion is the schema descriptor for version field.
+	marketplacepolicyDescVersion := marketplacepolicyFields[0].Descriptor()
+	// marketplacepolicy.VersionValidator is a validator for the "version" field. It is called by the builders before save.
+	marketplacepolicy.VersionValidator = marketplacepolicyDescVersion.Validators[0].(func(int64) error)
+	// marketplacepolicyDescFeeBps is the schema descriptor for fee_bps field.
+	marketplacepolicyDescFeeBps := marketplacepolicyFields[1].Descriptor()
+	// marketplacepolicy.FeeBpsValidator is a validator for the "fee_bps" field. It is called by the builders before save.
+	marketplacepolicy.FeeBpsValidator = marketplacepolicyDescFeeBps.Validators[0].(func(int) error)
+	// marketplacepolicyDescHoldHours is the schema descriptor for hold_hours field.
+	marketplacepolicyDescHoldHours := marketplacepolicyFields[2].Descriptor()
+	// marketplacepolicy.HoldHoursValidator is a validator for the "hold_hours" field. It is called by the builders before save.
+	marketplacepolicy.HoldHoursValidator = marketplacepolicyDescHoldHours.Validators[0].(func(int) error)
+	// marketplacepolicyDescMaxSupplierConcurrency is the schema descriptor for max_supplier_concurrency field.
+	marketplacepolicyDescMaxSupplierConcurrency := marketplacepolicyFields[3].Descriptor()
+	// marketplacepolicy.MaxSupplierConcurrencyValidator is a validator for the "max_supplier_concurrency" field. It is called by the builders before save.
+	marketplacepolicy.MaxSupplierConcurrencyValidator = marketplacepolicyDescMaxSupplierConcurrency.Validators[0].(func(int) error)
+	// marketplacepolicyDescRules is the schema descriptor for rules field.
+	marketplacepolicyDescRules := marketplacepolicyFields[5].Descriptor()
+	// marketplacepolicy.DefaultRules holds the default value on creation for the rules field.
+	marketplacepolicy.DefaultRules = marketplacepolicyDescRules.Default.(func() map[string]interface{})
+	marketplacepriceversionMixin := schema.MarketplacePriceVersion{}.Mixin()
+	marketplacepriceversionMixinFields0 := marketplacepriceversionMixin[0].Fields()
+	_ = marketplacepriceversionMixinFields0
+	marketplacepriceversionFields := schema.MarketplacePriceVersion{}.Fields()
+	_ = marketplacepriceversionFields
+	// marketplacepriceversionDescCreatedAt is the schema descriptor for created_at field.
+	marketplacepriceversionDescCreatedAt := marketplacepriceversionMixinFields0[0].Descriptor()
+	// marketplacepriceversion.DefaultCreatedAt holds the default value on creation for the created_at field.
+	marketplacepriceversion.DefaultCreatedAt = marketplacepriceversionDescCreatedAt.Default.(func() time.Time)
+	// marketplacepriceversionDescUpdatedAt is the schema descriptor for updated_at field.
+	marketplacepriceversionDescUpdatedAt := marketplacepriceversionMixinFields0[1].Descriptor()
+	// marketplacepriceversion.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	marketplacepriceversion.DefaultUpdatedAt = marketplacepriceversionDescUpdatedAt.Default.(func() time.Time)
+	// marketplacepriceversion.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	marketplacepriceversion.UpdateDefaultUpdatedAt = marketplacepriceversionDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// marketplacepriceversionDescVersion is the schema descriptor for version field.
+	marketplacepriceversionDescVersion := marketplacepriceversionFields[0].Descriptor()
+	// marketplacepriceversion.VersionValidator is a validator for the "version" field. It is called by the builders before save.
+	marketplacepriceversion.VersionValidator = marketplacepriceversionDescVersion.Validators[0].(func(int64) error)
+	// marketplacepriceversionDescRules is the schema descriptor for rules field.
+	marketplacepriceversionDescRules := marketplacepriceversionFields[1].Descriptor()
+	// marketplacepriceversion.DefaultRules holds the default value on creation for the rules field.
+	marketplacepriceversion.DefaultRules = marketplacepriceversionDescRules.Default.(func() map[string]interface{})
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.
@@ -1850,6 +1912,33 @@ func init() {
 	setting.DefaultUpdatedAt = settingDescUpdatedAt.Default.(func() time.Time)
 	// setting.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	setting.UpdateDefaultUpdatedAt = settingDescUpdatedAt.UpdateDefault.(func() time.Time)
+	sharingofferMixin := schema.SharingOffer{}.Mixin()
+	sharingofferMixinFields0 := sharingofferMixin[0].Fields()
+	_ = sharingofferMixinFields0
+	sharingofferFields := schema.SharingOffer{}.Fields()
+	_ = sharingofferFields
+	// sharingofferDescCreatedAt is the schema descriptor for created_at field.
+	sharingofferDescCreatedAt := sharingofferMixinFields0[0].Descriptor()
+	// sharingoffer.DefaultCreatedAt holds the default value on creation for the created_at field.
+	sharingoffer.DefaultCreatedAt = sharingofferDescCreatedAt.Default.(func() time.Time)
+	// sharingofferDescUpdatedAt is the schema descriptor for updated_at field.
+	sharingofferDescUpdatedAt := sharingofferMixinFields0[1].Descriptor()
+	// sharingoffer.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	sharingoffer.DefaultUpdatedAt = sharingofferDescUpdatedAt.Default.(func() time.Time)
+	// sharingoffer.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	sharingoffer.UpdateDefaultUpdatedAt = sharingofferDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// sharingofferDescEnabled is the schema descriptor for enabled field.
+	sharingofferDescEnabled := sharingofferFields[3].Descriptor()
+	// sharingoffer.DefaultEnabled holds the default value on creation for the enabled field.
+	sharingoffer.DefaultEnabled = sharingofferDescEnabled.Default.(bool)
+	// sharingofferDescAllowedModels is the schema descriptor for allowed_models field.
+	sharingofferDescAllowedModels := sharingofferFields[4].Descriptor()
+	// sharingoffer.DefaultAllowedModels holds the default value on creation for the allowed_models field.
+	sharingoffer.DefaultAllowedModels = sharingofferDescAllowedModels.Default.(func() []string)
+	// sharingofferDescVersion is the schema descriptor for version field.
+	sharingofferDescVersion := sharingofferFields[5].Descriptor()
+	// sharingoffer.DefaultVersion holds the default value on creation for the version field.
+	sharingoffer.DefaultVersion = sharingofferDescVersion.Default.(int64)
 	subscriptionplanFields := schema.SubscriptionPlan{}.Fields()
 	_ = subscriptionplanFields
 	// subscriptionplanDescName is the schema descriptor for name field.
@@ -1918,6 +2007,37 @@ func init() {
 	subscriptionplan.DefaultUpdatedAt = subscriptionplanDescUpdatedAt.Default.(func() time.Time)
 	// subscriptionplan.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	subscriptionplan.UpdateDefaultUpdatedAt = subscriptionplanDescUpdatedAt.UpdateDefault.(func() time.Time)
+	supplierprofileMixin := schema.SupplierProfile{}.Mixin()
+	supplierprofileMixinFields0 := supplierprofileMixin[0].Fields()
+	_ = supplierprofileMixinFields0
+	supplierprofileFields := schema.SupplierProfile{}.Fields()
+	_ = supplierprofileFields
+	// supplierprofileDescCreatedAt is the schema descriptor for created_at field.
+	supplierprofileDescCreatedAt := supplierprofileMixinFields0[0].Descriptor()
+	// supplierprofile.DefaultCreatedAt holds the default value on creation for the created_at field.
+	supplierprofile.DefaultCreatedAt = supplierprofileDescCreatedAt.Default.(func() time.Time)
+	// supplierprofileDescUpdatedAt is the schema descriptor for updated_at field.
+	supplierprofileDescUpdatedAt := supplierprofileMixinFields0[1].Descriptor()
+	// supplierprofile.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	supplierprofile.DefaultUpdatedAt = supplierprofileDescUpdatedAt.Default.(func() time.Time)
+	// supplierprofile.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	supplierprofile.UpdateDefaultUpdatedAt = supplierprofileDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// supplierprofileDescReviewReason is the schema descriptor for review_reason field.
+	supplierprofileDescReviewReason := supplierprofileFields[2].Descriptor()
+	// supplierprofile.DefaultReviewReason holds the default value on creation for the review_reason field.
+	supplierprofile.DefaultReviewReason = supplierprofileDescReviewReason.Default.(string)
+	// supplierprofileDescPayoutFrozen is the schema descriptor for payout_frozen field.
+	supplierprofileDescPayoutFrozen := supplierprofileFields[5].Descriptor()
+	// supplierprofile.DefaultPayoutFrozen holds the default value on creation for the payout_frozen field.
+	supplierprofile.DefaultPayoutFrozen = supplierprofileDescPayoutFrozen.Default.(bool)
+	// supplierprofileDescRiskReason is the schema descriptor for risk_reason field.
+	supplierprofileDescRiskReason := supplierprofileFields[6].Descriptor()
+	// supplierprofile.DefaultRiskReason holds the default value on creation for the risk_reason field.
+	supplierprofile.DefaultRiskReason = supplierprofileDescRiskReason.Default.(string)
+	// supplierprofileDescVersion is the schema descriptor for version field.
+	supplierprofileDescVersion := supplierprofileFields[7].Descriptor()
+	// supplierprofile.DefaultVersion holds the default value on creation for the version field.
+	supplierprofile.DefaultVersion = supplierprofileDescVersion.Default.(int64)
 	tlsfingerprintprofileMixin := schema.TLSFingerprintProfile{}.Mixin()
 	tlsfingerprintprofileMixinFields0 := tlsfingerprintprofileMixin[0].Fields()
 	_ = tlsfingerprintprofileMixinFields0

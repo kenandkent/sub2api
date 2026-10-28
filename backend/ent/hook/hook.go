@@ -237,6 +237,30 @@ func (f IdentityAdoptionDecisionFunc) Mutate(ctx context.Context, m ent.Mutation
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.IdentityAdoptionDecisionMutation", m)
 }
 
+// The MarketplacePolicyFunc type is an adapter to allow the use of ordinary
+// function as MarketplacePolicy mutator.
+type MarketplacePolicyFunc func(context.Context, *ent.MarketplacePolicyMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f MarketplacePolicyFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.MarketplacePolicyMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.MarketplacePolicyMutation", m)
+}
+
+// The MarketplacePriceVersionFunc type is an adapter to allow the use of ordinary
+// function as MarketplacePriceVersion mutator.
+type MarketplacePriceVersionFunc func(context.Context, *ent.MarketplacePriceVersionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f MarketplacePriceVersionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.MarketplacePriceVersionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.MarketplacePriceVersionMutation", m)
+}
+
 // The PaymentAuditLogFunc type is an adapter to allow the use of ordinary
 // function as PaymentAuditLog mutator.
 type PaymentAuditLogFunc func(context.Context, *ent.PaymentAuditLogMutation) (ent.Value, error)
@@ -357,6 +381,18 @@ func (f SettingFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, err
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SettingMutation", m)
 }
 
+// The SharingOfferFunc type is an adapter to allow the use of ordinary
+// function as SharingOffer mutator.
+type SharingOfferFunc func(context.Context, *ent.SharingOfferMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SharingOfferFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SharingOfferMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SharingOfferMutation", m)
+}
+
 // The SubscriptionPlanFunc type is an adapter to allow the use of ordinary
 // function as SubscriptionPlan mutator.
 type SubscriptionPlanFunc func(context.Context, *ent.SubscriptionPlanMutation) (ent.Value, error)
@@ -367,6 +403,18 @@ func (f SubscriptionPlanFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.V
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SubscriptionPlanMutation", m)
+}
+
+// The SupplierProfileFunc type is an adapter to allow the use of ordinary
+// function as SupplierProfile mutator.
+type SupplierProfileFunc func(context.Context, *ent.SupplierProfileMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SupplierProfileFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SupplierProfileMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SupplierProfileMutation", m)
 }
 
 // The TLSFingerprintProfileFunc type is an adapter to allow the use of ordinary

@@ -125,6 +125,7 @@ var (
 		{Name: "session_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "session_window_status", Type: field.TypeString, Nullable: true, Size: 20},
 		{Name: "quota_dimension", Type: field.TypeEnum, Enums: []string{"global", "spark"}, Default: "global"},
+		{Name: "owner_user_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "proxy_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "parent_account_id", Type: field.TypeInt64, Nullable: true},
 	}
@@ -135,14 +136,20 @@ var (
 		PrimaryKey: []*schema.Column{AccountsColumns[0]},
 		ForeignKeys: []*schema.ForeignKey{
 			{
-				Symbol:     "accounts_proxies_proxy",
+				Symbol:     "accounts_users_owner",
 				Columns:    []*schema.Column{AccountsColumns[30]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.Restrict,
+			},
+			{
+				Symbol:     "accounts_proxies_proxy",
+				Columns:    []*schema.Column{AccountsColumns[31]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "accounts_accounts_children",
-				Columns:    []*schema.Column{AccountsColumns[31]},
+				Columns:    []*schema.Column{AccountsColumns[32]},
 				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.Restrict,
 			},
@@ -166,7 +173,7 @@ var (
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[30]},
+				Columns: []*schema.Column{AccountsColumns[31]},
 			},
 			{
 				Name:    "account_priority",
@@ -216,7 +223,12 @@ var (
 			{
 				Name:    "account_parent_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[31]},
+				Columns: []*schema.Column{AccountsColumns[32]},
+			},
+			{
+				Name:    "account_owner_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[30]},
 			},
 		},
 	}
@@ -1099,6 +1111,42 @@ var (
 			},
 		},
 	}
+	// MarketplacePoliciesColumns holds the columns for the "marketplace_policies" table.
+	MarketplacePoliciesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "version", Type: field.TypeInt64, Unique: true},
+		{Name: "fee_bps", Type: field.TypeInt},
+		{Name: "hold_hours", Type: field.TypeInt},
+		{Name: "max_supplier_concurrency", Type: field.TypeInt},
+		{Name: "minimum_payout_usd", Type: field.TypeString, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "rules", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "published_by", Type: field.TypeInt64, Nullable: true},
+		{Name: "published_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// MarketplacePoliciesTable holds the schema information for the "marketplace_policies" table.
+	MarketplacePoliciesTable = &schema.Table{
+		Name:       "marketplace_policies",
+		Columns:    MarketplacePoliciesColumns,
+		PrimaryKey: []*schema.Column{MarketplacePoliciesColumns[0]},
+	}
+	// MarketplacePriceVersionsColumns holds the columns for the "marketplace_price_versions" table.
+	MarketplacePriceVersionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "version", Type: field.TypeInt64, Unique: true},
+		{Name: "rules", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "published_by", Type: field.TypeInt64, Nullable: true},
+		{Name: "published_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// MarketplacePriceVersionsTable holds the schema information for the "marketplace_price_versions" table.
+	MarketplacePriceVersionsTable = &schema.Table{
+		Name:       "marketplace_price_versions",
+		Columns:    MarketplacePriceVersionsColumns,
+		PrimaryKey: []*schema.Column{MarketplacePriceVersionsColumns[0]},
+	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1538,6 +1586,32 @@ var (
 		Columns:    SettingsColumns,
 		PrimaryKey: []*schema.Column{SettingsColumns[0]},
 	}
+	// SharingOffersColumns holds the columns for the "sharing_offers" table.
+	SharingOffersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "account_id", Type: field.TypeInt64, Unique: true},
+		{Name: "owner_user_id", Type: field.TypeInt64},
+		{Name: "review_status", Type: field.TypeEnum, Enums: []string{"draft", "pending_review", "approved", "rejected", "revoked"}, Default: "draft"},
+		{Name: "enabled", Type: field.TypeBool, Default: false},
+		{Name: "allowed_models", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "version", Type: field.TypeInt64, Default: 1},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// SharingOffersTable holds the schema information for the "sharing_offers" table.
+	SharingOffersTable = &schema.Table{
+		Name:       "sharing_offers",
+		Columns:    SharingOffersColumns,
+		PrimaryKey: []*schema.Column{SharingOffersColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "sharingoffer_owner_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{SharingOffersColumns[4]},
+			},
+		},
+	}
 	// SubscriptionPlansColumns holds the columns for the "subscription_plans" table.
 	SubscriptionPlansColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1573,6 +1647,26 @@ var (
 				Columns: []*schema.Column{SubscriptionPlansColumns[11]},
 			},
 		},
+	}
+	// SupplierProfilesColumns holds the columns for the "supplier_profiles" table.
+	SupplierProfilesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_id", Type: field.TypeInt64, Unique: true},
+		{Name: "status", Type: field.TypeEnum, Enums: []string{"pending", "active", "rejected", "suspended"}, Default: "pending"},
+		{Name: "review_reason", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "agreement_version", Type: field.TypeInt64, Nullable: true},
+		{Name: "agreement_accepted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "payout_frozen", Type: field.TypeBool, Default: false},
+		{Name: "risk_reason", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "version", Type: field.TypeInt64, Default: 1},
+	}
+	// SupplierProfilesTable holds the schema information for the "supplier_profiles" table.
+	SupplierProfilesTable = &schema.Table{
+		Name:       "supplier_profiles",
+		Columns:    SupplierProfilesColumns,
+		PrimaryKey: []*schema.Column{SupplierProfilesColumns[0]},
 	}
 	// TLSFingerprintProfilesColumns holds the columns for the "tls_fingerprint_profiles" table.
 	TLSFingerprintProfilesColumns = []*schema.Column{
@@ -2110,6 +2204,8 @@ var (
 		GroupsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
+		MarketplacePoliciesTable,
+		MarketplacePriceVersionsTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2120,7 +2216,9 @@ var (
 		RedeemCodesTable,
 		SecuritySecretsTable,
 		SettingsTable,
+		SharingOffersTable,
 		SubscriptionPlansTable,
+		SupplierProfilesTable,
 		TLSFingerprintProfilesTable,
 		UsageCleanupTasksTable,
 		UsageLogsTable,
@@ -2139,8 +2237,9 @@ func init() {
 	APIKeysTable.Annotation = &entsql.Annotation{
 		Table: "api_keys",
 	}
-	AccountsTable.ForeignKeys[0].RefTable = ProxiesTable
-	AccountsTable.ForeignKeys[1].RefTable = AccountsTable
+	AccountsTable.ForeignKeys[0].RefTable = UsersTable
+	AccountsTable.ForeignKeys[1].RefTable = ProxiesTable
+	AccountsTable.ForeignKeys[2].RefTable = AccountsTable
 	AccountsTable.Annotation = &entsql.Annotation{
 		Table: "accounts",
 	}
@@ -2207,6 +2306,12 @@ func init() {
 	IdentityAdoptionDecisionsTable.Annotation = &entsql.Annotation{
 		Table: "identity_adoption_decisions",
 	}
+	MarketplacePoliciesTable.Annotation = &entsql.Annotation{
+		Table: "marketplace_policies",
+	}
+	MarketplacePriceVersionsTable.Annotation = &entsql.Annotation{
+		Table: "marketplace_price_versions",
+	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",
 	}
@@ -2244,8 +2349,14 @@ func init() {
 	SettingsTable.Annotation = &entsql.Annotation{
 		Table: "settings",
 	}
+	SharingOffersTable.Annotation = &entsql.Annotation{
+		Table: "sharing_offers",
+	}
 	SubscriptionPlansTable.Annotation = &entsql.Annotation{
 		Table: "subscription_plans",
+	}
+	SupplierProfilesTable.Annotation = &entsql.Annotation{
+		Table: "supplier_profiles",
 	}
 	TLSFingerprintProfilesTable.Annotation = &entsql.Annotation{
 		Table: "tls_fingerprint_profiles",

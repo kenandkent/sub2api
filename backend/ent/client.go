@@ -34,6 +34,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
+	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -44,7 +46,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
+	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
+	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -101,6 +105,10 @@ type Client struct {
 	IdempotencyRecord *IdempotencyRecordClient
 	// IdentityAdoptionDecision is the client for interacting with the IdentityAdoptionDecision builders.
 	IdentityAdoptionDecision *IdentityAdoptionDecisionClient
+	// MarketplacePolicy is the client for interacting with the MarketplacePolicy builders.
+	MarketplacePolicy *MarketplacePolicyClient
+	// MarketplacePriceVersion is the client for interacting with the MarketplacePriceVersion builders.
+	MarketplacePriceVersion *MarketplacePriceVersionClient
 	// PaymentAuditLog is the client for interacting with the PaymentAuditLog builders.
 	PaymentAuditLog *PaymentAuditLogClient
 	// PaymentOrder is the client for interacting with the PaymentOrder builders.
@@ -121,8 +129,12 @@ type Client struct {
 	SecuritySecret *SecuritySecretClient
 	// Setting is the client for interacting with the Setting builders.
 	Setting *SettingClient
+	// SharingOffer is the client for interacting with the SharingOffer builders.
+	SharingOffer *SharingOfferClient
 	// SubscriptionPlan is the client for interacting with the SubscriptionPlan builders.
 	SubscriptionPlan *SubscriptionPlanClient
+	// SupplierProfile is the client for interacting with the SupplierProfile builders.
+	SupplierProfile *SupplierProfileClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
 	TLSFingerprintProfile *TLSFingerprintProfileClient
 	// UsageCleanupTask is the client for interacting with the UsageCleanupTask builders.
@@ -171,6 +183,8 @@ func (c *Client) init() {
 	c.Group = NewGroupClient(c.config)
 	c.IdempotencyRecord = NewIdempotencyRecordClient(c.config)
 	c.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(c.config)
+	c.MarketplacePolicy = NewMarketplacePolicyClient(c.config)
+	c.MarketplacePriceVersion = NewMarketplacePriceVersionClient(c.config)
 	c.PaymentAuditLog = NewPaymentAuditLogClient(c.config)
 	c.PaymentOrder = NewPaymentOrderClient(c.config)
 	c.PaymentProviderInstance = NewPaymentProviderInstanceClient(c.config)
@@ -181,7 +195,9 @@ func (c *Client) init() {
 	c.RedeemCode = NewRedeemCodeClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
 	c.Setting = NewSettingClient(c.config)
+	c.SharingOffer = NewSharingOfferClient(c.config)
 	c.SubscriptionPlan = NewSubscriptionPlanClient(c.config)
+	c.SupplierProfile = NewSupplierProfileClient(c.config)
 	c.TLSFingerprintProfile = NewTLSFingerprintProfileClient(c.config)
 	c.UsageCleanupTask = NewUsageCleanupTaskClient(c.config)
 	c.UsageLog = NewUsageLogClient(c.config)
@@ -302,6 +318,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
+		MarketplacePolicy:             NewMarketplacePolicyClient(cfg),
+		MarketplacePriceVersion:       NewMarketplacePriceVersionClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
@@ -312,7 +330,9 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
+		SharingOffer:                  NewSharingOfferClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
+		SupplierProfile:               NewSupplierProfileClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
@@ -360,6 +380,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
+		MarketplacePolicy:             NewMarketplacePolicyClient(cfg),
+		MarketplacePriceVersion:       NewMarketplacePriceVersionClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
@@ -370,7 +392,9 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
+		SharingOffer:                  NewSharingOfferClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
+		SupplierProfile:               NewSupplierProfileClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
@@ -414,11 +438,12 @@ func (c *Client) Use(hooks ...Hook) {
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.IdentityAdoptionDecision, c.MarketplacePolicy, c.MarketplacePriceVersion,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SharingOffer, c.SubscriptionPlan,
+		c.SupplierProfile, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
@@ -434,11 +459,12 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.IdentityAdoptionDecision, c.MarketplacePolicy, c.MarketplacePriceVersion,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SharingOffer, c.SubscriptionPlan,
+		c.SupplierProfile, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
@@ -486,6 +512,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.IdempotencyRecord.mutate(ctx, m)
 	case *IdentityAdoptionDecisionMutation:
 		return c.IdentityAdoptionDecision.mutate(ctx, m)
+	case *MarketplacePolicyMutation:
+		return c.MarketplacePolicy.mutate(ctx, m)
+	case *MarketplacePriceVersionMutation:
+		return c.MarketplacePriceVersion.mutate(ctx, m)
 	case *PaymentAuditLogMutation:
 		return c.PaymentAuditLog.mutate(ctx, m)
 	case *PaymentOrderMutation:
@@ -506,8 +536,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.SecuritySecret.mutate(ctx, m)
 	case *SettingMutation:
 		return c.Setting.mutate(ctx, m)
+	case *SharingOfferMutation:
+		return c.SharingOffer.mutate(ctx, m)
 	case *SubscriptionPlanMutation:
 		return c.SubscriptionPlan.mutate(ctx, m)
+	case *SupplierProfileMutation:
+		return c.SupplierProfile.mutate(ctx, m)
 	case *TLSFingerprintProfileMutation:
 		return c.TLSFingerprintProfile.mutate(ctx, m)
 	case *UsageCleanupTaskMutation:
@@ -820,6 +854,22 @@ func (c *AccountClient) GetX(ctx context.Context, id int64) *Account {
 		panic(err)
 	}
 	return obj
+}
+
+// QueryOwner queries the owner edge of a Account.
+func (c *AccountClient) QueryOwner(_m *Account) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, account.OwnerTable, account.OwnerColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
 }
 
 // QueryGroups queries the groups edge of a Account.
@@ -3577,6 +3627,272 @@ func (c *IdentityAdoptionDecisionClient) mutate(ctx context.Context, m *Identity
 	}
 }
 
+// MarketplacePolicyClient is a client for the MarketplacePolicy schema.
+type MarketplacePolicyClient struct {
+	config
+}
+
+// NewMarketplacePolicyClient returns a client for the MarketplacePolicy from the given config.
+func NewMarketplacePolicyClient(c config) *MarketplacePolicyClient {
+	return &MarketplacePolicyClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `marketplacepolicy.Hooks(f(g(h())))`.
+func (c *MarketplacePolicyClient) Use(hooks ...Hook) {
+	c.hooks.MarketplacePolicy = append(c.hooks.MarketplacePolicy, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `marketplacepolicy.Intercept(f(g(h())))`.
+func (c *MarketplacePolicyClient) Intercept(interceptors ...Interceptor) {
+	c.inters.MarketplacePolicy = append(c.inters.MarketplacePolicy, interceptors...)
+}
+
+// Create returns a builder for creating a MarketplacePolicy entity.
+func (c *MarketplacePolicyClient) Create() *MarketplacePolicyCreate {
+	mutation := newMarketplacePolicyMutation(c.config, OpCreate)
+	return &MarketplacePolicyCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of MarketplacePolicy entities.
+func (c *MarketplacePolicyClient) CreateBulk(builders ...*MarketplacePolicyCreate) *MarketplacePolicyCreateBulk {
+	return &MarketplacePolicyCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *MarketplacePolicyClient) MapCreateBulk(slice any, setFunc func(*MarketplacePolicyCreate, int)) *MarketplacePolicyCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &MarketplacePolicyCreateBulk{err: fmt.Errorf("calling to MarketplacePolicyClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*MarketplacePolicyCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &MarketplacePolicyCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for MarketplacePolicy.
+func (c *MarketplacePolicyClient) Update() *MarketplacePolicyUpdate {
+	mutation := newMarketplacePolicyMutation(c.config, OpUpdate)
+	return &MarketplacePolicyUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *MarketplacePolicyClient) UpdateOne(_m *MarketplacePolicy) *MarketplacePolicyUpdateOne {
+	mutation := newMarketplacePolicyMutation(c.config, OpUpdateOne, withMarketplacePolicy(_m))
+	return &MarketplacePolicyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *MarketplacePolicyClient) UpdateOneID(id int64) *MarketplacePolicyUpdateOne {
+	mutation := newMarketplacePolicyMutation(c.config, OpUpdateOne, withMarketplacePolicyID(id))
+	return &MarketplacePolicyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for MarketplacePolicy.
+func (c *MarketplacePolicyClient) Delete() *MarketplacePolicyDelete {
+	mutation := newMarketplacePolicyMutation(c.config, OpDelete)
+	return &MarketplacePolicyDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *MarketplacePolicyClient) DeleteOne(_m *MarketplacePolicy) *MarketplacePolicyDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *MarketplacePolicyClient) DeleteOneID(id int64) *MarketplacePolicyDeleteOne {
+	builder := c.Delete().Where(marketplacepolicy.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &MarketplacePolicyDeleteOne{builder}
+}
+
+// Query returns a query builder for MarketplacePolicy.
+func (c *MarketplacePolicyClient) Query() *MarketplacePolicyQuery {
+	return &MarketplacePolicyQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeMarketplacePolicy},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a MarketplacePolicy entity by its id.
+func (c *MarketplacePolicyClient) Get(ctx context.Context, id int64) (*MarketplacePolicy, error) {
+	return c.Query().Where(marketplacepolicy.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *MarketplacePolicyClient) GetX(ctx context.Context, id int64) *MarketplacePolicy {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *MarketplacePolicyClient) Hooks() []Hook {
+	return c.hooks.MarketplacePolicy
+}
+
+// Interceptors returns the client interceptors.
+func (c *MarketplacePolicyClient) Interceptors() []Interceptor {
+	return c.inters.MarketplacePolicy
+}
+
+func (c *MarketplacePolicyClient) mutate(ctx context.Context, m *MarketplacePolicyMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&MarketplacePolicyCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&MarketplacePolicyUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&MarketplacePolicyUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&MarketplacePolicyDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown MarketplacePolicy mutation op: %q", m.Op())
+	}
+}
+
+// MarketplacePriceVersionClient is a client for the MarketplacePriceVersion schema.
+type MarketplacePriceVersionClient struct {
+	config
+}
+
+// NewMarketplacePriceVersionClient returns a client for the MarketplacePriceVersion from the given config.
+func NewMarketplacePriceVersionClient(c config) *MarketplacePriceVersionClient {
+	return &MarketplacePriceVersionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `marketplacepriceversion.Hooks(f(g(h())))`.
+func (c *MarketplacePriceVersionClient) Use(hooks ...Hook) {
+	c.hooks.MarketplacePriceVersion = append(c.hooks.MarketplacePriceVersion, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `marketplacepriceversion.Intercept(f(g(h())))`.
+func (c *MarketplacePriceVersionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.MarketplacePriceVersion = append(c.inters.MarketplacePriceVersion, interceptors...)
+}
+
+// Create returns a builder for creating a MarketplacePriceVersion entity.
+func (c *MarketplacePriceVersionClient) Create() *MarketplacePriceVersionCreate {
+	mutation := newMarketplacePriceVersionMutation(c.config, OpCreate)
+	return &MarketplacePriceVersionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of MarketplacePriceVersion entities.
+func (c *MarketplacePriceVersionClient) CreateBulk(builders ...*MarketplacePriceVersionCreate) *MarketplacePriceVersionCreateBulk {
+	return &MarketplacePriceVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *MarketplacePriceVersionClient) MapCreateBulk(slice any, setFunc func(*MarketplacePriceVersionCreate, int)) *MarketplacePriceVersionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &MarketplacePriceVersionCreateBulk{err: fmt.Errorf("calling to MarketplacePriceVersionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*MarketplacePriceVersionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &MarketplacePriceVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for MarketplacePriceVersion.
+func (c *MarketplacePriceVersionClient) Update() *MarketplacePriceVersionUpdate {
+	mutation := newMarketplacePriceVersionMutation(c.config, OpUpdate)
+	return &MarketplacePriceVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *MarketplacePriceVersionClient) UpdateOne(_m *MarketplacePriceVersion) *MarketplacePriceVersionUpdateOne {
+	mutation := newMarketplacePriceVersionMutation(c.config, OpUpdateOne, withMarketplacePriceVersion(_m))
+	return &MarketplacePriceVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *MarketplacePriceVersionClient) UpdateOneID(id int64) *MarketplacePriceVersionUpdateOne {
+	mutation := newMarketplacePriceVersionMutation(c.config, OpUpdateOne, withMarketplacePriceVersionID(id))
+	return &MarketplacePriceVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for MarketplacePriceVersion.
+func (c *MarketplacePriceVersionClient) Delete() *MarketplacePriceVersionDelete {
+	mutation := newMarketplacePriceVersionMutation(c.config, OpDelete)
+	return &MarketplacePriceVersionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *MarketplacePriceVersionClient) DeleteOne(_m *MarketplacePriceVersion) *MarketplacePriceVersionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *MarketplacePriceVersionClient) DeleteOneID(id int64) *MarketplacePriceVersionDeleteOne {
+	builder := c.Delete().Where(marketplacepriceversion.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &MarketplacePriceVersionDeleteOne{builder}
+}
+
+// Query returns a query builder for MarketplacePriceVersion.
+func (c *MarketplacePriceVersionClient) Query() *MarketplacePriceVersionQuery {
+	return &MarketplacePriceVersionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeMarketplacePriceVersion},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a MarketplacePriceVersion entity by its id.
+func (c *MarketplacePriceVersionClient) Get(ctx context.Context, id int64) (*MarketplacePriceVersion, error) {
+	return c.Query().Where(marketplacepriceversion.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *MarketplacePriceVersionClient) GetX(ctx context.Context, id int64) *MarketplacePriceVersion {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *MarketplacePriceVersionClient) Hooks() []Hook {
+	return c.hooks.MarketplacePriceVersion
+}
+
+// Interceptors returns the client interceptors.
+func (c *MarketplacePriceVersionClient) Interceptors() []Interceptor {
+	return c.inters.MarketplacePriceVersion
+}
+
+func (c *MarketplacePriceVersionClient) mutate(ctx context.Context, m *MarketplacePriceVersionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&MarketplacePriceVersionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&MarketplacePriceVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&MarketplacePriceVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&MarketplacePriceVersionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown MarketplacePriceVersion mutation op: %q", m.Op())
+	}
+}
+
 // PaymentAuditLogClient is a client for the PaymentAuditLog schema.
 type PaymentAuditLogClient struct {
 	config
@@ -5085,6 +5401,139 @@ func (c *SettingClient) mutate(ctx context.Context, m *SettingMutation) (Value, 
 	}
 }
 
+// SharingOfferClient is a client for the SharingOffer schema.
+type SharingOfferClient struct {
+	config
+}
+
+// NewSharingOfferClient returns a client for the SharingOffer from the given config.
+func NewSharingOfferClient(c config) *SharingOfferClient {
+	return &SharingOfferClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `sharingoffer.Hooks(f(g(h())))`.
+func (c *SharingOfferClient) Use(hooks ...Hook) {
+	c.hooks.SharingOffer = append(c.hooks.SharingOffer, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `sharingoffer.Intercept(f(g(h())))`.
+func (c *SharingOfferClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SharingOffer = append(c.inters.SharingOffer, interceptors...)
+}
+
+// Create returns a builder for creating a SharingOffer entity.
+func (c *SharingOfferClient) Create() *SharingOfferCreate {
+	mutation := newSharingOfferMutation(c.config, OpCreate)
+	return &SharingOfferCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SharingOffer entities.
+func (c *SharingOfferClient) CreateBulk(builders ...*SharingOfferCreate) *SharingOfferCreateBulk {
+	return &SharingOfferCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SharingOfferClient) MapCreateBulk(slice any, setFunc func(*SharingOfferCreate, int)) *SharingOfferCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SharingOfferCreateBulk{err: fmt.Errorf("calling to SharingOfferClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SharingOfferCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SharingOfferCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SharingOffer.
+func (c *SharingOfferClient) Update() *SharingOfferUpdate {
+	mutation := newSharingOfferMutation(c.config, OpUpdate)
+	return &SharingOfferUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SharingOfferClient) UpdateOne(_m *SharingOffer) *SharingOfferUpdateOne {
+	mutation := newSharingOfferMutation(c.config, OpUpdateOne, withSharingOffer(_m))
+	return &SharingOfferUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SharingOfferClient) UpdateOneID(id int64) *SharingOfferUpdateOne {
+	mutation := newSharingOfferMutation(c.config, OpUpdateOne, withSharingOfferID(id))
+	return &SharingOfferUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SharingOffer.
+func (c *SharingOfferClient) Delete() *SharingOfferDelete {
+	mutation := newSharingOfferMutation(c.config, OpDelete)
+	return &SharingOfferDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SharingOfferClient) DeleteOne(_m *SharingOffer) *SharingOfferDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SharingOfferClient) DeleteOneID(id int64) *SharingOfferDeleteOne {
+	builder := c.Delete().Where(sharingoffer.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SharingOfferDeleteOne{builder}
+}
+
+// Query returns a query builder for SharingOffer.
+func (c *SharingOfferClient) Query() *SharingOfferQuery {
+	return &SharingOfferQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSharingOffer},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SharingOffer entity by its id.
+func (c *SharingOfferClient) Get(ctx context.Context, id int64) (*SharingOffer, error) {
+	return c.Query().Where(sharingoffer.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SharingOfferClient) GetX(ctx context.Context, id int64) *SharingOffer {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *SharingOfferClient) Hooks() []Hook {
+	return c.hooks.SharingOffer
+}
+
+// Interceptors returns the client interceptors.
+func (c *SharingOfferClient) Interceptors() []Interceptor {
+	return c.inters.SharingOffer
+}
+
+func (c *SharingOfferClient) mutate(ctx context.Context, m *SharingOfferMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SharingOfferCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SharingOfferUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SharingOfferUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SharingOfferDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown SharingOffer mutation op: %q", m.Op())
+	}
+}
+
 // SubscriptionPlanClient is a client for the SubscriptionPlan schema.
 type SubscriptionPlanClient struct {
 	config
@@ -5215,6 +5664,139 @@ func (c *SubscriptionPlanClient) mutate(ctx context.Context, m *SubscriptionPlan
 		return (&SubscriptionPlanDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown SubscriptionPlan mutation op: %q", m.Op())
+	}
+}
+
+// SupplierProfileClient is a client for the SupplierProfile schema.
+type SupplierProfileClient struct {
+	config
+}
+
+// NewSupplierProfileClient returns a client for the SupplierProfile from the given config.
+func NewSupplierProfileClient(c config) *SupplierProfileClient {
+	return &SupplierProfileClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `supplierprofile.Hooks(f(g(h())))`.
+func (c *SupplierProfileClient) Use(hooks ...Hook) {
+	c.hooks.SupplierProfile = append(c.hooks.SupplierProfile, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `supplierprofile.Intercept(f(g(h())))`.
+func (c *SupplierProfileClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SupplierProfile = append(c.inters.SupplierProfile, interceptors...)
+}
+
+// Create returns a builder for creating a SupplierProfile entity.
+func (c *SupplierProfileClient) Create() *SupplierProfileCreate {
+	mutation := newSupplierProfileMutation(c.config, OpCreate)
+	return &SupplierProfileCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SupplierProfile entities.
+func (c *SupplierProfileClient) CreateBulk(builders ...*SupplierProfileCreate) *SupplierProfileCreateBulk {
+	return &SupplierProfileCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SupplierProfileClient) MapCreateBulk(slice any, setFunc func(*SupplierProfileCreate, int)) *SupplierProfileCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SupplierProfileCreateBulk{err: fmt.Errorf("calling to SupplierProfileClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SupplierProfileCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SupplierProfileCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SupplierProfile.
+func (c *SupplierProfileClient) Update() *SupplierProfileUpdate {
+	mutation := newSupplierProfileMutation(c.config, OpUpdate)
+	return &SupplierProfileUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SupplierProfileClient) UpdateOne(_m *SupplierProfile) *SupplierProfileUpdateOne {
+	mutation := newSupplierProfileMutation(c.config, OpUpdateOne, withSupplierProfile(_m))
+	return &SupplierProfileUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SupplierProfileClient) UpdateOneID(id int64) *SupplierProfileUpdateOne {
+	mutation := newSupplierProfileMutation(c.config, OpUpdateOne, withSupplierProfileID(id))
+	return &SupplierProfileUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SupplierProfile.
+func (c *SupplierProfileClient) Delete() *SupplierProfileDelete {
+	mutation := newSupplierProfileMutation(c.config, OpDelete)
+	return &SupplierProfileDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SupplierProfileClient) DeleteOne(_m *SupplierProfile) *SupplierProfileDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SupplierProfileClient) DeleteOneID(id int64) *SupplierProfileDeleteOne {
+	builder := c.Delete().Where(supplierprofile.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SupplierProfileDeleteOne{builder}
+}
+
+// Query returns a query builder for SupplierProfile.
+func (c *SupplierProfileClient) Query() *SupplierProfileQuery {
+	return &SupplierProfileQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSupplierProfile},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SupplierProfile entity by its id.
+func (c *SupplierProfileClient) Get(ctx context.Context, id int64) (*SupplierProfile, error) {
+	return c.Query().Where(supplierprofile.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SupplierProfileClient) GetX(ctx context.Context, id int64) *SupplierProfile {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *SupplierProfileClient) Hooks() []Hook {
+	return c.hooks.SupplierProfile
+}
+
+// Interceptors returns the client interceptors.
+func (c *SupplierProfileClient) Interceptors() []Interceptor {
+	return c.inters.SupplierProfile
+}
+
+func (c *SupplierProfileClient) mutate(ctx context.Context, m *SupplierProfileMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SupplierProfileCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SupplierProfileUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SupplierProfileUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SupplierProfileDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown SupplierProfile mutation op: %q", m.Op())
 	}
 }
 
@@ -6845,24 +7427,26 @@ type (
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		Group, IdempotencyRecord, IdentityAdoptionDecision, MarketplacePolicy,
+		MarketplacePriceVersion, PaymentAuditLog, PaymentOrder,
+		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
+		RedeemCode, SecuritySecret, Setting, SharingOffer, SubscriptionPlan,
+		SupplierProfile, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		Group, IdempotencyRecord, IdentityAdoptionDecision, MarketplacePolicy,
+		MarketplacePriceVersion, PaymentAuditLog, PaymentOrder,
+		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
+		RedeemCode, SecuritySecret, Setting, SharingOffer, SubscriptionPlan,
+		SupplierProfile, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

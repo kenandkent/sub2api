@@ -50,6 +50,7 @@ func (Account) Mixin() []ent.Mixin {
 // Fields 定义账户实体的所有字段。
 func (Account) Fields() []ent.Field {
 	return []ent.Field{
+		field.Int64("owner_user_id").Optional().Nillable(),
 		// name: 账户显示名称，用于在界面中标识账户
 		field.String("name").
 			MaxLen(100).
@@ -207,6 +208,7 @@ func (Account) Fields() []ent.Field {
 // Edges 定义账户实体的关联关系。
 func (Account) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.To("owner", User.Type).Field("owner_user_id").Unique().Annotations(entsql.OnDelete(entsql.Restrict)),
 		// groups: 账户所属的分组（多对多关系）
 		// 通过 account_groups 中间表实现
 		// 一个账户可以属于多个分组，一个分组可以包含多个账户
@@ -249,5 +251,6 @@ func (Account) Indexes() []ent.Index {
 		index.Fields("priority", "status"),
 		index.Fields("deleted_at"), // 软删除查询优化
 		index.Fields("parent_account_id"),
+		index.Fields("owner_user_id"),
 	}
 }

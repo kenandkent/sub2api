@@ -75,6 +75,7 @@ type OpenCodeFreeBunConfig struct {
 }
 
 type Config struct {
+	Marketplace             MarketplaceConfig             `mapstructure:"marketplace" yaml:"marketplace"`
 	OpenCodeFreeBun         OpenCodeFreeBunConfig         `mapstructure:"opencode_free_bun"`
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
@@ -1849,6 +1850,11 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	// 环境变量支持
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	for _, key := range []string{"enabled", "onboarding_enabled", "dispatch_enabled", "payouts_enabled", "fee_bps", "hold_hours", "max_supplier_concurrency", "minimum_payout_usd"} {
+		if err := viper.BindEnv("marketplace." + key); err != nil {
+			return nil, fmt.Errorf("bind marketplace.%s: %w", key, err)
+		}
+	}
 	if tz, ok := os.LookupEnv("TZ"); ok && strings.TrimSpace(tz) != "" {
 		// AutomaticEnv 会先把 timezone 映射到 TIMEZONE；显式 Set 保证标准 TZ 变量优先。
 		viper.Set("timezone", strings.TrimSpace(tz))
@@ -2727,6 +2733,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := c.Marketplace.Validate(c.RunMode); err != nil {
+		return err
+	}
 	if c.OpenCodeFreeBun.Enabled {
 		u, err := url.Parse(c.OpenCodeFreeBun.WorkerEndpoint)
 		if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {

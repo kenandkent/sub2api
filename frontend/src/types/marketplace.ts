@@ -14,7 +14,9 @@ export interface SupplierProfile {
   review_reason?: string
   payout_frozen: boolean
 }
-export interface SupplierProvider { platform: string; label: string; account_types: ('api_key' | 'oauth')[]; models: string[] }
+export interface SupplierPriceTier { from_tokens: number; input_per_million: string; output_per_million: string; cache_read_per_million: string; cache_write_per_million: string }
+export interface SupplierPrice { model: string; public_model: string; group_name: string; price_version: string | number; rate_multiplier: string; tiers: SupplierPriceTier[] }
+export interface SupplierProvider { platform: string; label: string; account_types: ('api_key' | 'oauth')[]; models: string[]; prices?: SupplierPrice[] }
 export interface SupplierOptions { agreement_version: number; agreement_text?: string; agreement_url?: string; application_fields: string[]; max_supplier_concurrency: number; fee_bps: number; hold_hours: number; providers: SupplierProvider[] }
 export interface SupplierOffer { id: number; review_status: string; enabled: boolean; allowed_models: string[]; version: number }
 export interface SupplierUsage { requests: number; input_tokens: number; output_tokens: number; consumer_charge: string; supplier_net: string }

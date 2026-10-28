@@ -7,9 +7,9 @@
       <template #cell-name="{ row }"><RouterLink class="text-primary-600 hover:underline" :to="`/supplier/accounts/${row.id}`">{{ row.name }}</RouterLink></template>
       <template #cell-models="{ row }">{{ row.offer.allowed_models.join(', ') }}</template>
       <template #cell-concurrency="{ row }">{{ row.current_concurrency }} / {{ row.concurrency }}</template>
-      <template #cell-review="{ row }"><StatusBadge :status="row.offer.review_status" :label="row.offer.review_status" /></template>
+      <template #cell-review="{ row }"><SupplierStatusBadge kind="review" :status="row.offer.review_status" /></template>
       <template #cell-availability="{ row }">{{ t(row.offer.enabled ? 'marketplace.enabled' : 'marketplace.disabled') }}</template>
-      <template #cell-health="{ row }"><StatusBadge :status="row.credential_status" :label="row.credential_status" /></template>
+      <template #cell-health="{ row }"><SupplierStatusBadge kind="credential" :status="row.credential_status" /></template>
       <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><RouterLink class="text-primary-600" :to="`/supplier/accounts/${row.id}`">{{ t('marketplace.details') }}</RouterLink><button v-if="row.offer.enabled" data-test="pause" class="text-amber-600" :disabled="busy" @click="confirm(row, 'pause')">{{ t('marketplace.pause') }}</button><button v-else-if="row.offer.review_status === 'approved' && !readOnly" class="text-primary-600" :disabled="busy" @click="confirm(row, 'resume')">{{ t('marketplace.resume') }}</button></div></template>
     </DataTable><div v-if="pages > 1" class="flex items-center justify-center gap-4 p-4 text-sm"><button :disabled="page <= 1" @click="page--; load()">{{ t('marketplace.previous') }}</button><span>{{ page }} / {{ pages }}</span><button :disabled="page >= pages" @click="page++; load()">{{ t('marketplace.next') }}</button></div></template>
   </TablePageLayout><AccountShareWizard v-if="wizard && options" :options="options" @close="wizard = false" @created="created" /><ConfirmDialog :show="!!action" :title="t(`marketplace.${action?.kind || 'pause'}`)" :message="t(action?.kind === 'pause' ? 'marketplace.pauseExplanation' : 'marketplace.resumeExplanation')" @cancel="action = null" @confirm="perform" /></AppLayout>
@@ -21,7 +21,7 @@ import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
-import StatusBadge from '@/components/common/StatusBadge.vue'
+import SupplierStatusBadge from '@/components/supplier/SupplierStatusBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import AccountShareWizard from '@/components/supplier/AccountShareWizard.vue'
 import { listAccounts, getSupplierOptions, accountAction } from '@/api/supplier'

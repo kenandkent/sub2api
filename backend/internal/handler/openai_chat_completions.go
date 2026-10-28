@@ -101,6 +101,13 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
+	marketplace, marketplaceBody, marketplaceOK := h.marketplaceRequest(c, apiKey, body, reqModel, "chat_completions")
+	if !marketplaceOK {
+		return
+	}
+	if marketplace != nil {
+		body = marketplaceBody
+	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	setOpsRequestContext(c, reqModel, reqStream)
@@ -117,12 +124,18 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
 	forwardModel := openAIChannelForwardModel(channelMapping, reqModel)
+	if marketplace != nil {
+		forwardModel = marketplace.quote.ActualModel
+	}
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	if marketplace != nil {
+		subscription = nil
+	}
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
@@ -146,21 +159,39 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
-	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
-	if err != nil {
-		reqLog.Info("openai_chat_completions.inflight_reservation_rejected", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
+	if marketplace != nil {
+		if !marketplace.reserve(c, h) {
+			return
 		}
-		h.handleStreamingAwareError(c, status, code, message, streamStarted)
-		return
+		defer marketplace.abortUndispatched()
 	}
-	defer inflightRelease()
+
+	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
+	if marketplace == nil {
+		inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
+		if err != nil {
+			reqLog.Info("openai_chat_completions.inflight_reservation_rejected", zap.Error(err))
+			status, code, message, retryAfter := billingErrorDetails(err)
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			h.handleStreamingAwareError(c, status, code, message, streamStarted)
+			return
+		}
+		defer inflightRelease()
+
+	}
 
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
+	if marketplace != nil {
+		if sessionHash != "" {
+			sessionHash = marketplace.scopeSession(sessionHash)
+		}
+		if promptCacheKey != "" {
+			promptCacheKey = marketplace.scopeSession(promptCacheKey)
+		}
+	}
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -173,6 +204,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	// 分组利润控制：chat completions 文本入口请求级装门并固定 pricingAt。
 	ccPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(ccPricingCtx)
+
+	requiredCapability := service.OpenAIEndpointCapabilityChatCompletions
+	if marketplace != nil {
+		requiredCapability = service.OpenAIEndpointCapabilityResponses
+	}
 
 	for {
 		if failoverClientGone(c) {
@@ -187,7 +223,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportAny,
-			service.OpenAIEndpointCapabilityChatCompletions,
+			requiredCapability,
 			false,
 			false,
 			true,
@@ -246,11 +282,32 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 
+		if marketplace != nil {
+			prepared, prepErr := marketplace.dispatch(c.Request.Context(), account)
+			if prepErr != nil {
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				if errors.Is(prepErr, service.ErrMarketplaceAccountIneligible) {
+					failedAccountIDs[account.ID] = struct{}{}
+					continue
+				}
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Shared account unavailable", streamStarted)
+				return
+			}
+			account = prepared
+			if accountReleaseFunc != nil {
+				defer accountReleaseFunc()
+				accountReleaseFunc = nil
+			}
+			marketplace.writer = newMarketplaceResponseWriter(c.Writer, reqStream)
+			c.Writer = marketplace.writer
+		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 
 		forwardBody := body
-		if channelMapping.Mapped {
+		if channelMapping.Mapped && marketplace == nil {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		writerSizeBeforeForward := c.Writer.Size()
@@ -265,6 +322,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
+		if marketplace != nil {
+			marketplace.finish(c, result, err)
+			return
+		}
 		var cyberBlockBodyChat []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyChat = body

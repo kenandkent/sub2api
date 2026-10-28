@@ -115,6 +115,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		zap.Bool("stream", clientStream),
 	)
 	SetOpsUpstreamModel(c, upstreamModel)
+	if !marketplaceModelMatches(ctx, upstreamModel) {
+		return nil, ErrMarketplacePriceUnavailable
+	}
 
 	// Build and send upstream request via the shared CC pipeline
 	apiKey, targetURL, err := s.resolveCCFallbackTarget(account)

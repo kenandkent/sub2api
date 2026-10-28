@@ -88,6 +88,7 @@ type codexTransformResult struct {
 }
 
 type codexOAuthTransformOptions struct {
+	PreserveMaxOutputTokens             bool
 	IsCodexCLI                          bool
 	IsCompact                           bool
 	SkipDefaultInstructions             bool
@@ -221,6 +222,9 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 
 	// Strip parameters unsupported by ChatGPT internal Codex endpoint.
 	for _, key := range openAICodexOAuthUnsupportedFields {
+		if opts.PreserveMaxOutputTokens && key == "max_output_tokens" {
+			continue
+		}
 		if _, ok := reqBody[key]; ok {
 			delete(reqBody, key)
 			result.Modified = true

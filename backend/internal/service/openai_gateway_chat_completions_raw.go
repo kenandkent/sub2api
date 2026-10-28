@@ -89,6 +89,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 		return nil, err
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
+	if !marketplaceModelMatches(ctx, upstreamModel) {
+		return nil, ErrMarketplacePriceUnavailable
+	}
 	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
 		// Resolve before image bridging or other body rewrites so the fallback is

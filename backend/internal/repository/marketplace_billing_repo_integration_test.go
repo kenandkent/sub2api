@@ -59,9 +59,9 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	require.NoError(t, err)
 	billing := NewMarketplaceBillingRepository(integrationDB)
 	require.NoError(t, billing.ReserveBudget(ctx, receipt.ID, buyer, service.Money{Decimal: decimal.NewFromInt(2)}))
-	price := service.Money{Decimal: decimal.NewFromInt(1)}
-	rate := decimal.NewFromInt(1)
-	accountRate := decimal.NewFromInt(2)
+	price := service.Money{Decimal: decimal.NewFromInt(2)}
+	rate := decimal.RequireFromString("0.5")
+	accountRate := decimal.RequireFromString("1.234567")
 	q := service.QuoteSnapshot{Currency: "USD", PublicModel: "m", ActualModel: "m", Protocol: "responses", PriceVersion: 1, PolicyVersion: 1, RateMultiplier: &rate, AccountRateMultiplier: &accountRate, Tiers: []service.MarketplacePriceTier{{InputPerMillion: &price, OutputPerMillion: &price, CacheReadPerMillion: &price, CacheWritePerMillion: &price}}, FeeBPS: 2000, HoldHours: 24, AccountID: account, OfferID: offer, OwnerUserID: owner, SnapshotAt: time.Now().UTC()}
 	tx, err := integrationDB.BeginTx(ctx, nil)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	digest, err := service.MarketplaceQuoteDigest(q)
 	require.NoError(t, err)
-	usage := service.UsageSnapshot{InputTokens: 1234567, Source: "upstream"}
+	usage := service.UsageSnapshot{InputTokens: 1234567, CacheReadTokens: 234567, CacheWriteTokens: 100000, Source: "upstream"}
 	charge, err := service.NewMarketplaceQuoteService().CalculateActual(q, usage)
 	require.NoError(t, err)
 	net, fee, err := service.SplitMarketplaceCharge(charge, 2000)
@@ -128,7 +128,7 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	require.Equal(t, "1.23456700", quota)
 	var accountQuota string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT extra->>'quota_used' FROM accounts WHERE id=$1`, account).Scan(&accountQuota))
-	require.True(t, decimal.RequireFromString(accountQuota).Equal(decimal.RequireFromString("2.469134")))
+	require.True(t, decimal.RequireFromString(accountQuota).Equal(decimal.RequireFromString("3.04831135")))
 	require.Equal(t, "1.23456700", c)
 	require.Equal(t, "0.98765360", n)
 	require.Equal(t, "0.24691340", f)
@@ -147,7 +147,7 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 		require.True(t, event.APIKeyQuotaExhausted)
 		require.True(t, event.APIKeyRateLimitChanged)
 		require.Equal(t, "3.76543300", event.BuyerBalanceAfter.StringFixed(8))
-		if _, err := tx.ExecContext(ctx, `UPDATE api_keys SET quota_used=quota_used+100 WHERE id=$1`, key); err != nil {
+		if err := ProjectMarketplaceCapture(ctx, tx, event); err != nil {
 			return err
 		}
 		return errors.New("projection failed")
@@ -159,10 +159,58 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	require.Equal(t, "1.23456700", quota)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE marketplace_outbox SET next_attempt_at=now() WHERE receipt_id=$1`, receipt.ID)
 	require.NoError(t, err)
-	worker.Project = func(context.Context, *sql.Tx, MarketplaceOutboxEvent) error { return nil }
+	var count int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM usage_logs WHERE marketplace_receipt_id=$1`, receipt.ID).Scan(&count))
+	require.Zero(t, count)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM marketplace_cache_tasks t JOIN marketplace_captures c ON c.id=t.capture_id WHERE c.receipt_id=$1`, receipt.ID).Scan(&count))
+	require.Zero(t, count)
+	worker.Project = ProjectMarketplaceCapture
 	processed, err = worker.ProcessOne(ctx)
 	require.True(t, processed)
 	require.NoError(t, err)
+	var input, cacheRead, cacheWrite int64
+	var actual, base, projectedRate, legacyAccountRate, exactAccountRate, accountStats string
+	var version int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT input_tokens,cache_read_tokens,cache_creation_tokens,actual_cost::text,total_cost::text,marketplace_rate_multiplier::text,marketplace_price_version,account_rate_multiplier::text,marketplace_account_rate_multiplier::text,(coalesce(account_stats_cost,total_cost)*account_rate_multiplier)::text FROM usage_logs WHERE marketplace_receipt_id=$1`, receipt.ID).Scan(&input, &cacheRead, &cacheWrite, &actual, &base, &projectedRate, &version, &legacyAccountRate, &exactAccountRate, &accountStats))
+	require.Equal(t, int64(900000), input)
+	require.Equal(t, int64(234567), cacheRead)
+	require.Equal(t, int64(100000), cacheWrite)
+	require.True(t, decimal.RequireFromString(actual).Equal(decimal.RequireFromString("1.234567")))
+	require.True(t, decimal.RequireFromString(base).Equal(decimal.RequireFromString("2.469134")))
+	require.True(t, decimal.RequireFromString(projectedRate).Equal(decimal.RequireFromString("0.5")))
+	require.Equal(t, int64(1), version)
+	require.True(t, decimal.RequireFromString(legacyAccountRate).Equal(decimal.RequireFromString("1.2346")))
+	require.True(t, decimal.RequireFromString(exactAccountRate).Equal(accountRate))
+	require.True(t, decimal.RequireFromString(accountStats).Equal(decimal.RequireFromString("3.0483928364")))
+	processed, err = worker.ProcessOne(ctx)
+	require.NoError(t, err)
+	require.False(t, processed)
+	cache := &marketplaceProjectionCacheFake{fail: true}
+	cacheWorker := NewMarketplaceCacheWorker(integrationDB, cache)
+	processed, err = cacheWorker.ProcessOne(ctx)
+	require.True(t, processed)
+	require.Error(t, err)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM marketplace_cache_tasks WHERE user_id=$1 AND processed_at IS NULL`, buyer).Scan(&count))
+	require.Equal(t, 1, count)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE marketplace_cache_tasks SET available_at=now() WHERE user_id=$1`, buyer)
+	require.NoError(t, err)
+	cache.fail = false
+	processed, err = cacheWorker.ProcessOne(ctx)
+	require.True(t, processed)
+	require.NoError(t, err)
+	require.Equal(t, buyer, cache.user)
+	require.Equal(t, key, cache.key)
+	processed, err = cacheWorker.ProcessOne(ctx)
+	require.NoError(t, err)
+	require.False(t, processed)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE marketplace_cache_tasks SET available_at=now() WHERE user_id=$1`, buyer)
+	require.NoError(t, err)
+	processed, err = cacheWorker.ProcessOne(ctx)
+	require.True(t, processed)
+	require.NoError(t, err)
+	processed, err = cacheWorker.ProcessOne(ctx)
+	require.NoError(t, err)
+	require.False(t, processed)
 
 	// Underfunding keeps trusted usage and the existing hold, without supplier earnings.
 	next, _, err := requests.Prepare(ctx, service.MarketplacePrepareCommand{BuyerUserID: buyer, APIKeyID: key, GroupID: group, RequestDigest: "next"})
@@ -242,4 +290,22 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	require.True(t, replay.APIKeyQuotaExhausted)
 	require.True(t, replay.APIKeyRateLimitChanged)
 	require.Equal(t, 3.765433, *replay.NewBalance)
+}
+
+// Cache failures must leave work available for retry; no historical balance is written.
+type marketplaceProjectionCacheFake struct {
+	fail      bool
+	user, key int64
+}
+
+func (f *marketplaceProjectionCacheFake) InvalidateUserBalance(_ context.Context, id int64) error {
+	f.user = id
+	if f.fail {
+		return errors.New("cache unavailable")
+	}
+	return nil
+}
+func (f *marketplaceProjectionCacheFake) InvalidateAPIKeyRateLimit(_ context.Context, id int64) error {
+	f.key = id
+	return nil
 }

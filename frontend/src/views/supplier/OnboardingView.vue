@@ -1,23 +1,16 @@
-<template>
-  <AppLayout>
-    <div class="card max-w-2xl p-6">
-      <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('marketplace.onboarding') }}</h2>
-      <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('marketplace.onboardingDescription') }}</p>
-      <p v-if="store.capabilities" class="mt-6 text-sm text-gray-700 dark:text-dark-200">{{ t('marketplace.status') }}: {{ t(`marketplace.${store.capabilities.supplier_status}`) }}</p>
-      <div v-else class="mt-6 text-sm text-gray-600 dark:text-dark-300">
-        <p>{{ t('marketplace.unavailable') }}</p>
-        <button class="btn-secondary mt-3" type="button" @click="retry">{{ t('marketplace.retry') }}</button>
-      </div>
-    </div>
-  </AppLayout>
-</template>
+<template><AppLayout><div class="card max-w-2xl space-y-5 p-6"><div><h1 class="text-xl font-semibold">{{ t('marketplace.onboarding') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('marketplace.onboardingDescription') }}</p></div><p v-if="loading">{{ t('marketplace.loading') }}</p><div v-else-if="error" role="alert">{{ t('marketplace.loadFailed') }} <button class="text-primary-600 underline" @click="load">{{ t('marketplace.retry') }}</button></div><template v-else-if="profile"><p>{{ t('marketplace.status') }}: {{ t(`marketplace.${profile.status}`) }}</p><p v-if="profile.review_reason" class="text-sm text-red-600">{{ profile.review_reason }}</p><p v-if="profile.payout_frozen" class="text-sm text-amber-600">{{ t('marketplace.payoutFrozen') }}</p><RouterLink v-if="profile.status === 'active' || profile.status === 'suspended'" class="btn-secondary inline-block" to="/supplier/overview">{{ t('marketplace.overview') }}</RouterLink><form v-if="['not_applied', 'rejected', 'pending'].includes(profile.status) && options" class="space-y-4" @submit.prevent="submit"><p class="text-sm">{{ t('marketplace.applicationPolicy', { version: options.agreement_version, fee: options.fee_bps, hours: options.hold_hours }) }}</p><p v-if="options.agreement_text" class="whitespace-pre-wrap text-sm">{{ options.agreement_text }}</p><a v-if="agreementUrl" :href="agreementUrl" target="_blank" rel="noopener noreferrer" class="text-sm text-primary-600 underline">{{ t('marketplace.readAgreement') }}</a><p v-if="!hasAgreement" class="text-sm text-amber-600">{{ t('marketplace.agreementUnavailable') }}</p><label v-for="field in options.application_fields" :key="field" class="block text-sm">{{ field }}<input v-model="fields[field]" required class="input mt-1 w-full" /></label><label class="flex items-start gap-2 text-sm"><input v-model="accepted" type="checkbox" required />{{ t('marketplace.acceptAgreement') }}</label><p v-if="submitError" role="alert" class="text-sm text-red-600">{{ t('marketplace.submitFailed') }}</p><button class="btn-primary" :disabled="busy || !accepted || !hasAgreement">{{ t('marketplace.submitApplication') }}</button></form><p v-else-if="!options && ['not_applied', 'rejected', 'pending'].includes(profile.status)" class="text-sm text-amber-600">{{ t('marketplace.optionsUnavailable') }}</p></template></div></AppLayout></template>
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { getSupplierProfile, getSupplierOptions, submitSupplierProfile } from '@/api/supplier'
 import { useWorkModeStore } from '@/stores/workMode'
 import { useAuthStore } from '@/stores/auth'
-const { t } = useI18n()
-const store = useWorkModeStore()
-const auth = useAuthStore()
-function retry() { if (auth.user) void store.loadCapabilities(auth.user.id) }
+import type { SupplierProfile, SupplierOptions } from '@/types/marketplace'
+const { t } = useI18n(); const store = useWorkModeStore(); const auth = useAuthStore(); const profile = ref<SupplierProfile | null>(null); const options = ref<SupplierOptions | null>(null); const fields = ref<Record<string, string>>({}); const accepted = ref(false); const loading = ref(true); const error = ref(false); const submitError = ref(false); const busy = ref(false)
+watch([fields, accepted], () => { if (!loading.value) store.dirty = true }, { deep: true })
+const agreementUrl = computed(() => { try { const url = new URL(options.value?.agreement_url || ''); return ['http:', 'https:'].includes(url.protocol) ? url.href : '' } catch { return '' } }); const hasAgreement = computed(() => !!options.value?.agreement_text?.trim() || !!agreementUrl.value)
+async function load() { loading.value = true; error.value = false; try { const [p, o] = await Promise.all([getSupplierProfile().catch(e => { if ((e as { status?: number }).status === 404) return { status: 'not_applied' as const, agreement_version: 0, application_fields: {}, payout_frozen: false }; throw e }), getSupplierOptions().catch(() => null)]); profile.value = p; options.value = o; fields.value = { ...p.application_fields }; accepted.value = false; await nextTick(); store.dirty = false } catch { error.value = true } finally { loading.value = false } }
+async function submit() { if (!options.value || !accepted.value || !hasAgreement.value || busy.value) return; busy.value = true; submitError.value = false; try { profile.value = await submitSupplierProfile({ agreement_version: options.value.agreement_version, fields: fields.value }); store.dirty = false; if (auth.user) await store.loadCapabilities(auth.user.id) } catch { submitError.value = true } finally { busy.value = false } }
+onMounted(load); onUnmounted(() => { store.dirty = false })
 </script>

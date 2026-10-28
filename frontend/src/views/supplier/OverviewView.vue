@@ -1,6 +1,12 @@
-<template><AppLayout><div class="card max-w-2xl p-6"><h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('marketplace.overview') }}</h2><p class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('marketplace.overviewDescription') }}</p></div></AppLayout></template>
+<template><AppLayout><div class="space-y-6"><div class="flex flex-wrap items-center justify-between gap-4"><div><h1 class="text-xl font-semibold">{{ t('marketplace.overview') }}</h1><p class="mt-1 text-sm text-gray-500">{{ t('marketplace.overviewDescription') }}</p></div><RouterLink class="btn-primary" to="/supplier/accounts">{{ t('marketplace.accounts') }}</RouterLink></div><div v-if="loading" class="card p-6">{{ t('marketplace.loading') }}</div><div v-else-if="error" class="card p-6" role="alert">{{ t('marketplace.loadFailed') }} <button class="text-primary-600 underline" @click="load">{{ t('marketplace.retry') }}</button></div><template v-else-if="overview"><div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"><StatCard :title="t('marketplace.onlineAccounts')" :value="overview.online_accounts" /><StatCard :title="t('marketplace.currentRequests')" :value="overview.current_requests" /><StatCard :title="t('marketplace.pendingEarnings')" :value="overview.pending" /><StatCard :title="t('marketplace.withdrawable')" :value="overview.available" /><StatCard :title="t('marketplace.payoutReserved')" :value="overview.payout_reserved" /></div><p class="text-sm text-gray-500">{{ t('marketplace.overviewUpdated', { time: overview.updated_at }) }} {{ t('marketplace.approximate') }}</p></template></div></AppLayout></template>
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-const { t } = useI18n()
+import StatCard from '@/components/common/StatCard.vue'
+import { getSupplierOverview } from '@/api/supplier'
+import type { SupplierOverview } from '@/types/marketplace'
+const { t } = useI18n(); const overview = ref<SupplierOverview | null>(null); const loading = ref(true); const error = ref(false)
+async function load() { loading.value = true; error.value = false; try { overview.value = await getSupplierOverview() } catch { error.value = true } finally { loading.value = false } }
+onMounted(load)
 </script>

@@ -208,6 +208,16 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, titleKey: 'marketplace.overview' }
   },
   {
+    path: '/supplier/accounts', name: 'SupplierAccounts',
+    component: () => import('@/views/supplier/AccountsView.vue'),
+    meta: { requiresAuth: true, titleKey: 'marketplace.accounts' }
+  },
+  {
+    path: '/supplier/accounts/:id', name: 'SupplierAccountDetail',
+    component: () => import('@/views/supplier/AccountDetailView.vue'),
+    meta: { requiresAuth: true, titleKey: 'marketplace.accounts' }
+  },
+  {
     path: '/dashboard',
     name: 'Dashboard',
     component: () => import('@/views/user/DashboardView.vue'),

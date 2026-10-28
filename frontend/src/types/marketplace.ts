@@ -6,3 +6,18 @@ export interface UserCapabilities {
   marketplace_enabled: boolean
   allowed_workspaces: WorkMode[]
 }
+
+export interface SupplierProfile {
+  status: SupplierStatus
+  agreement_version: number
+  application_fields: Record<string, string>
+  review_reason?: string
+  payout_frozen: boolean
+}
+export interface SupplierProvider { platform: string; label: string; account_types: ('api_key' | 'oauth')[]; models: string[] }
+export interface SupplierOptions { agreement_version: number; agreement_text?: string; agreement_url?: string; application_fields: string[]; max_supplier_concurrency: number; fee_bps: number; hold_hours: number; providers: SupplierProvider[] }
+export interface SupplierOffer { id: number; review_status: string; enabled: boolean; allowed_models: string[]; version: number }
+export interface SupplierAccount { id: number; name: string; platform: string; type: string; concurrency: number; status: string; offer: SupplierOffer; credential_status: string; current_concurrency: number; created_at: string }
+export interface SupplierOverview { online_accounts: number; current_requests: number; pending: string; available: string; payout_reserved: string; updated_at: string }
+export interface Page<T> { items: T[]; total: number; page: number; page_size: number; pages: number }
+export interface CreateSupplierAccount { name: string; platform: string; type: string; api_key?: string; allowed_models: string[]; concurrency: number }

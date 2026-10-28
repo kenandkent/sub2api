@@ -50,6 +50,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		// Privacy client factory for OpenAI training opt-out
 		providePrivacyClientFactory,
 		provideMarketplaceHandlers,
+		provideMarketplaceReplayResolver,
 
 		// BuildInfo provider
 		provideServiceBuildInfo,

@@ -56,9 +56,12 @@ type SupplierStatement struct {
 	OpeningPending   string    `json:"opening_pending"`
 	OpeningAvailable string    `json:"opening_available"`
 	OpeningReserved  string    `json:"opening_reserved"`
+	OpeningDebt      string    `json:"opening_debt"`
 	ClosingPending   string    `json:"closing_pending"`
 	ClosingAvailable string    `json:"closing_available"`
 	ClosingReserved  string    `json:"closing_reserved"`
+	ClosingDebt      string    `json:"closing_debt"`
+	DebtOffset       string    `json:"debt_offset"`
 	EarnedNet        string    `json:"earned_net"`
 	PlatformFee      string    `json:"platform_fee"`
 	RefundNet        string    `json:"refund_net"`
@@ -67,15 +70,16 @@ type SupplierStatement struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 type SupplierStatementEntry struct {
-	OperationID    string    `json:"operation_id"`
-	Date           time.Time `json:"date"`
-	AccountID      int64     `json:"account_id"`
-	AccountName    string    `json:"account_name"`
-	Model          string    `json:"model"`
-	Kind           string    `json:"kind"`
-	ConsumerCharge string    `json:"consumer_charge"`
-	PlatformFee    string    `json:"platform_fee"`
-	SupplierNet    string    `json:"supplier_net"`
+	OperationID        string    `json:"operation_id"`
+	Date               time.Time `json:"date"`
+	AccountID          int64     `json:"account_id"`
+	AccountName        string    `json:"account_name"`
+	Model              string    `json:"model"`
+	Kind               string    `json:"kind"`
+	ConsumerCharge     string    `json:"consumer_charge"`
+	PlatformFee        string    `json:"platform_fee"`
+	SupplierNet        string    `json:"supplier_net"`
+	SupplierDebtOffset string    `json:"supplier_debt_offset"`
 }
 type SupplierStatementEntriesPage struct {
 	FinancePage
@@ -93,17 +97,35 @@ type ReconciliationItem struct {
 	Difference string `json:"difference,omitempty"`
 }
 type ReconciliationTotals struct {
-	ReceiptStatuses        map[string]int64 `json:"receipt_statuses"`
-	UnbalancedTransactions int64            `json:"unbalanced_transactions"`
-	WalletDifferences      int64            `json:"wallet_differences"`
-	FundingDifferences     int64            `json:"funding_differences"`
-	AgedOutbox             int64            `json:"aged_outbox"`
-	UncertainPayouts       int64            `json:"uncertain_payouts"`
+	ReceiptStatuses                 map[string]int64 `json:"receipt_statuses"`
+	UnbalancedTransactions          int64            `json:"unbalanced_transactions"`
+	WalletDifferences               int64            `json:"wallet_differences"`
+	FundingDifferences              int64            `json:"funding_differences"`
+	BuyerLedgerDifferences          int64            `json:"buyer_ledger_differences"`
+	CacheBacklog                    int64            `json:"cache_backlog"`
+	CacheOldestAgeSeconds           int64            `json:"cache_oldest_age_seconds"`
+	MaturityBacklog                 int64            `json:"maturity_backlog"`
+	MaturityOldestAgeSeconds        int64            `json:"maturity_oldest_age_seconds"`
+	MaturityFailures                int64            `json:"maturity_failures"`
+	MaturityOldestFailureAgeSeconds int64            `json:"maturity_oldest_failure_age_seconds"`
+	AgedOutbox                      int64            `json:"aged_outbox"`
+	UncertainPayouts                int64            `json:"uncertain_payouts"`
 }
 type ReconciliationPage struct {
 	FinancePage
 	Items  []ReconciliationItem `json:"items"`
 	Totals ReconciliationTotals `json:"totals"`
+}
+type MarketplaceAdminReceipt struct {
+	ReceiptID        string    `json:"receipt_id"`
+	Status           string    `json:"status"`
+	ActualCharge     string    `json:"actual_charge"`
+	Captured         bool      `json:"captured"`
+	RefundedAmount   string    `json:"refunded_amount"`
+	RefundableAmount string    `json:"refundable_amount"`
+	CaptureStatus    string    `json:"capture_status"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 type SupplierFinanceStore interface {
 	Earnings(context.Context, int64, FinanceFilter) (*SupplierEarningsPage, error)
@@ -147,6 +169,15 @@ func (s *SupplierFinanceService) AdminGenerateClosedMonth(ctx context.Context, a
 }
 func (s *SupplierFinanceService) Reconciliation(ctx context.Context, status string, p, n int) (*ReconciliationPage, error) {
 	return s.store.Reconciliation(ctx, status, p, n)
+}
+func (s *SupplierFinanceService) AdminReceipt(ctx context.Context, actor int64, receipt string) (*MarketplaceAdminReceipt, error) {
+	store, ok := s.store.(interface {
+		AdminReceipt(context.Context, int64, string) (*MarketplaceAdminReceipt, error)
+	})
+	if !ok || actor <= 0 {
+		return nil, ErrSupplierFinanceInvalid
+	}
+	return store.AdminReceipt(ctx, actor, receipt)
 }
 func StatementMonth(value string, now time.Time) (time.Time, error) {
 	m, err := time.Parse("2006-01", value)

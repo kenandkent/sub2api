@@ -18,4 +18,20 @@ describe('payout destinations', () => {
     expect((w.get('[data-test=credential]').element as HTMLInputElement).value).toBe('')
     expect(w.text()).not.toContain('secret')
   })
+  it('recovers an in-flight destination with the same key and a re-entered secret after reload', async () => {
+    let resolve!: (value: unknown) => void; let retried: unknown; api.createDestination.mockImplementationOnce(() => new Promise(r => { resolve = r })).mockImplementationOnce(async (payload, key) => { retried = [{ ...payload }, key]; return {} })
+    const settings = { global: { plugins: [createPinia()], stubs: { AppLayout: { template: '<div><slot /></div>' }, TotpStepUpDialog: true, RouterLink: true } } }
+    const first = mount(PayoutDestinationsView, settings); await flushPromises()
+    await first.get('[data-test=label]').setValue('Bank ****5678'); await first.get('[data-test=credential]').setValue('secret')
+    await first.get('[data-test=save]').trigger('click'); await flushPromises()
+    const key = api.createDestination.mock.calls[0][1]
+    expect(sessionStorage.getItem('supplier-destination-operation:42')).toBe(key)
+    expect(JSON.stringify(sessionStorage)).not.toContain('secret')
+    first.unmount()
+    const second = mount(PayoutDestinationsView, { ...settings, global: { ...settings.global, plugins: [createPinia()] } }); await flushPromises()
+    await second.get('[data-test=credential]').setValue('secret')
+    await second.get('[data-test=retry-destination]').trigger('click'); await flushPromises()
+    expect(retried).toEqual([{ masked_label: 'Bank ****5678', credential: 'secret' }, key])
+    resolve({}); first.unmount(); second.unmount()
+  })
 })

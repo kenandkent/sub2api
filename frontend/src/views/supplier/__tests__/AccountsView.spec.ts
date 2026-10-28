@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({ listAccounts: vi.fn(), accountAction: vi.fn(), u
 vi.mock('@/api/supplier', () => api)
 vi.mock('vue-i18n', async (importOriginal) => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-router', async (importOriginal) => ({ ...await importOriginal<typeof import('vue-router')>(), useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 42 } }) }))
 vi.mock('@/stores/workMode', () => ({ useWorkModeStore: () => ({ dirty: false }) }))
 const account = { id: 1, name: 'Shared', platform: 'openai', type: 'api_key', concurrency: 1, status: 'active', credential_status: 'valid', current_concurrency: 0, created_at: '', offer: { id: 2, review_status: 'approved', enabled: true, allowed_models: ['model'], version: 1 } }
 const stubs = { AppLayout: { template: '<div><slot /></div>' }, TablePageLayout: { template: '<div><slot name="actions"/><slot name="filters"/><slot name="table"/></div>' }, DataTable: { props: ['data'], template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-review" :row="row"/><slot name="cell-health" :row="row"/><slot name="cell-actions" :row="row"/></div></div>' }, SupplierStatusBadge: { props: ['kind', 'status'], template: '<span>{{ kind }}_{{ status }}</span>' }, ConfirmDialog: { props: ['show', 'message'], template: '<div v-if="show">{{ message }}<button @click="$emit(\'confirm\')">confirm</button></div>' }, AccountShareWizard: true, RouterLink: { template: '<a><slot /></a>' } }

@@ -1,5 +1,6 @@
 -- Keep the financial receipt as the stable identity of a projected usage row.
-ALTER TABLE usage_logs ADD COLUMN marketplace_receipt_id UUID REFERENCES marketplace_requests(id);
+ALTER TABLE usage_logs ADD COLUMN marketplace_receipt_id UUID;
+ALTER TABLE usage_logs ADD CONSTRAINT usage_logs_marketplace_receipt_id_fkey FOREIGN KEY (marketplace_receipt_id) REFERENCES marketplace_requests(id) NOT VALID;
 ALTER TABLE usage_logs ADD COLUMN marketplace_price_version BIGINT;
 ALTER TABLE usage_logs ADD COLUMN marketplace_policy_version BIGINT;
 ALTER TABLE usage_logs ADD COLUMN marketplace_rate_multiplier NUMERIC;
@@ -9,7 +10,6 @@ ALTER TABLE usage_logs ADD COLUMN marketplace_output_cost NUMERIC;
 ALTER TABLE usage_logs ADD COLUMN marketplace_cache_read_cost NUMERIC;
 ALTER TABLE usage_logs ADD COLUMN marketplace_cache_write_cost NUMERIC;
 ALTER TABLE usage_logs ADD COLUMN marketplace_total_cost NUMERIC;
-CREATE UNIQUE INDEX usage_logs_marketplace_receipt_unique ON usage_logs(marketplace_receipt_id) WHERE marketplace_receipt_id IS NOT NULL;
 
 -- References only: no captured balances or credentials are copied here.
 CREATE TABLE marketplace_cache_tasks (

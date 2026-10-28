@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +28,13 @@ type SupplierRuntimeOAuthRefresher interface {
 type SupplierRuntimeRefreshLock interface {
 	AcquireRefreshLock(context.Context, string, time.Duration) (bool, error)
 	ReleaseRefreshLock(context.Context, string) error
+}
+
+// SupplierOwnedRefreshLock provides a separate owner-safe port while leaving
+// the shared legacy token cache interface unchanged for other providers.
+type SupplierOwnedRefreshLock interface {
+	AcquireSupplierRefreshLock(context.Context, string, string, time.Duration) (bool, error)
+	ReleaseSupplierRefreshLock(context.Context, string, string) error
 }
 type SupplierRuntimeProviderConfig struct {
 	ProxyURL string
@@ -118,16 +128,30 @@ func (s *SupplierRuntimeAccountService) refreshAccount(ctx context.Context, acco
 	if s.lock == nil || s.refresh == nil {
 		return nil, ErrSupplierRuntimeUnavailable
 	}
+	ownedLock, ok := s.lock.(SupplierOwnedRefreshLock)
+	if !ok {
+		return nil, ErrSupplierRuntimeUnavailable
+	}
+	ownerBytes := make([]byte, 16)
+	if _, err := rand.Read(ownerBytes); err != nil {
+		return nil, ErrSupplierRuntimeUnavailable
+	}
+	owner := hex.EncodeToString(ownerBytes)
 	key := fmt.Sprintf("supplier-runtime:%d", account.ID)
-	locked, err := s.lock.AcquireRefreshLock(ctx, key, 30*time.Second)
+	lockStarted := time.Now()
+	locked, err := ownedLock.AcquireSupplierRefreshLock(ctx, key, owner, 30*time.Second)
 	if err != nil || !locked {
 		return nil, ErrSupplierRuntimeUnavailable
 	}
 	defer func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = s.lock.ReleaseRefreshLock(releaseCtx, key)
+		_ = ownedLock.ReleaseSupplierRefreshLock(releaseCtx, key, owner)
 	}()
+	// Reserve five seconds of lease margin for cancellation and cleanup; all
+	// credential reads and CAS retries share this deadline, not only HTTP.
+	ctx, cancelRefreshWork := context.WithDeadline(ctx, lockStarted.Add(25*time.Second))
+	defer cancelRefreshWork()
 	sealed, err := s.store.LoadSupplierCredential(ctx, account.ID, *account.OwnerUserID)
 	if err != nil {
 		return nil, ErrSupplierRuntimeUnavailable
@@ -156,7 +180,7 @@ func (s *SupplierRuntimeAccountService) refreshAccount(ctx context.Context, acco
 	refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	response, err := s.refresh.RefreshToken(refreshCtx, token, s.config.ProxyURL)
-	if err != nil || response == nil || strings.TrimSpace(response.AccessToken) == "" || response.ExpiresIn <= 0 || response.ExpiresIn > 31536000 {
+	if err != nil || refreshCtx.Err() != nil || ctx.Err() != nil || response == nil || strings.TrimSpace(response.AccessToken) == "" || response.ExpiresIn <= 0 || response.ExpiresIn > 31536000 {
 		return nil, ErrSupplierRuntimeUnavailable
 	}
 	if response.IDToken != "" {
@@ -197,8 +221,47 @@ func (s *SupplierRuntimeAccountService) refreshAccount(ctx context.Context, acco
 		return nil, ErrSupplierRuntimeUnavailable
 	}
 	swapped, err := s.store.CompareAndSwapSupplierCredential(ctx, account.ID, *account.OwnerUserID, sealed, replacement)
-	if err != nil || !swapped {
+	if err != nil {
 		return nil, ErrSupplierRuntimeUnavailable
+	}
+	if !swapped {
+		// Key rotation may have re-encrypted the same plaintext while the
+		// provider was rotating the refresh token. Retry only while the full
+		// original envelope content is unchanged; a reauthorization, deletion,
+		// or another credential change must never be overwritten.
+		original, e := s.envelope.Open(account.Platform, *account.OwnerUserID, account.ID, sealed)
+		if e != nil {
+			return nil, ErrSupplierRuntimeUnavailable
+		}
+		defer func() {
+			for i := range original {
+				original[i] = 0
+			}
+		}()
+		for retry := 0; retry < 3 && !swapped; retry++ {
+			latest, e := s.store.LoadSupplierCredential(ctx, account.ID, *account.OwnerUserID)
+			if e != nil {
+				return nil, ErrSupplierRuntimeUnavailable
+			}
+			latestPlain, e := s.envelope.Open(account.Platform, *account.OwnerUserID, account.ID, latest)
+			if e != nil {
+				return nil, ErrSupplierRuntimeUnavailable
+			}
+			same := subtle.ConstantTimeCompare(original, latestPlain) == 1
+			for i := range latestPlain {
+				latestPlain[i] = 0
+			}
+			if !same {
+				return nil, ErrSupplierRuntimeUnavailable
+			}
+			swapped, e = s.store.CompareAndSwapSupplierCredential(ctx, account.ID, *account.OwnerUserID, latest, replacement)
+			if e != nil {
+				return nil, ErrSupplierRuntimeUnavailable
+			}
+		}
+		if !swapped {
+			return nil, ErrSupplierRuntimeUnavailable
+		}
 	}
 	current.Credentials = runtimePublicCredentials(account.Credentials, s.config.BaseURL)
 	for k, v := range credentials {

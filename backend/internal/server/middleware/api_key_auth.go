@@ -18,8 +18,20 @@ import (
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
-func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
-	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
+type MarketplaceReplayResolver interface {
+	MarketplaceReplayExists(context.Context, int64, int64, int64, string) (bool, error)
+}
+
+const marketplaceReplayOnlyKey = "marketplace_replay_only"
+
+func IsMarketplaceReplayOnly(c *gin.Context) bool {
+	value, ok := c.Get(marketplaceReplayOnlyKey)
+	replay, valid := value.(bool)
+	return ok && valid && replay
+}
+
+func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, resolvers ...MarketplaceReplayResolver) APIKeyAuthMiddleware {
+	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg, resolvers...))
 }
 
 // apiKeyAuthWithSubscription API Key认证中间件（支持订阅验证）
@@ -31,7 +43,7 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 // /v1/usage、/v1/sub2api/billing 端点与异步生图任务查询只需鉴权，不需要计费执行。
 // usage 允许过期/配额耗尽的 Key 查询自身用量，billing 用于读取当前 Key 的倍率配置，
 // 异步生图查询允许已耗尽额度的 Key 拉取自身任务结果。
-func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
+func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, resolvers ...MarketplaceReplayResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
 		if rejectInvalidAuthAbuse(c, apiKeyService) {
@@ -170,6 +182,21 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.
 		skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
+
+		// A scoped existing receipt permits read-only replay admission. The
+		// handler must match the body digest and cannot dispatch on a miss.
+		if len(resolvers) > 0 && resolvers[0] != nil && apiKey.GroupID != nil && apiKey.Group != nil && apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Status != service.StatusAPIKeyExpired && !apiKey.IsExpired() && marketplaceReplayRoute(c.Request.Method, c.Request.URL.Path) {
+			idempotency := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+			if idempotency != "" && len(idempotency) <= 255 {
+				found, err := resolvers[0].MarketplaceReplayExists(c.Request.Context(), apiKey.User.ID, apiKey.ID, *apiKey.GroupID, idempotency)
+				// A lookup failure grants no exception and leaves ordinary billing
+				// admission unchanged. Shared handler lookup fails closed itself.
+				if err == nil && found {
+					c.Set(marketplaceReplayOnlyKey, true)
+					skipBilling = true
+				}
+			}
+		}
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
@@ -446,4 +473,16 @@ func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool)
 		return "GROUP_DISABLED", "API Key 所属分组已停用", false
 	}
 	return "", "", true
+}
+
+func marketplaceReplayRoute(method, path string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	switch strings.TrimRight(path, "/") {
+	case "/v1/responses", "/responses", "/backend-api/codex/responses", "/openai/v1/responses", "/v1/chat/completions", "/chat/completions", "/backend-api/codex/chat/completions", "/openai/v1/chat/completions":
+		return true
+	default:
+		return false
+	}
 }

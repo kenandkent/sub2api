@@ -1324,6 +1324,7 @@ image_storage:
 #   credential_key_id: ""
 #   credential_keys_json: "" # JSON object: key ID -> base64 of a stable random 32-byte key
 #   oauth_proxy_url: "" # Trusted operator configuration; never supplier input
+#   upstream_timeout_seconds: 300 # 1–3600 seconds; effective limit is min(this, gateway concurrency slot TTL minus 31s), starting before slot selection
 #   agreement_version: 1
 #   agreement_text: ""
 #   agreement_url: ""
@@ -1338,4 +1339,8 @@ image_storage:
 #       base_url: https://api.openai.com/v1
 #       account_types: [apikey, oauth]
 #       models: [] # Explicit actual models supported by this deployment
+#       # Operator-attested provider hard limits on TOTAL billable input tokens,
+#       # including hidden framing, tools and referenced context, for every listed account type.
+#       # Independently verify each provider/model before setting; missing entries disable dispatch.
+#       max_billable_input_tokens_by_model: {} # e.g. {"actual-model": 100000}
 #       # proxy_id: 123 # Optional existing, operator-managed proxy

@@ -416,12 +416,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		zap.Int64("api_key_id", apiKey.ID),
 		zap.Any("group_id", apiKey.GroupID),
 	)
-	if !h.ensureResponsesDependencies(c, reqLog) {
-		return
-	}
 
 	// Read request body
-	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	rawBody, err := readMarketplaceRawJSON(c.Request, h.cfg)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
@@ -432,8 +429,27 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
-	if len(body) == 0 {
+	if len(rawBody) == 0 {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
+		return
+	}
+
+	rawDigest := marketplaceRawDigest("responses", rawBody)
+	c.Set(marketplaceRawDigestKey, rawDigest)
+	if middleware2.IsMarketplaceReplayOnly(c) {
+		h.lookupMarketplaceReplay(c, apiKey, rawDigest, true)
+		return
+	}
+	body, err := normalizeMarketplaceRawJSON(rawBody, h.cfg)
+	if err != nil {
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		return
+	}
+	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}
 
@@ -636,6 +652,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		defer marketplace.abortUndispatched()
+		executionCtx, cancelExecution := service.WithMarketplaceSlotBoundExecution(service.WithMarketplaceBeforeSend(c.Request.Context(), marketplace.commitDispatch), h.cfg.Marketplace.UpstreamTimeoutSeconds, h.cfg.Gateway.ConcurrencySlotTTLMinutes)
+		defer cancelExecution()
+		c.Request = c.Request.WithContext(executionCtx)
+		releaseWriteDeadline, deadlineErr := marketplaceBoundClientWrites(c, executionCtx)
+		if deadlineErr != nil {
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Shared response deadline unavailable", streamStarted)
+			return
+		}
+		defer releaseWriteDeadline()
 	}
 
 	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
@@ -700,6 +725,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// be drained after a disconnect. Re-check the client context before every
 		// account attempt so a canceled request never starts a failover replay.
 		if !openAIRequestAllowsFailoverReplay(c) {
+			if marketplace != nil {
+				marketplace.respondTimeout(c, h, streamStarted)
+			}
 			return
 		}
 		// Select account supporting the requested model
@@ -720,6 +748,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		)
 		if err != nil {
 			if failoverClientGone(c) {
+				if marketplace != nil {
+					marketplace.respondTimeout(c, h, streamStarted)
+				}
 				reqLog.Info("openai.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
@@ -2365,7 +2396,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
-		return wrapReleaseOnDone(ctx, selection.ReleaseFunc), openAISlotAcquireOK
+		return wrapReleaseOnDone(service.MarketplaceSlotReleaseContext(ctx), selection.ReleaseFunc), openAISlotAcquireOK
 	}
 	if selection.WaitPlan == nil {
 		markOpsRoutingCapacityLimited(c)
@@ -2400,7 +2431,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
-		return wrapReleaseOnDone(ctx, fastReleaseFunc), openAISlotAcquireOK
+		return wrapReleaseOnDone(service.MarketplaceSlotReleaseContext(ctx), fastReleaseFunc), openAISlotAcquireOK
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -2456,7 +2487,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
-	return wrapReleaseOnDone(ctx, accountReleaseFunc), openAISlotAcquireOK
+	return wrapReleaseOnDone(service.MarketplaceSlotReleaseContext(ctx), accountReleaseFunc), openAISlotAcquireOK
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint

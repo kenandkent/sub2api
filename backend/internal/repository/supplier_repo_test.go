@@ -35,12 +35,12 @@ func TestSupplierRepositoryReviewAuditAtomic(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT status FROM supplier_profiles WHERE user_id=\$1 FOR UPDATE`).WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("pending"))
+	mock.ExpectQuery(`SELECT status,version,COALESCE\(agreement_version,0\),application_fields FROM supplier_profiles WHERE user_id=\$1 FOR UPDATE`).WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"status", "version", "agreement", "application_fields"}).AddRow("pending", 1, 3, []byte(`{}`)))
 	cols := []string{"user_id", "status", "review_reason", "agreement_version", "agreement_accepted_at", "application_fields", "payout_frozen", "version"}
 	mock.ExpectQuery(`UPDATE supplier_profiles SET status=`).WithArgs(int64(42), service.SupplierStatusActive, "approved").WillReturnRows(sqlmock.NewRows(cols).AddRow(42, "active", "approved", 3, time.Now(), []byte(`{}`), false, 2))
-	mock.ExpectExec(`INSERT INTO supplier_review_audits`).WithArgs(int64(42), int64(9), "pending", service.SupplierStatusActive, "approved").WillReturnError(sql.ErrConnDone)
+	mock.ExpectExec(`INSERT INTO supplier_review_audits`).WithArgs(int64(42), int64(9), "pending", service.SupplierStatusActive, "approved", int64(1), int64(3), "{}").WillReturnError(sql.ErrConnDone)
 	mock.ExpectRollback()
-	_, err = NewSupplierRepository(db).Review(context.Background(), 42, 9, service.SupplierStatusActive, "approved")
+	_, err = NewSupplierRepository(db).Review(context.Background(), 42, 9, 1, service.SupplierStatusActive, "approved")
 	if err == nil {
 		t.Fatal("audit failure must roll back review")
 	}

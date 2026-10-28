@@ -1,12 +1,12 @@
 <template>
-  <BaseDialog :show="true" :z-index="40" :close-on-escape="!locked" :close-on-click-outside="!locked" :show-close-button="!locked" :title="t('marketplace.addAccount')" @close="close">
+  <BaseDialog :show="true" :z-index="40" :close-on-escape="!busy" :close-on-click-outside="!busy" :show-close-button="!busy" :title="t('marketplace.addAccount')" @close="close">
     <form class="space-y-4" @submit.prevent="submit">
       <p class="text-sm text-gray-500">{{ t('marketplace.wizardStep', { step }) }}</p>
       <div v-if="step === 1" class="space-y-4">
         <p class="text-sm text-gray-500">{{ t('marketplace.eligibility') }}</p>
         <label class="block text-sm">{{ t('marketplace.provider') }}<select v-model="platform" class="input mt-1 w-full"><option v-for="item in options.providers" :key="item.platform" :value="item.platform">{{ item.label }}</option></select></label>
         <label class="block text-sm">{{ t('marketplace.accountType') }}<select v-model="type" class="input mt-1 w-full"><option v-for="kind in provider?.account_types || []" :key="kind" :value="kind">{{ kind }}</option></select></label>
-        <label v-if="type === 'api_key'" class="block text-sm">{{ t('marketplace.apiKey') }}<input v-model="apiKey" data-test="api-key" type="password" autocomplete="off" class="input mt-1 w-full" /></label>
+        <label v-if="['api_key', 'apikey'].includes(type)" class="block text-sm">{{ t('marketplace.apiKey') }}<input v-model="apiKey" data-test="api-key" type="password" autocomplete="off" class="input mt-1 w-full" /></label>
         <p v-else class="text-sm text-gray-500">{{ t('marketplace.oauthAfterPolicy') }}</p>
       </div>
       <div v-else-if="step === 2" class="space-y-4">
@@ -21,11 +21,11 @@
         <p v-if="!hasAgreement" class="text-sm text-amber-600">{{ t('marketplace.agreementUnavailable') }}</p>
         <RouterLink to="/available-channels" target="_blank" rel="noopener noreferrer" class="block text-sm text-primary-600 underline">{{ t('marketplace.viewPrices') }}</RouterLink>
         <label class="flex items-start gap-2 text-sm"><input v-model="accepted" type="checkbox" :disabled="locked" />{{ t('marketplace.acceptAgreement') }}</label>
-        <div v-if="type === 'oauth' && session && !authorizedId" class="space-y-2 text-sm"><a :href="authUrl" data-test="authorization-link" target="_blank" rel="noopener noreferrer" class="text-primary-600 underline">{{ t('marketplace.openAuthorization') }}</a><p>{{ t('marketplace.callbackHint') }}</p><label class="block">{{ t('marketplace.callbackUrl') }}<input v-model="callback" class="input mt-1 w-full" autocomplete="off" /></label></div>
+        <div v-if="type === 'oauth' && session && !authorizedId && !unknown" class="space-y-2 text-sm"><a :href="authUrl" data-test="authorization-link" target="_blank" rel="noopener noreferrer" class="text-primary-600 underline">{{ t('marketplace.openAuthorization') }}</a><p>{{ t('marketplace.callbackHint') }}</p><label class="block">{{ t('marketplace.callbackUrl') }}<input v-model="callback" class="input mt-1 w-full" autocomplete="off" /></label></div>
       </div>
-      <p v-if="unknown" role="alert" class="text-sm text-amber-600">{{ t(unknown === 'authorization' ? 'marketplace.authorizationUnknown' : 'marketplace.operationUnknown') }}</p><button v-if="unknown === 'authorization'" data-test="check-authorization" type="button" class="btn btn-secondary" :disabled="busy" @click="checkAuthorization">{{ t('marketplace.checkStatus') }}</button><button v-if="unknown === 'creation' || unknown === 'configuration'" data-test="check-operation" type="button" class="btn btn-secondary" :disabled="busy" @click="checkOperation">{{ t('marketplace.checkStatus') }}</button><button v-if="unknown === 'configuration'" data-test="retry-patch" type="button" class="btn btn-secondary" :disabled="busy" @click="retryPatch">{{ t('marketplace.retrySameSave') }}</button><div v-if="patchConflict" class="space-y-2 text-sm text-amber-600"><p>{{ t('marketplace.versionConflict') }}</p><p>{{ t('marketplace.latestConfiguration') }}: {{ patchConflict.name }} · {{ patchConflict.concurrency }} · {{ patchConflict.offer.allowed_models.join(', ') }}</p><p>{{ t('marketplace.yourConfiguration') }}: {{ name }} · {{ concurrency }} · {{ models.join(', ') }}</p><button type="button" data-test="acknowledge-conflict" class="underline" @click="acknowledgeConflict">{{ t('marketplace.reviewedConfiguration') }}</button></div><p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p><button v-if="authorizedId && error" type="button" class="text-sm text-primary-600 underline" @click="openCreated">{{ t('marketplace.openCreatedAccount') }}</button>
+      <label v-if="unknown === 'creation'" class="block text-sm">{{ t('marketplace.apiKey') }}<input v-model="apiKey" data-test="recovery-key" type="password" autocomplete="off" class="input mt-1 w-full" /></label><button v-if="unknown === 'creation'" type="button" data-test="retry-creation" class="btn btn-secondary" :disabled="busy || !apiKey" @click="retryCreation">{{ t('marketplace.retrySameOperation') }}</button><template v-if="unknown === 'authorization' && authStatus === 'pending'"><label class="block text-sm">{{ t('marketplace.callbackUrl') }}<input v-model="callback" data-test="recovery-callback" autocomplete="off" class="input mt-1 w-full" /></label><button type="button" data-test="retry-authorization" class="btn btn-secondary" :disabled="busy || !callback" @click="retryAuthorization">{{ t('marketplace.retrySameOperation') }}</button></template><p v-if="(unknown === 'authorization' && session) || (unknown === 'creation' && operationKey)" class="break-all text-sm">{{ t('marketplace.operationReference') }}: {{ unknown === 'authorization' ? session : operationKey }}</p><p v-if="unknown" role="alert" class="text-sm text-amber-600">{{ t(unknown === 'authorization' ? 'marketplace.authorizationUnknown' : 'marketplace.operationUnknown') }}</p><button v-if="unknown === 'authorization'" data-test="check-authorization" type="button" class="btn btn-secondary" :disabled="busy" @click="checkAuthorization">{{ t('marketplace.checkStatus') }}</button><button v-if="unknown === 'creation' || unknown === 'configuration'" data-test="check-operation" type="button" class="btn btn-secondary" :disabled="busy" @click="checkOperation">{{ t('marketplace.checkStatus') }}</button><button v-if="unknown === 'configuration'" data-test="retry-patch" type="button" class="btn btn-secondary" :disabled="busy" @click="retryPatch">{{ t('marketplace.retrySameSave') }}</button><div v-if="patchConflict" class="space-y-2 text-sm text-amber-600"><p>{{ t('marketplace.versionConflict') }}</p><p>{{ t('marketplace.latestConfiguration') }}: {{ patchConflict.name }} · {{ patchConflict.concurrency }} · {{ patchConflict.offer.allowed_models.join(', ') }}</p><p>{{ t('marketplace.yourConfiguration') }}: {{ name }} · {{ concurrency }} · {{ models.join(', ') }}</p><button type="button" data-test="acknowledge-conflict" class="underline" @click="acknowledgeConflict">{{ t('marketplace.reviewedConfiguration') }}</button></div><p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p><button v-if="authorizedId && error" type="button" class="text-sm text-primary-600 underline" @click="openCreated">{{ t('marketplace.openCreatedAccount') }}</button>
       <div class="flex justify-end gap-2">
-        <button type="button" data-test="cancel" class="btn btn-secondary" :disabled="locked" @click="close">{{ t('common.cancel') }}</button>
+        <button type="button" data-test="cancel" class="btn btn-secondary" :disabled="busy" @click="close">{{ t('common.cancel') }}</button>
         <button v-if="step > 1" type="button" data-test="back" class="btn btn-secondary" :disabled="locked || !!authorizedId" @click="step--">{{ t('marketplace.previous') }}</button>
         <button v-if="step < 3" type="button" data-test="next" class="btn btn-primary" :disabled="busy || !canAdvance" @click="step++">{{ t('marketplace.next') }}</button>
         <button v-else data-test="create" class="btn btn-primary" :disabled="locked || !!patchConflict || !accepted || !hasAgreement || !pricesAvailable">{{ type === 'oauth' && authorizedId ? t('marketplace.save') : type === 'oauth' && !session ? t('marketplace.startAuthorization') : type === 'oauth' ? t('marketplace.completeAuthorization') : t('marketplace.createDraft') }}</button>
@@ -34,7 +34,7 @@
   </BaseDialog>
 </template>
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -42,61 +42,82 @@ import AccountConcurrencyForm from './AccountConcurrencyForm.vue'
 import { createAccount, createAuthorization, completeAuthorization, getAccount, updateAccount, getAuthorizationStatus, getSupplierOperation } from '@/api/supplier'
 import { useWorkModeStore } from '@/stores/workMode'
 import type { SupplierAccount, SupplierOptions } from '@/types/marketplace'
-const props = defineProps<{ options: SupplierOptions }>()
+const props = defineProps<{ options: SupplierOptions; ownerId?: number }>()
 const emit = defineEmits<{ close: []; created: [id?: number] }>()
-const { t } = useI18n(); const store = useWorkModeStore()
+const { t } = useI18n(); const store = useWorkModeStore(); let generation = 0; let disposed = false
 const step = ref(1); const accepted = ref(false); const platform = ref(props.options.providers[0]?.platform || ''); const type = ref('api_key'); const name = ref(''); const models = ref<string[]>([]); const concurrency = ref(1); const apiKey = ref(''); const busy = ref(false); const error = ref(''); const session = ref(''); const unknown = ref<'' | 'authorization' | 'creation' | 'configuration'>(''); const operationKey = ref(''); const pendingPatch = ref<{ id: number; payload: { expected_version: number; name: string; concurrency: number; allowed_models: string[] } } | null>(null); const patchConflict = ref<SupplierAccount | null>(null); const authUrl = ref(''); const callback = ref(''); const authorizedId = ref<number | null>(null)
-const agreementUrl = computed(() => { try { const url = new URL(props.options.agreement_url || ''); return ['http:', 'https:'].includes(url.protocol) ? url.href : '' } catch { return '' } }); const hasAgreement = computed(() => !!props.options.agreement_text?.trim() || !!agreementUrl.value)
+const authStatus = ref('')
+const agreementUrl = computed(() => { try { if (!props.options.agreement_url || /^(?:\/\/|\\)/.test(props.options.agreement_url)) return ''; const url = new URL(props.options.agreement_url, window.location.origin); return ['http:', 'https:'].includes(url.protocol) ? url.href : '' } catch { return '' } }); const hasAgreement = computed(() => !!props.options.agreement_text?.trim() || !!agreementUrl.value)
 const selectedPrices = computed(() => (provider.value?.prices || []).filter(p => models.value.includes(p.model)))
 const pricesAvailable = computed(() => models.value.length > 0 && models.value.every(m => selectedPrices.value.some(p => p.model === m)) && selectedPrices.value.every(p => !!p.public_model && !!p.group_name && p.price_version !== undefined && p.price_version !== null && String(p.price_version).length > 0 && typeof p.rate_multiplier === 'string' && !!p.rate_multiplier && !!p.tiers?.length && p.tiers.every(tier => Number.isFinite(tier.from_tokens) && [tier.input_per_million, tier.output_per_million, tier.cache_read_per_million, tier.cache_write_per_million].every(v => typeof v === 'string' && v.trim().length > 0))))
 const locked = computed(() => busy.value || !!unknown.value)
-onBeforeRouteLeave(() => !locked.value)
-onBeforeRouteUpdate(() => !locked.value)
-function beforeUnload(event: BeforeUnloadEvent) { if (locked.value) { event.preventDefault(); event.returnValue = '' } }
+onBeforeRouteLeave(() => !busy.value)
+onBeforeRouteUpdate(() => !busy.value)
+function beforeUnload(event: BeforeUnloadEvent) { if (busy.value) { event.preventDefault(); event.returnValue = '' } }
 window.addEventListener('beforeunload', beforeUnload)
 const provider = computed(() => props.options.providers.find(p => p.platform === platform.value))
 watch(provider, p => { type.value = p?.account_types[0] || ''; models.value = []; session.value = ''; authUrl.value = ''; apiKey.value = '' }, { immediate: true })
 watch(type, () => { session.value = ''; authUrl.value = ''; callback.value = ''; apiKey.value = '' })
 watch([name, models, concurrency, apiKey, accepted, platform, type], () => { store.dirty = true }, { deep: true })
 const configValid = computed(() => !!name.value.trim() && models.value.length > 0 && Number.isInteger(concurrency.value) && concurrency.value > 0 && concurrency.value <= props.options.max_supplier_concurrency)
-const canAdvance = computed(() => step.value === 1 ? !!provider.value && !!type.value && (type.value !== 'api_key' || !!apiKey.value) : configValid.value)
-function finish(id?: number) { unknown.value = ''; busy.value = false; store.dirty = false; emit('created', id) }
+const canAdvance = computed(() => step.value === 1 ? !!provider.value && !!type.value && (!['api_key', 'apikey'].includes(type.value) || !!apiKey.value) : configValid.value)
+function persistOperation(value: object, owner = props.ownerId) { if (owner) sessionStorage.setItem(`supplier-create-operation:${owner}`, JSON.stringify(value)) }
+function clearOperation(owner = props.ownerId) { if (owner) sessionStorage.removeItem(`supplier-create-operation:${owner}`) }
+function configuration() { return { name: name.value.trim(), platform: platform.value, type: type.value, allowed_models: [...models.value], concurrency: concurrency.value } }
+function finish(id?: number) { clearOperation(); unknown.value = ''; busy.value = false; store.dirty = false; emit('created', id) }
 function openCreated() { if (!authorizedId.value) return; callback.value = ''; store.dirty = false; emit('created', authorizedId.value) }
-async function close() { if (locked.value || !await store.confirmLeave()) return; apiKey.value = ''; callback.value = ''; store.dirty = false; emit('close') }
-onUnmounted(() => { window.removeEventListener('beforeunload', beforeUnload); apiKey.value = ''; callback.value = ''; store.dirty = false })
+async function close() { if (busy.value || !await store.confirmLeave()) return; apiKey.value = ''; callback.value = ''; store.dirty = false; emit('close') }
+onUnmounted(() => { disposed = true; generation++; window.removeEventListener('beforeunload', beforeUnload); apiKey.value = ''; callback.value = ''; store.dirty = false })
 async function submit() {
   if (step.value !== 3 || !configValid.value || !accepted.value || !hasAgreement.value || !pricesAvailable.value || locked.value || patchConflict.value) return
+  const owner = props.ownerId, epoch = generation; const active = () => !disposed && generation === epoch && props.ownerId === owner
   busy.value = true; error.value = ''; let inspectConflict = false; let phase: 'create' | 'start' | 'complete' | 'configure' | 'local' = 'local'
   try {
-    if (type.value === 'api_key') {
+    if (['api_key', 'apikey'].includes(type.value)) {
       if (!apiKey.value) { step.value = 1; return }
-      operationKey.value ||= crypto.randomUUID(); phase = 'create'; await createAccount({ name: name.value.trim(), platform: platform.value, type: type.value, api_key: apiKey.value, allowed_models: models.value, concurrency: concurrency.value }, operationKey.value)
-      apiKey.value = ''; finish(); return
+      operationKey.value ||= crypto.randomUUID(); const payload = configuration(); persistOperation({ kind: 'creation', key: operationKey.value, payload }, owner); phase = 'create'; await createAccount({ ...payload, api_key: apiKey.value }, operationKey.value)
+      if (!active()) return; apiKey.value = ''; finish(); return
     }
     if (!session.value && !authorizedId.value) {
-      phase = 'start'; const result = await createAuthorization({ purpose: 'create', provider: platform.value }); const url = new URL(result.auth_url); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid authorization URL'); authUrl.value = url.href; session.value = result.session_id; return
+      phase = 'start'; const result = await createAuthorization({ purpose: 'create', provider: platform.value }); if (!active()) return; const url = new URL(result.auth_url); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid authorization URL'); authUrl.value = url.href; session.value = result.session_id; return
     }
     if (!authorizedId.value) {
       const url = new URL(callback.value); const state = url.searchParams.get('state'); const code = url.searchParams.get('code'); if (!state || !code) throw new Error('invalid callback')
-      phase = 'complete'; authorizedId.value = (await completeAuthorization(session.value, { state, code, purpose: 'create' })).account_id
-      callback.value = ''
+      persistOperation({ kind: 'authorization', session: session.value, payload: configuration() }, owner); phase = 'complete'; const completed = await completeAuthorization(session.value, { state, code, purpose: 'create' }); if (!active()) return; authorizedId.value = completed.account_id
+      persistOperation({ kind: 'authorized', account_id: completed.account_id, payload: configuration() }, owner); callback.value = ''
     }
-    phase = 'local'; const account = await getAccount(authorizedId.value)
-    pendingPatch.value = { id: account.id, payload: { expected_version: account.offer.version, name: name.value.trim(), concurrency: concurrency.value, allowed_models: [...models.value] } }; phase = 'configure'
+    phase = 'local'; const account = await getAccount(authorizedId.value); if (!active()) return
+    pendingPatch.value = { id: account.id, payload: { expected_version: account.offer.version, name: name.value.trim(), concurrency: concurrency.value, allowed_models: [...models.value] } }; persistOperation({ kind: 'configuration', patch: pendingPatch.value, payload: configuration() }, owner); phase = 'configure'
     await updateAccount(pendingPatch.value.id, pendingPatch.value.payload)
-    finish(account.id)
+    if (active()) finish(account.id)
   } catch (e) {
+    if (!active()) return
     apiKey.value = ''; callback.value = ''; const status = (e as { status?: number }).status
-    if (phase === 'complete' && ![400, 401, 403, 404, 410].includes(status || 0)) unknown.value = 'authorization'
-    else if (phase === 'create' && ![400, 401, 403, 404, 410, 422].includes(status || 0)) unknown.value = 'creation'
-    else if (phase === 'configure' && (status === 409 || ![400, 401, 403, 404, 410, 422].includes(status || 0))) { unknown.value = 'configuration'; inspectConflict = status === 409 }
-    else { if (phase === 'complete') { session.value = ''; authUrl.value = '' } if (phase === 'create') operationKey.value = ''; error.value = status === 409 ? t('marketplace.versionConflict') : t('marketplace.authorizationFailed') }
-  } finally { busy.value = false }
+    if (phase === 'complete') unknown.value = 'authorization'
+    else if (phase === 'create') unknown.value = 'creation'
+    else if (phase === 'configure') { unknown.value = 'configuration'; inspectConflict = status === 409 }
+    else { error.value = status === 409 ? t('marketplace.versionConflict') : t('marketplace.authorizationFailed') }
+  } finally { if (active()) busy.value = false }
+  if (!active()) return
   if (unknown.value === 'authorization') await checkAuthorization()
   else if (unknown.value === 'configuration' && inspectConflict) await checkOperation()
 }
-async function checkAuthorization() { if (!session.value || busy.value) return; busy.value = true; try { const result = await getAuthorizationStatus(session.value); if (result.status === 'completed' && result.account_id) { authorizedId.value = result.account_id; unknown.value = '' } else if (result.status === 'failed') { session.value = ''; authUrl.value = ''; unknown.value = ''; error.value = t('marketplace.authorizationFailed') } } catch { /* Keep the uncertain state until the server confirms a result. */ } finally { busy.value = false } }
-async function checkOperation() { if (busy.value) return; busy.value = true; try { if (unknown.value === 'creation') { const result = await getSupplierOperation(operationKey.value); if (result.status === 'completed' && result.account_id) { finish(result.account_id) } else if (result.status === 'failed') { operationKey.value = ''; unknown.value = ''; error.value = t('marketplace.authorizationFailed') } } else if (unknown.value === 'configuration' && pendingPatch.value) { const account = await getAccount(pendingPatch.value.id); const snapshot = pendingPatch.value.payload; if (account.offer.version > snapshot.expected_version) { if (account.name === snapshot.name && account.concurrency === snapshot.concurrency && [...account.offer.allowed_models].sort().join('\0') === [...snapshot.allowed_models].sort().join('\0')) finish(account.id); else { unknown.value = ''; patchConflict.value = account; store.dirty = true } } } } catch { /* Keep the uncertain state. */ } finally { busy.value = false } }
-async function retryPatch() { if (busy.value || unknown.value !== 'configuration' || !pendingPatch.value) return; busy.value = true; let inspect = false; try { await updateAccount(pendingPatch.value.id, pendingPatch.value.payload); finish(pendingPatch.value.id) } catch (e) { if ((e as { status?: number }).status === 409) inspect = true } finally { busy.value = false } if (inspect) await checkOperation() }
-function acknowledgeConflict() { patchConflict.value = null; pendingPatch.value = null; error.value = '' }
+async function retryCreation() { if (busy.value || unknown.value !== 'creation' || !apiKey.value || !operationKey.value) return; const owner = props.ownerId, epoch = generation; const active = () => !disposed && epoch === generation && owner === props.ownerId; busy.value = true; try { await createAccount({ ...configuration(), api_key: apiKey.value }, operationKey.value); if (!active()) return; apiKey.value = ''; finish() } catch { if (active()) { apiKey.value = ''; error.value = t('marketplace.operationUnknown') } } finally { if (active()) busy.value = false } }
+watch(() => props.ownerId, async id => {
+  const epoch = ++generation; busy.value = false; unknown.value = ''; session.value = ''; operationKey.value = ''; authStatus.value = ''; pendingPatch.value = null; authorizedId.value = null; apiKey.value = ''; callback.value = ''; error.value = ''; name.value = ''; models.value = []; concurrency.value = 1; accepted.value = false; patchConflict.value = null; authUrl.value = ''
+  if (!id) return
+  try { const saved = JSON.parse(sessionStorage.getItem(`supplier-create-operation:${id}`) || 'null'); if (!saved?.payload || !['creation', 'authorization', 'authorized', 'configuration'].includes(saved.kind) || typeof saved.payload.name !== 'string' || typeof saved.payload.platform !== 'string' || typeof saved.payload.type !== 'string' || !Number.isInteger(saved.payload.concurrency) || !Array.isArray(saved.payload.allowed_models) || !saved.payload.allowed_models.every((m: unknown) => typeof m === 'string')) return
+    platform.value = saved.payload.platform; await nextTick(); if (disposed || epoch !== generation) return; type.value = saved.payload.type; await nextTick(); if (disposed || epoch !== generation) return
+    name.value = saved.payload.name; models.value = saved.payload.allowed_models; concurrency.value = saved.payload.concurrency; accepted.value = true; step.value = 3
+    if (saved.kind === 'creation' && typeof saved.key === 'string') { operationKey.value = saved.key; unknown.value = 'creation' }
+    else if (saved.kind === 'authorization' && typeof saved.session === 'string') { session.value = saved.session; unknown.value = 'authorization' }
+    else if (saved.kind === 'authorized' && Number.isSafeInteger(saved.account_id)) authorizedId.value = saved.account_id
+    else if (saved.kind === 'configuration' && saved.patch?.id && saved.patch.payload) { pendingPatch.value = saved.patch; authorizedId.value = saved.patch.id; unknown.value = 'configuration' }
+  } catch { /* Ignore invalid recovery metadata. */ }
+}, { immediate: true })
+async function retryAuthorization() { if (busy.value || unknown.value !== 'authorization' || authStatus.value !== 'pending') return; const owner = props.ownerId, epoch = generation; const active = () => !disposed && epoch === generation && owner === props.ownerId; busy.value = true; try { const url = new URL(callback.value); const state = url.searchParams.get('state'), code = url.searchParams.get('code'); if (!state || !code) throw new Error('invalid callback'); const result = await completeAuthorization(session.value, { state, code, purpose: 'create' }); if (!active()) return; callback.value = ''; authorizedId.value = result.account_id; persistOperation({ kind: 'authorized', account_id: result.account_id, payload: configuration() }); unknown.value = ''; authStatus.value = '' } catch { if (active()) { callback.value = ''; authStatus.value = ''; error.value = t('marketplace.operationUnknown') } } finally { if (active()) busy.value = false } }
+async function checkAuthorization() { if (!session.value || busy.value) return; const owner = props.ownerId, epoch = generation; const active = () => !disposed && epoch === generation && owner === props.ownerId; busy.value = true; try { const result = await getAuthorizationStatus(session.value); if (!active()) return; authStatus.value = result.status; error.value = ''; if (result.status === 'completed' && result.account_id) { authorizedId.value = result.account_id; persistOperation({ kind: 'authorized', account_id: result.account_id, payload: configuration() }, owner); unknown.value = '' } else if (result.status === 'failed') { clearOperation(owner); session.value = ''; authUrl.value = ''; unknown.value = ''; error.value = t('marketplace.authorizationFailed') } else if (result.status === 'needs_review') error.value = t('marketplace.authorizationNeedsReview') } catch { /* Keep the uncertain state until the server confirms a result. */ } finally { if (active()) busy.value = false } }
+async function checkOperation() { if (busy.value) return; const owner = props.ownerId, epoch = generation; const active = () => !disposed && epoch === generation && owner === props.ownerId; busy.value = true; try { if (unknown.value === 'creation') { const result = await getSupplierOperation(operationKey.value); if (!active()) return; if (result.status === 'completed' && result.account_id) finish(result.account_id); else if (result.status === 'failed') { operationKey.value = ''; clearOperation(owner); unknown.value = ''; error.value = t('marketplace.authorizationFailed') } else if (result.status === 'needs_review') error.value = t('marketplace.authorizationNeedsReview') } else if (unknown.value === 'configuration' && pendingPatch.value) { const snapshot = pendingPatch.value.payload; const account = await getAccount(pendingPatch.value.id); if (!active()) return; if (account.offer.version > snapshot.expected_version) { if (account.name === snapshot.name && account.concurrency === snapshot.concurrency && [...account.offer.allowed_models].sort().join('\0') === [...snapshot.allowed_models].sort().join('\0')) finish(account.id); else { unknown.value = ''; patchConflict.value = account; store.dirty = true } } } } catch { /* Keep the uncertain state. */ } finally { if (active()) busy.value = false } }
+async function retryPatch() { if (busy.value || unknown.value !== 'configuration' || !pendingPatch.value) return; const owner = props.ownerId, epoch = generation; const active = () => !disposed && epoch === generation && owner === props.ownerId; const patch = pendingPatch.value; busy.value = true; let inspect = false; try { await updateAccount(patch.id, patch.payload); if (active()) finish(patch.id) } catch (e) { if (active() && (e as { status?: number }).status === 409) inspect = true } finally { if (active()) busy.value = false } if (inspect && active()) await checkOperation() }
+function acknowledgeConflict() { clearOperation(); patchConflict.value = null; pendingPatch.value = null; error.value = '' }
 </script>

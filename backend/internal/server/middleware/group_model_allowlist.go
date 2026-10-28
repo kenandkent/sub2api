@@ -31,6 +31,12 @@ import (
 //     local_model_configuration 与 ingress 拒绝原因 model_not_allowed。
 func GroupModelAllowlist() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// A resolver-authorized replay is read-only; the handler still checks
+		// the original payload digest and cannot dispatch on a mismatch.
+		if IsMarketplaceReplayOnly(c) {
+			c.Next()
+			return
+		}
 		apiKey, ok := GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.Group == nil || !apiKey.Group.ModelAllowlistEnabled() {
 			c.Next()

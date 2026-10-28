@@ -22,9 +22,19 @@ describe('offer review', () => {
     const wrapper = mount(ReviewList, { props: { kind: 'offers' }, global: { stubs } }); await flushPromises()
     await wrapper.findAll('button').find(b => b.text() === 'adminMarketplace.review')!.trigger('click')
     await wrapper.find('textarea').setValue('Approved for sharing')
+    expect(wrapper.findAll('button').find(b => b.text() === 'adminMarketplace.confirmReview')!.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test=identity-reviewed]').setValue(true)
     await wrapper.findAll('button').find(b => b.text() === 'adminMarketplace.confirmReview')!.trigger('click'); await flushPromises()
-    expect(api.post).toHaveBeenCalledWith('offers/17/review', { status: 'approved', reason: 'Approved for sharing', expected_version: 4 })
+    expect(api.post).toHaveBeenCalledWith('offers/17/review', { status: 'approved', reason: 'Approved for sharing', expected_version: 4, identity_reviewed: true })
   })
+})
+
+it('sends the reviewed supplier version with its decision', async () => {
+  api.list.mockResolvedValue({ items: [{ user_id: 8, version: 4, status: 'pending', payout_frozen: false, application_fields: {} }], total: 1 }); api.post.mockResolvedValue({})
+  const wrapper = mount(ReviewList, { props: { kind: 'suppliers' }, global: { stubs } }); await flushPromises()
+  await wrapper.findAll('button').find(b => b.text() === 'adminMarketplace.review')!.trigger('click'); await wrapper.find('textarea').setValue('Approved')
+  await wrapper.findAll('button').find(b => b.text() === 'adminMarketplace.confirmReview')!.trigger('click'); await flushPromises()
+  expect(api.post).toHaveBeenCalledWith('suppliers/8/review', { status: 'active', reason: 'Approved', expected_version: 4 })
 })
 
 describe('supplier payout freeze', () => {

@@ -104,6 +104,10 @@ func (r *marketplaceCatalogRepository) Publish(ctx context.Context, actor int64,
 			return nil, err
 		}
 	}
+	notice := fmt.Sprintf("Marketplace policy version %d has been published. New shared requests use the new policy. Review the current marketplace terms and prices.", version)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO announcements(title,content,status,notify_mode,targeting,created_by,updated_by) VALUES('Marketplace policy updated',$1,'active','silent','{}'::jsonb,$2,$2)`, notice, actor); err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}

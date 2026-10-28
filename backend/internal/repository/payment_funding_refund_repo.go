@@ -114,7 +114,7 @@ func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user i
 	if !orderAmount.IsPositive() || bonus.IsNegative() || bonus.GreaterThan(orderAmount) {
 		return true, ErrFundingInvariant
 	}
-	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state IN ('reserved','confirmed')),0), EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='reserved')`, []any{order}, &prior, &open); err != nil {
+	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state IN ('reserved','confirmed')),0)+greatest(coalesce((SELECT CASE WHEN p.status IN ('PARTIALLY_REFUNDED','REFUNDED') AND NOT EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts a WHERE a.order_id=p.id AND a.state='confirmed') THEN p.refund_amount ELSE 0 END FROM payment_orders p WHERE p.id=$1),0),coalesce((SELECT max(legacy_refund_amount) FROM marketplace_funding_admin_operations WHERE kind='reclassify' AND order_id=$1),0)), EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='reserved')`, []any{order}, &prior, &open); err != nil {
 		return true, err
 	}
 	if open || prior.Add(a).GreaterThan(orderAmount) {
@@ -161,6 +161,15 @@ func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user i
 	}
 	if _, err = q.ExecContext(ctx, `INSERT INTO marketplace_payment_refund_attempts(attempt_id,order_id,user_id,lot_id,amount,state) VALUES($1,$2,$3,$4,$5,'reserved')`, attempt, order, user, lot, a); err != nil {
 		return true, err
+	}
+	var classified bool
+	if err = scanSingleRow(ctx, q, `SELECT EXISTS(SELECT 1 FROM marketplace_funding_admin_operations WHERE kind='reclassify' AND order_id=$1)`, []any{order}, &classified); err != nil {
+		return true, err
+	}
+	if classified {
+		if _, err = q.ExecContext(ctx, `INSERT INTO marketplace_refund_reclass_attributions(attempt_id,cash_amount,bonus_amount) VALUES($1,$2,$3)`, attempt, cashPart, bonusPart); err != nil {
+			return true, err
+		}
 	}
 	holdID := "payment-refund:" + attempt
 	if _, err = q.ExecContext(ctx, `INSERT INTO wallet_funding_operations(operation_id,user_id,actor,operation_type,fingerprint) VALUES($1,$2,'payment_refund','refund_hold',$3)`, holdID, user, a.StringFixed(8)); err != nil {
@@ -360,7 +369,7 @@ func (r *userRepository) RecordPaymentChargebackExact(ctx context.Context, order
 	}
 	var prior decimal.Decimal
 	var open bool
-	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='confirmed'),0), EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='reserved')`, []any{order}, &prior, &open); err != nil {
+	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='confirmed'),0)+greatest(coalesce((SELECT CASE WHEN p.status IN ('PARTIALLY_REFUNDED','REFUNDED') AND NOT EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts a WHERE a.order_id=p.id AND a.state='confirmed') THEN p.refund_amount ELSE 0 END FROM payment_orders p WHERE p.id=$1),0),coalesce((SELECT max(legacy_refund_amount) FROM marketplace_funding_admin_operations WHERE kind='reclassify' AND order_id=$1),0)), EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='reserved')`, []any{order}, &prior, &open); err != nil {
 		return err
 	}
 	if !orderAmount.IsPositive() || bonus.IsNegative() || bonus.GreaterThan(orderAmount) {
@@ -403,6 +412,21 @@ func (r *userRepository) RecordPaymentChargebackExact(ctx context.Context, order
 	if !total.Sub(debt).Equal(balance.Add(frozen)) || !held.Equal(frozen) {
 		return ErrFundingInvariant
 	}
+	// Attribute this reversal to previously classified provenance first.
+	// A later reclassification must not count that same amount a second time.
+	var classifiedCash, classifiedBonus, reversedCash, reversedBonus, refundedCash, refundedBonus decimal.Decimal
+	err = scanSingleRow(ctx, q, `SELECT
+ coalesce((SELECT sum(cash_amount) FROM marketplace_funding_admin_operations WHERE kind='reclassify' AND order_id=$1),0),
+ coalesce((SELECT sum(bonus_amount) FROM marketplace_funding_admin_operations WHERE kind='reclassify' AND order_id=$1),0),
+ coalesce((SELECT sum(x.cash_amount) FROM marketplace_chargeback_reclass_attributions x JOIN marketplace_payment_chargebacks c ON c.event_id=x.event_id WHERE c.order_id=$1),0),
+ coalesce((SELECT sum(x.bonus_amount) FROM marketplace_chargeback_reclass_attributions x JOIN marketplace_payment_chargebacks c ON c.event_id=x.event_id WHERE c.order_id=$1),0),
+ coalesce((SELECT sum(x.cash_amount) FROM marketplace_refund_reclass_attributions x JOIN marketplace_payment_refund_attempts a ON a.attempt_id=x.attempt_id WHERE a.order_id=$1 AND a.state IN ('reserved','confirmed')),0),
+ coalesce((SELECT sum(x.bonus_amount) FROM marketplace_refund_reclass_attributions x JOIN marketplace_payment_refund_attempts a ON a.attempt_id=x.attempt_id WHERE a.order_id=$1 AND a.state IN ('reserved','confirmed')),0)`, []any{order}, &classifiedCash, &classifiedBonus, &reversedCash, &reversedBonus, &refundedCash, &refundedBonus)
+	if err != nil {
+		return err
+	}
+	overlapCash := decimal.Min(cashPart, decimal.Max(classifiedCash.Sub(reversedCash).Sub(refundedCash), decimal.Zero))
+	overlapBonus := decimal.Min(bonusPart, decimal.Max(classifiedBonus.Sub(reversedBonus).Sub(refundedBonus), decimal.Zero))
 	revoked := decimal.Zero
 	for _, part := range []struct {
 		lot               int64
@@ -428,10 +452,21 @@ func (r *userRepository) RecordPaymentChargebackExact(ctx context.Context, order
 	if _, err = q.ExecContext(ctx, `INSERT INTO marketplace_payment_chargebacks(event_id,order_id,user_id,actor_id,amount,revoked,buyer_debt,evidence) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, event, order, user, actor, amount, revoked, newDebt, evidence); err != nil {
 		return err
 	}
-	if _, err = q.ExecContext(ctx, `INSERT INTO marketplace_payment_risk_flags(user_id,reason) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING`, user, "external chargeback: "+event); err != nil {
+	if overlapCash.IsPositive() || overlapBonus.IsPositive() {
+		if _, err = q.ExecContext(ctx, `INSERT INTO marketplace_chargeback_reclass_attributions(event_id,cash_amount,bonus_amount) VALUES($1,$2,$3)`, event, overlapCash, overlapBonus); err != nil {
+			return err
+		}
+	}
+	if _, err = q.ExecContext(ctx, `INSERT INTO marketplace_payment_risk_flags(user_id,reason) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET reason=EXCLUDED.reason,version=nextval('marketplace_funding_risk_version_seq')`, user, "external chargeback: "+event); err != nil {
 		return err
 	}
-	return refundPost(ctx, q, "payment-chargeback:"+event, user, "chargeback_loss", "buyer_chargeback_liability", amount)
+	if err = refundPost(ctx, q, "payment-chargeback:"+event, user, "chargeback_loss", "buyer_chargeback_liability", amount); err != nil {
+		return err
+	}
+	// The available projection falls by the full amount, including the part
+	// that becomes buyer debt. Post that signed movement independently from
+	// the bank loss so the buyer wallet can be reconstructed from the ledger.
+	return refundPost(ctx, q, "payment-chargeback-buyer:"+event, user, "buyer_available", "chargeback_recovery", amount)
 }
 
 // BindRefundProviderReference ensures one external refund belongs to at most one attempt.

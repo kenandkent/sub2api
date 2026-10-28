@@ -1,7 +1,6 @@
--- Existing platform-owned accounts remain NULL; ownership never cascades away.
-ALTER TABLE accounts ADD COLUMN owner_user_id BIGINT REFERENCES users(id) ON DELETE RESTRICT;
-CREATE INDEX accounts_owner_user_id_idx ON accounts(owner_user_id);
-ALTER TABLE accounts ADD CONSTRAINT accounts_id_owner_user_id_key UNIQUE (id, owner_user_id);
+-- The nullable owner and both indexes are prepared by 249. Attaching the
+-- prebuilt unique index avoids scanning accounts under an exclusive lock.
+ALTER TABLE accounts ADD CONSTRAINT accounts_id_owner_user_id_key UNIQUE USING INDEX accounts_id_owner_user_id_key;
 
 CREATE TABLE supplier_profiles (
     id BIGSERIAL PRIMARY KEY,

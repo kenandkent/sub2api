@@ -20,8 +20,7 @@ export const useWorkModeStore = defineStore('workMode', () => {
     localStorage.setItem(`work-mode:${userId}`, value)
   }
   function canUseSupplier() {
-    return !!capabilities.value?.marketplace_enabled &&
-      capabilities.value.allowed_workspaces.includes('supplier') &&
+    return !!capabilities.value?.allowed_workspaces.includes('supplier') &&
       ['active', 'suspended'].includes(capabilities.value.supplier_status)
   }
   function targetFor(value: WorkMode) {

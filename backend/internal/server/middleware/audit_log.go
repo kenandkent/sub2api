@@ -109,6 +109,8 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
+	"GET /api/v1/admin/marketplace/funding-risks":                    "admin.marketplace.funding_risks.read",
+	"GET /api/v1/admin/marketplace/receipts/:id":                     "admin.marketplace.receipt.read",
 	"GET /api/v1/admin/marketplace/receipts/:id/execution-incidents": "admin.marketplace.execution_incidents.read",
 	"GET /api/v1/admin/accounts/data":                                "admin.accounts.export",
 	"GET /api/v1/admin/proxies/data":                                 "admin.proxies.export",
@@ -148,6 +150,9 @@ var auditActionOverrides = map[string]string{
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
 // 这类 body 的凭证内嵌在普通字符串值里，键级脱敏无法覆盖，整体不入库。
 var auditBodyOmittedRoutes = map[string]struct{}{
+	"POST /api/v1/admin/marketplace/vault/rotate":                     {},
+	"POST /api/v1/admin/marketplace/funding-reclassifications":        {},
+	"POST /api/v1/admin/marketplace/funding-risks/:id/clear":          {},
 	"POST /api/v1/admin/marketplace/funding-chargebacks":              {},
 	"POST /api/v1/admin/marketplace/receipts/:id/execution-incidents": {},
 	"POST /api/v1/supplier/authorizations/:id/complete":               {},

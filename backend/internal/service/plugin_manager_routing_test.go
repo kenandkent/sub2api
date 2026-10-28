@@ -133,3 +133,21 @@ func TestPluginManagerStatusReportsNotRunningWithoutRuntime(t *testing.T) {
 	assert.Equal(t, "插件未运行", resp.Message)
 	assert.Empty(t, resp.StatusJson)
 }
+
+func TestSupplierOAuthNeverEntersPluginTransport(t *testing.T) {
+	manager := &PluginManager{}
+	manager.route.Store(&pluginRoute{pluginID: 1, rolloutPercent: 100, unavailable: "plugin tripwire"})
+	upstream := &pluginRoutingHTTPUpstream{}
+	gateway := &OpenAIGatewayService{pluginManager: manager, httpUpstream: upstream}
+	owner := int64(17)
+	account := &Account{ID: 22, OwnerUserID: &owner, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.test/v1/responses", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer supplier-secret")
+	resp, err := gateway.doOpenAIUpstream(req, "", account)
+	require.NoError(t, err, "supplier must never enter the plugin tripwire")
+	require.NotNil(t, resp)
+	_ = resp.Body.Close()
+	require.Equal(t, 1, upstream.doCalls)
+	require.False(t, manager.ShouldRouteOpenAIOAuth(account))
+}

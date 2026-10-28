@@ -53,14 +53,25 @@ func TestSupplierAccountRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Renamed", a.Name)
 	require.Equal(t, int64(2), a.Offer.Version)
-	a, err = repo.Transition(ctx, owner, id, 2, "submit")
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_policies(version,fee_bps,hold_hours,max_supplier_concurrency,minimum_payout_usd,published_by,published_at) VALUES(1,2000,24,3,1,$1,now())`, other)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_price_versions(version,rules,published_by,published_at) VALUES(1,'{}',$1,now())`, other)
+	require.NoError(t, err)
+	_, err = repo.TransitionWithPolicy(ctx, owner, id, 2, "submit", 2)
+	require.Error(t, err, "stale policy must not be acknowledged")
+	var acceptances int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM sharing_offer_policy_acceptances WHERE offer_id=$1`, a.Offer.ID).Scan(&acceptances))
+	require.Zero(t, acceptances)
+	a, err = repo.TransitionWithPolicy(ctx, owner, id, 2, "submit", 1)
 	require.NoError(t, err)
 	require.Equal(t, "pending_review", a.Offer.ReviewStatus)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM sharing_offer_policy_acceptances WHERE offer_id=$1 AND owner_user_id=$2 AND policy_version=1`, a.Offer.ID, owner).Scan(&acceptances))
+	require.Equal(t, 1, acceptances)
 	var group int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups(name) VALUES($1) RETURNING id`, uniqueTestValue(t, "supplier-group")).Scan(&group))
-	_, err = repo.Review(ctx, other, a.Offer.ID, 2, "approved", "reviewed", []int64{group})
+	_, err = repo.Review(ctx, other, a.Offer.ID, 2, "approved", "reviewed", []int64{group}, true)
 	require.Error(t, err)
-	a, err = repo.Review(ctx, other, a.Offer.ID, 3, "approved", "reviewed", []int64{group})
+	a, err = repo.Review(ctx, other, a.Offer.ID, 3, "approved", "reviewed", []int64{group}, true)
 	require.NoError(t, err)
 	require.Equal(t, "approved", a.Offer.ReviewStatus)
 	require.True(t, a.Offer.Enabled)
@@ -69,12 +80,15 @@ func TestSupplierAccountRepositoryLifecycle(t *testing.T) {
 	require.Equal(t, 1, count)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sharing_offer_review_audits WHERE offer_id=$1`, a.Offer.ID).Scan(&count))
 	require.Equal(t, 1, count)
+	var identityReviewed bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT identity_reviewed FROM sharing_offer_review_audits WHERE offer_id=$1`, a.Offer.ID).Scan(&identityReviewed))
+	require.True(t, identityReviewed)
 	rotated, err := repo.ReplaceCredentials(ctx, owner, id, "rotate-1", "rotate-digest", "sk-another-strong-secret-credential", a.Offer.Version)
 	require.NoError(t, err)
 	require.Equal(t, id, *rotated.AccountID)
 	a, err = repo.Get(ctx, owner, id)
 	require.NoError(t, err)
-	require.Equal(t, "pending_review", a.Offer.ReviewStatus)
+	require.Equal(t, "draft", a.Offer.ReviewStatus, "replaced credentials require renewed policy confirmation")
 	require.False(t, a.Offer.Enabled)
 	retryRotate, err := repo.ReplaceCredentials(ctx, owner, id, "rotate-1", "rotate-digest", "sk-another-strong-secret-credential", 4)
 	require.NoError(t, err)
@@ -95,4 +109,20 @@ func TestSupplierAccountRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "pending", draftAccount.CredentialStatus)
 
+}
+
+func TestPendingOfferModelChangeRequiresNewPolicyConfirmation(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
+	ctx := context.Background()
+	var owner, account int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES ($1,'x') RETURNING id`, uniqueTestValue(t, "policy-model")+"@example.com").Scan(&owner))
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO supplier_profiles(user_id,status) VALUES($1,'active')`, owner)
+	require.NoError(t, err)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(owner_user_id,name,platform,type,credentials,concurrency) VALUES($1,'offer','openai','apikey','{}',1) RETURNING id`, owner).Scan(&account))
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO sharing_offers(account_id,owner_user_id,review_status,allowed_models) VALUES($1,$2,'pending_review','["m1"]')`, account, owner)
+	require.NoError(t, err)
+	models := []string{"m1", "m2"}
+	updated, err := NewSupplierAccountRepository(integrationDB, nil).Patch(ctx, owner, account, service.SupplierAccountPatch{ExpectedVersion: 1, AllowedModels: &models})
+	require.NoError(t, err)
+	require.Equal(t, "draft", updated.Offer.ReviewStatus)
 }

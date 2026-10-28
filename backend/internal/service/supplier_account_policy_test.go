@@ -42,10 +42,13 @@ func (s *policyAccountStore) Patch(context.Context, int64, int64, SupplierAccoun
 func (s *policyAccountStore) Transition(context.Context, int64, int64, int64, string) (*SupplierAccountDetail, error) {
 	return s.account, nil
 }
+func (s *policyAccountStore) TransitionWithPolicy(context.Context, int64, int64, int64, string, int64) (*SupplierAccountDetail, error) {
+	return s.account, nil
+}
 func (s *policyAccountStore) GetForReview(context.Context, int64) (*SupplierAccountDetail, error) {
 	return s.account, nil
 }
-func (s *policyAccountStore) Review(context.Context, int64, int64, int64, string, string, []int64) (*SupplierAccountDetail, error) {
+func (s *policyAccountStore) Review(context.Context, int64, int64, int64, string, string, []int64, bool) (*SupplierAccountDetail, error) {
 	return s.account, nil
 }
 func TestSupplierAccountsEnforcePublishedConcurrency(t *testing.T) {
@@ -67,18 +70,18 @@ func TestSupplierAccountsEnforcePublishedConcurrency(t *testing.T) {
 		_, err = svc.Transition(ctx, 1, 1, 1, action)
 		require.Error(t, err, action)
 	}
-	_, err = svc.AdminReview(ctx, 1, 1, 1, "approved", "valid")
+	_, err = svc.AdminReview(ctx, 1, 1, 1, "approved", "valid", true)
 	require.Error(t, err)
 	cat.max = 3
 	_, err = svc.Create(ctx, 1, "key", create)
 	require.NoError(t, err)
 	_, err = svc.Patch(ctx, 1, 1, SupplierAccountPatch{ExpectedVersion: 1})
 	require.NoError(t, err)
-	_, err = svc.Transition(ctx, 1, 1, 1, "submit")
+	_, err = svc.Transition(ctx, 1, 1, 1, "submit", 1)
 	require.NoError(t, err)
 	_, err = svc.Transition(ctx, 1, 1, 1, "resume")
 	require.NoError(t, err)
-	_, err = svc.AdminReview(ctx, 1, 1, 1, "approved", "valid")
+	_, err = svc.AdminReview(ctx, 1, 1, 1, "approved", "valid", true)
 	require.NoError(t, err)
 	cat.err = errors.New("unpublished")
 	_, err = svc.Create(ctx, 1, "key", create)
@@ -95,4 +98,22 @@ func TestSupplierOAuthCreateRequiresPublishedPolicy(t *testing.T) {
 	catalog.err = nil
 	catalog.max = 1
 	require.NoError(t, svc.AuthorizeSupplierAuthorization(context.Background(), 1, "create", 0))
+}
+
+func TestSupplierSubmitRequiresAcknowledgedPolicyVersion(t *testing.T) {
+	cfg := &config.Config{Marketplace: config.MarketplaceConfig{Enabled: true}}
+	cat := &policyAccountCatalog{max: 2}
+	store := &policyAccountStore{account: &SupplierAccountDetail{Platform: "openai", Concurrency: 1, CredentialStatus: "configured", Offer: SupplierOffer{AllowedModels: []string{"m"}}}}
+	svc := NewSupplierAccountService(cfg, store, authorizationPolicyProfiles{profile: &SupplierProfile{Status: SupplierStatusActive}}, cat, nil)
+	_, err := svc.Transition(context.Background(), 1, 1, 1, "submit")
+	require.Error(t, err, "submission must acknowledge a specific published policy")
+}
+
+func TestOfferApprovalRequiresManualIdentityAttestation(t *testing.T) {
+	cfg := &config.Config{Marketplace: config.MarketplaceConfig{Enabled: true}}
+	cat := &policyAccountCatalog{max: 2}
+	store := &policyAccountStore{account: &SupplierAccountDetail{Platform: "openai", Concurrency: 1, CredentialStatus: "configured", Offer: SupplierOffer{AllowedModels: []string{"m"}}}}
+	svc := NewSupplierAccountService(cfg, store, authorizationPolicyProfiles{profile: &SupplierProfile{Status: SupplierStatusActive}}, cat, nil)
+	_, err := svc.AdminReview(context.Background(), 1, 1, 1, "approved", "approved")
+	require.Error(t, err, "fingerprint presence is not manual identity verification")
 }

@@ -45,6 +45,10 @@ func (runtimeLockStub) AcquireRefreshLock(context.Context, string, time.Duration
 	return true, nil
 }
 func (runtimeLockStub) ReleaseRefreshLock(context.Context, string) error { return nil }
+func (runtimeLockStub) AcquireSupplierRefreshLock(context.Context, string, string, time.Duration) (bool, error) {
+	return true, nil
+}
+func (runtimeLockStub) ReleaseSupplierRefreshLock(context.Context, string, string) error { return nil }
 
 func runtimeTestAccount(t *testing.T, creds map[string]any) (*CredentialEnvelope, *Account, *runtimeStoreStub) {
 	t.Helper()

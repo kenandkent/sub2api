@@ -499,3 +499,32 @@ func TestGroupModelAllowlistDuplicateIdenticalModelsAllowed(t *testing.T) {
 		t.Fatalf("expected handler to run once, got %v", *calls)
 	}
 }
+
+func TestGroupModelAllowlistReplayOnlyBypass(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyAPIKey), allowlistAPIKey(true, "allowed"))
+		if c.GetHeader("X-Test-Replay") == "true" {
+			c.Set(marketplaceReplayOnlyKey, true)
+		}
+		c.Next()
+	})
+	router.Use(GroupModelAllowlist())
+	router.POST("/v1/responses", func(c *gin.Context) { c.Status(http.StatusOK) })
+	request := func(replay bool) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"no-longer-allowed"}`))
+		if replay {
+			r.Header.Set("X-Test-Replay", "true")
+		}
+		router.ServeHTTP(w, r)
+		return w
+	}
+	if got := request(false).Code; got == http.StatusOK {
+		t.Fatal("new request must remain subject to allowlist")
+	}
+	if got := request(true).Code; got != http.StatusOK {
+		t.Fatalf("replay must reach digest check, got %d", got)
+	}
+}

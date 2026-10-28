@@ -29,26 +29,95 @@ type marketplaceRequestState struct {
 	digest            string
 	idempotency       *string
 	writer            *marketplaceResponseWriter
+	dispatchErr       error
+	clientContext     context.Context
 }
 
 func (h *OpenAIGatewayHandler) SetMarketplaceGateway(g *service.MarketplaceGateway) {
 	h.marketplaceGateway = g
 }
 
+const marketplaceRawDigestKey = "marketplace_raw_request_digest"
+
+func marketplaceRawDigest(protocol string, body []byte) string {
+	return service.HashUsageRequestPayload(append([]byte(protocol+"\x00"), body...))
+}
+
+// lookupMarketplaceReplay is read-only. When admission set replay-only, every
+// miss or lookup error terminates the request before any new dispatch.
+func (h *OpenAIGatewayHandler) lookupMarketplaceReplay(c *gin.Context, key *service.APIKey, digest string, required bool) bool {
+	raw := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if h.marketplaceGateway == nil || key == nil || key.GroupID == nil || raw == "" {
+		if required {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Shared request lookup unavailable")
+			return true
+		}
+		return false
+	}
+	lookup, ok := h.marketplaceGateway.Store.(interface {
+		LookupReplay(context.Context, service.MarketplacePrepareCommand) (*service.MarketplaceReceipt, error)
+	})
+	if !ok {
+		if required {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Shared request lookup unavailable")
+			return true
+		}
+		return false
+	}
+	command := service.MarketplacePrepareCommand{BuyerUserID: key.UserID, APIKeyID: key.ID, GroupID: *key.GroupID, RequestDigest: digest, IdempotencyKey: &raw}
+	receipt, err := lookup.LookupReplay(c.Request.Context(), command)
+	if err != nil {
+		status, code := http.StatusServiceUnavailable, "api_error"
+		if errors.Is(err, service.ErrMarketplaceIdempotencyConflict) {
+			status, code = http.StatusConflict, "idempotency_conflict"
+		}
+		h.errorResponse(c, status, code, "Shared request lookup failed")
+		return true
+	}
+	if receipt != nil {
+		writeMarketplaceReplay(c, receipt)
+		return true
+	}
+	if required {
+		h.errorResponse(c, http.StatusConflict, "idempotency_conflict", "Shared request replay does not match")
+		return true
+	}
+	return false
+}
+
 // marketplaceRequest returns nil for ordinary groups and fails closed when a
 // shared group cannot be priced or is disabled.
 func (h *OpenAIGatewayHandler) marketplaceRequest(c *gin.Context, key *service.APIKey, body []byte, model, protocol string) (*marketplaceRequestState, []byte, bool) {
 	gateway := h.marketplaceGateway
-	if gateway == nil || gateway.Catalog == nil || key == nil || key.GroupID == nil {
+	replayOnly := middleware2.IsMarketplaceReplayOnly(c)
+	if gateway == nil || key == nil || key.GroupID == nil {
+		if replayOnly {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Shared request lookup unavailable")
+			return nil, nil, false
+		}
 		return nil, body, true
 	}
-	shared, err := gateway.Catalog.IsSharedGroup(c.Request.Context(), *key.GroupID)
-	if err != nil {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Marketplace catalog unavailable")
+	if !replayOnly {
+		if gateway.Catalog == nil {
+			return nil, body, true
+		}
+		shared, err := gateway.Catalog.IsSharedGroup(c.Request.Context(), *key.GroupID)
+		if err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Marketplace catalog unavailable")
+			return nil, nil, false
+		}
+		if !shared {
+			return nil, body, true
+		}
+	}
+	digest := marketplaceRawDigest(protocol, body)
+	if v, ok := c.Get(marketplaceRawDigestKey); ok {
+		if raw, ok := v.(string); ok && raw != "" {
+			digest = raw
+		}
+	}
+	if h.lookupMarketplaceReplay(c, key, digest, replayOnly) {
 		return nil, nil, false
-	}
-	if !shared {
-		return nil, body, true
 	}
 	if h.cfg == nil || !h.cfg.Marketplace.Enabled || !h.cfg.Marketplace.DispatchEnabled || config.NormalizeRunMode(h.cfg.RunMode) != config.RunModeStandard || gateway.Store == nil || gateway.Runtime == nil || key.Group == nil || key.Group.Platform != service.PlatformOpenAI {
 		h.errorResponse(c, http.StatusServiceUnavailable, "marketplace_disabled", "Marketplace dispatch is unavailable")
@@ -61,6 +130,11 @@ func (h *OpenAIGatewayHandler) marketplaceRequest(c *gin.Context, key *service.A
 	quote, contextLimit, outputLimit, err := gateway.Catalog.QuoteTemplate(c.Request.Context(), *key.GroupID, model, protocol)
 	if err != nil || quote.RateMultiplier == nil || quote.PublicModel != model || quote.Protocol != protocol || contextLimit <= 0 || outputLimit <= 0 || outputLimit > contextLimit {
 		h.errorResponse(c, http.StatusBadRequest, "price_unavailable", "Shared model price is unavailable")
+		return nil, nil, false
+	}
+	providerBound, attested := h.cfg.Marketplace.AttestedInputCeiling(key.Group.Platform, quote.ActualModel)
+	if !attested || contextLimit < providerBound {
+		h.errorResponse(c, http.StatusServiceUnavailable, "price_unavailable", "Shared provider input limit is not verified")
 		return nil, nil, false
 	}
 	capped, err := service.MarketplaceEnforceTextRequest(body, protocol, outputLimit)
@@ -95,7 +169,6 @@ func (h *OpenAIGatewayHandler) marketplaceRequest(c *gin.Context, key *service.A
 	if raw := strings.TrimSpace(c.GetHeader("Idempotency-Key")); raw != "" {
 		idempotency = &raw
 	}
-	digest := service.HashUsageRequestPayload(append([]byte(protocol+"\x00"), body...))
 	state := &marketplaceRequestState{gateway: gateway, quote: quote, budget: budget, outputLimit: outputLimit, buyer: key.UserID, key: key.ID, group: *key.GroupID, digest: digest, idempotency: idempotency}
 	if strings.TrimSpace(c.GetHeader("x-codex-turn-state")) != "" {
 		h.errorResponse(c, http.StatusBadRequest, "unsupported_shared_protocol", "Unsupported shared session reference")
@@ -118,6 +191,17 @@ func (h *OpenAIGatewayHandler) marketplaceRequest(c *gin.Context, key *service.A
 	}
 	return state, capped, true
 }
+func writeMarketplaceReplay(c *gin.Context, receipt *service.MarketplaceReceipt) {
+	status, code := http.StatusConflict, "operation_in_progress"
+	switch receipt.Status {
+	case "settled", "voided":
+		status, code = http.StatusOK, "operation_completed"
+	case "needs_review", "usage_pending":
+		code = "operation_needs_review"
+	}
+	c.JSON(status, gin.H{"receipt_id": receipt.ID, "status": receipt.Status, "code": code})
+}
+
 func (s *marketplaceRequestState) reserve(c *gin.Context, h *OpenAIGatewayHandler) bool {
 	receipt, created, err := s.gateway.Store.PrepareAndReserve(c.Request.Context(), service.MarketplacePrepareCommand{BuyerUserID: s.buyer, APIKeyID: s.key, GroupID: s.group, RequestDigest: s.digest, IdempotencyKey: s.idempotency}, s.budget)
 	if err != nil {
@@ -131,10 +215,15 @@ func (s *marketplaceRequestState) reserve(c *gin.Context, h *OpenAIGatewayHandle
 		return false
 	}
 	if !created || receipt == nil {
-		h.errorResponse(c, http.StatusConflict, "operation_in_progress", "Shared request already exists")
+		if receipt == nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Shared request unavailable")
+			return false
+		}
+		writeMarketplaceReplay(c, receipt)
 		return false
 	}
 	s.receipt = receipt
+	s.clientContext = c.Request.Context()
 	c.Request = c.Request.WithContext(service.WithMarketplaceOutputLimit(service.WithMarketplaceExpectedModel(service.WithMarketplaceBuyer(c.Request.Context(), s.buyer), s.quote.ActualModel), s.outputLimit))
 	return true
 }
@@ -171,6 +260,7 @@ func (s *marketplaceRequestState) dispatch(ctx context.Context, a *service.Accou
 	}
 	prepared.Extra["openai_passthrough"] = false
 	prepared.Extra["openai_oauth_passthrough"] = false
+	prepared.Extra["openai_ws_force_http"] = true
 	q := s.quote
 	q.AccountID = a.ID
 	q.OwnerUserID = *a.OwnerUserID
@@ -181,20 +271,71 @@ func (s *marketplaceRequestState) dispatch(ctx context.Context, a *service.Accou
 	}
 	rate := decimal.NewFromFloat(multiplier)
 	q.AccountRateMultiplier = &rate
-	attempt, err := s.gateway.Store.Dispatch(ctx, s.receipt.ID, q)
+	s.quote = q
+	return prepared, nil
+}
+
+func (s *marketplaceRequestState) commitDispatch(ctx context.Context) error {
+	if s.clientContext != nil && s.clientContext.Err() != nil {
+		return s.clientContext.Err()
+	}
+	if s.attempt != nil {
+		return service.ErrMarketplaceRequestState
+	}
+	attempt, err := s.gateway.Store.Dispatch(ctx, s.receipt.ID, s.quote)
 	if err != nil {
-		return nil, err
+		s.dispatchErr = err
+		return err
 	}
 	if attempt == nil {
-		return nil, service.ErrMarketplaceRequestState
+		s.dispatchErr = service.ErrMarketplaceRequestState
+		return s.dispatchErr
 	}
-	s.quote = q
 	s.attempt = attempt
-	return prepared, nil
+	return nil
+}
+
+// Bound downstream writes as well as upstream work. Without this, a connected
+// client that stops reading can keep the account slot occupied beyond its TTL.
+func marketplaceBoundClientWrites(c *gin.Context, execution context.Context) (func(), error) {
+	deadline, ok := execution.Deadline()
+	if !ok {
+		return nil, errors.New("shared execution deadline unavailable")
+	}
+	controller := http.NewResponseController(c.Writer)
+	if err := controller.SetWriteDeadline(deadline); err != nil {
+		return nil, err
+	}
+	return func() { _ = controller.SetWriteDeadline(time.Time{}) }, nil
+}
+
+func (s *marketplaceRequestState) clientConnected(c *gin.Context) bool {
+	if s.clientContext != nil {
+		return s.clientContext.Err() == nil
+	}
+	return c.Request.Context().Err() == nil
+}
+func (s *marketplaceRequestState) respondTimeout(c *gin.Context, h *OpenAIGatewayHandler, streamStarted bool) {
+	if s != nil && c.Request.Context().Err() != nil && s.clientConnected(c) {
+		h.handleStreamingAwareError(c, http.StatusGatewayTimeout, "api_error", "Shared execution timed out", streamStarted)
+	}
 }
 func (s *marketplaceRequestState) finish(c *gin.Context, result *service.OpenAIForwardResult, forwardErr error) {
 	original := s.writer.ResponseWriter
 	defer func() { c.Writer = original }()
+	if s.attempt == nil {
+		if s.writer.status >= 400 && s.writer.Written() && !s.writer.failed {
+			_ = s.writer.Finish(true)
+		} else if !original.Written() && s.clientConnected(c) {
+			c.Writer = original
+			status := http.StatusBadRequest
+			if s.dispatchErr != nil {
+				status = http.StatusServiceUnavailable
+			}
+			c.JSON(status, gin.H{"error": gin.H{"type": "api_error", "message": "Shared request could not be dispatched"}})
+		}
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 15*time.Second)
 	defer cancel()
 	captured := false
@@ -208,12 +349,36 @@ func (s *marketplaceRequestState) finish(c *gin.Context, result *service.OpenAIF
 	if !captured {
 		_ = s.gateway.Store.MarkReview(ctx, s.receipt.ID, s.attempt.ID, "usage_or_capture_unavailable")
 	}
-	_ = s.writer.Finish(captured)
-	if !captured && !original.Written() && c.Request.Context().Err() == nil {
+	deliveryErr := s.writer.Finish(captured)
+	if deliveryErr != nil && s.clientConnected(c) {
 		c.Writer = original
-		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "api_error", "message": "Shared usage settlement unavailable"}})
+		if !original.Written() {
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "api_error", "message": "Shared response delivery failed", "receipt_id": s.receipt.ID}})
+		} else if s.writer.streaming {
+			_, _ = original.WriteString("event: error\ndata: {\"error\":{\"type\":\"api_error\",\"message\":\"Shared response delivery failed\",\"receipt_id\":\"" + s.receipt.ID + "\"}}\n\n")
+			original.Flush()
+		}
+		return
 	}
-	_ = forwardErr
+	if captured && forwardErr != nil && !s.writer.terminal && s.clientConnected(c) {
+		c.Writer = original
+		if !original.Written() {
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "upstream_error", "message": "Shared upstream request failed", "receipt_id": s.receipt.ID}})
+		} else if s.writer.streaming {
+			_, _ = original.WriteString("event: error\ndata: {\"error\":{\"type\":\"upstream_error\",\"message\":\"Shared upstream request failed\",\"receipt_id\":\"" + s.receipt.ID + "\"}}\n\n")
+			original.Flush()
+		}
+		return
+	}
+	if !captured && s.clientConnected(c) {
+		c.Writer = original
+		if !original.Written() {
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "api_error", "message": "Shared usage settlement unavailable", "receipt_id": s.receipt.ID}})
+		} else if s.writer.streaming {
+			_, _ = original.WriteString("event: error\ndata: {\"error\":{\"type\":\"api_error\",\"message\":\"Shared usage settlement unavailable\",\"receipt_id\":\"" + s.receipt.ID + "\"}}\n\n")
+			original.Flush()
+		}
+	}
 }
 func (s *marketplaceRequestState) scopeSession(value string) string {
 	return service.HashUsageRequestPayload([]byte(strings.Join([]string{"marketplace", strconv.FormatInt(s.buyer, 10), strconv.FormatInt(s.key, 10), value}, "\x00")))
@@ -234,6 +399,10 @@ func marketplaceSupportedRoute(method, path string) bool {
 // MarketplaceRouteGuard is attached after API-key authentication on gateway
 // routes so unsupported modalities cannot fall through to ordinary billing.
 func (h *OpenAIGatewayHandler) MarketplaceRouteGuard(c *gin.Context) {
+	if middleware2.IsMarketplaceReplayOnly(c) {
+		c.Next()
+		return
+	}
 	if h == nil || h.marketplaceGateway == nil || h.marketplaceGateway.Catalog == nil {
 		c.Next()
 		return

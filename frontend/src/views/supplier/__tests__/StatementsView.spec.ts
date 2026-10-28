@@ -12,4 +12,15 @@ describe('statements', () => {
     await w.get('[data-test=statement-detail]').trigger('click'); await flushPromises()
     expect(w.text()).toContain('123456789012345.12345678'); expect(w.text()).toContain('0.0123'); expect(w.text()).toContain('refund-1')
   })
+  it('does not mix a previous statement’s delayed entries with a newly selected statement', async () => {
+    let resolveFirst!: (value: unknown) => void
+    const a = { id: 1, month: '2026-01', version: 1 }, b = { id: 2, month: '2026-02', version: 1 }
+    api.listStatements.mockResolvedValue({ items: [a, b], page: 1, pages: 1 }); api.getStatement.mockImplementation(async (id: number) => id === 1 ? a : b)
+    api.listStatementEntries.mockImplementation((id: number) => id === 1 ? new Promise(r => { resolveFirst = r }) : Promise.resolve({ items: [{ operation_id: 'B-entry', kind: 'capture' }], page: 1, pages: 1 }))
+    const w = mount(StatementsView, { global: { stubs: { BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' }, AppLayout: { template: '<div><slot /></div>' }, TablePageLayout: { template: '<div><slot name="filters"/><slot name="table"/></div>' } } } }); await flushPromises()
+    await w.findAll('[data-test=statement-detail]')[0].trigger('click'); await flushPromises()
+    await w.findAll('[data-test=statement-detail]')[1].trigger('click'); await flushPromises()
+    resolveFirst({ items: [{ operation_id: 'A-entry', kind: 'capture' }], page: 1, pages: 1 }); await flushPromises()
+    expect(w.text()).toContain('2026-02'); expect(w.text()).toContain('B-entry'); expect(w.text()).not.toContain('A-entry')
+  })
 })

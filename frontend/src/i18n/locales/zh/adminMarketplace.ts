@@ -1,4 +1,12 @@
 export default {
+  maturity_failures: '收益结算失败数', maturity_oldest_failure_age_seconds: '最早收益结算失败（秒）',
+
+  retryPayloadMismatch: '输入内容与原操作不一致，请重新输入相同内容后重试。',
+
+  identityReviewed: '我已审核此账号的身份及所有权证据。',
+
+  lookupReceipt: '查询收据', capturedAmount: '已扣款', refundedAmount: '已退款', refundableAmount: '可退金额', buyer_ledger_differences: '买方账本差异', cache_backlog: '缓存待处理', cache_oldest_age_seconds: '最早缓存事件（秒）', maturity_backlog: '收益结算待处理', maturity_oldest_age_seconds: '最早待结算项（秒）',
+
   incidentReceipt: '请求记录编号（UUID）',
   executionIncident: "执行异常登记",
   incidentRecordOnly: "这里只登记异常与证据，补偿金额由人工核定。不会再次扣除消费者余额，也不会自动计入供应者收益。",

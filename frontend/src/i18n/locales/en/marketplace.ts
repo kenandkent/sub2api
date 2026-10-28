@@ -1,4 +1,16 @@
-export default { marketplace: {
+export default {
+ marketplace: {
+  operationReference: 'Operation reference',
+
+  authorizationNeedsReview: 'Authorization needs manual review. Contact support and keep this operation reference; do not start another authorization.',
+
+  reviewPolicySummary: 'Policy version {version}; platform fee {fee} basis points; settlement hold {hours} hours.',
+
+  opening_debt: 'Opening debt', closing_debt: 'Closing debt', debt_offset: 'Debt offset', supplierDebtOffset: 'Debt offset', credentialFingerprint: 'Credential fingerprint', present: 'Present', absent: 'Absent',
+
+  acceptReviewPolicy: 'I acknowledge these current prices and terms.',
+  policyChanged: 'The policy or account changed. Review the latest terms before submitting again.',
+
   consumer: 'Consumer mode', supplier: 'Supplier mode', switchWorkspace: 'Switch workspace',
   unsavedTitle: 'Unsaved changes', unsavedMessage: 'Discard unsaved changes and switch?',
   onboarding: 'Supplier application', overview: 'Supplier overview',
@@ -201,7 +213,7 @@ export default { marketplace: {
   payoutStatus_risk_cancelled: 'Cancelled after risk review',
   entryRefund: 'Refund',
   entryCapture: 'Charge',
-  destinationRecoveryHelp: 'The entered payment details were cleared when you left this page. Check the status again later or contact support before submitting another destination.',
+  destinationRecoveryHelp: 'The payment details were cleared when you left. Re-enter the same details to retry the same operation, or check its status.',
   earningStatus_pending: 'Pending settlement',
   earningStatus_matured: 'Settled',
   earningStatus_reversed: 'Reversed',

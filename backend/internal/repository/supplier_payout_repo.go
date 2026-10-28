@@ -66,6 +66,9 @@ func (r *SupplierPayoutRepository) CreateDestination(ctx context.Context, owner 
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockPayoutSupplier(ctx, tx, owner); err != nil {
+		return nil, err
+	}
 	fp := payoutFingerprint([]any{"destination", owner, mask})
 	var result service.PayoutDestination
 	found, err := payoutOp(ctx, tx, op, fp, &result)
@@ -125,6 +128,19 @@ func lockPayoutAdmin(ctx context.Context, tx *sql.Tx, id int64) bool {
 	err := tx.QueryRowContext(ctx, `SELECT role,status FROM users WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, id).Scan(&role, &status)
 	return err == nil && role == "admin" && status == "active"
 }
+
+// Suspended suppliers retain access to earned funds unless payouts are frozen
+// separately; pending and rejected applicants do not have payout capability.
+func lockPayoutSupplier(ctx context.Context, tx *sql.Tx, owner int64) error {
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM supplier_profiles WHERE user_id=$1 FOR SHARE`, owner).Scan(&status); err != nil {
+		return service.ErrPayoutInvalid
+	}
+	if status != "active" && status != "suspended" {
+		return service.ErrPayoutInvalid
+	}
+	return nil
+}
 func (r *SupplierPayoutRepository) VerifyDestination(ctx context.Context, id, admin int64, op, evidence string) (*service.PayoutDestination, error) {
 	if strings.TrimSpace(evidence) == "" || len(evidence) > 4096 {
 		return nil, service.ErrPayoutInvalid
@@ -145,6 +161,13 @@ func (r *SupplierPayoutRepository) VerifyDestination(ctx context.Context, id, ad
 	}
 	if found {
 		return &d, tx.Commit()
+	}
+	var owner int64
+	if err = tx.QueryRowContext(ctx, `SELECT supplier_id FROM supplier_payout_destinations WHERE id=$1 FOR UPDATE`, id).Scan(&owner); err != nil {
+		return nil, err
+	}
+	if err = lockPayoutSupplier(ctx, tx, owner); err != nil {
+		return nil, err
 	}
 	err = tx.QueryRowContext(ctx, `UPDATE supplier_payout_destinations SET verified=true,verified_by=$2,verified_at=now(),verification_evidence=$3 WHERE id=$1 AND supplier_id<>$2 AND NOT verified RETURNING id,supplier_id,masked_label,version,verified,created_at`, id, admin, evidence).Scan(&d.ID, &d.SupplierID, &d.MaskedLabel, &d.Version, &d.Verified, &d.CreatedAt)
 	if err != nil {
@@ -187,7 +210,9 @@ func lockPayoutWallet(ctx context.Context, tx *sql.Tx, owner int64) (payoutWalle
 	err = tx.QueryRowContext(ctx, `SELECT status,payout_frozen FROM supplier_profiles WHERE user_id=$1 FOR UPDATE`, owner).Scan(&w.status, &w.frozen)
 	return w, err
 }
-func canPayout(w payoutWallet) bool { return w.status == "active" && !w.frozen && w.debt.IsZero() }
+func canPayout(w payoutWallet) bool {
+	return (w.status == "active" || w.status == "suspended") && !w.frozen && w.debt.IsZero()
+}
 func scanPayout(row interface{ Scan(...any) error }) (*service.SupplierPayout, error) {
 	var p service.SupplierPayout
 	err := row.Scan(&p.ID, &p.SupplierID, &p.DestinationID, &p.MaskedLabel, &p.Amount, &p.Currency, &p.Status, &p.ExternalReference, &p.PaidAt, &p.Evidence, &p.CreatedAt)

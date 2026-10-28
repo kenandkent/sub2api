@@ -1,4 +1,12 @@
 export default {
+  maturity_failures: 'Maturity failures', maturity_oldest_failure_age_seconds: 'Oldest maturity failure (seconds)',
+
+  retryPayloadMismatch: 'The details do not match the original operation. Re-enter the same details to retry.',
+
+  identityReviewed: 'I reviewed the account identity and ownership evidence for this approval.',
+
+  lookupReceipt: 'Look up receipt', capturedAmount: 'Captured', refundedAmount: 'Refunded', refundableAmount: 'Refundable', buyer_ledger_differences: 'Buyer ledger differences', cache_backlog: 'Cache backlog', cache_oldest_age_seconds: 'Oldest cache event (seconds)', maturity_backlog: 'Maturity backlog', maturity_oldest_age_seconds: 'Oldest maturity item (seconds)',
+
   incidentReceipt: 'Request receipt ID (UUID)',
   executionIncident: "Record execution incident",
   incidentRecordOnly: "Record the incident and evidence here. Compensation is determined manually. The consumer is never charged again and no supplier earnings are created automatically.",

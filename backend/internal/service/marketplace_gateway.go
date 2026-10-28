@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // MarketplaceGatewayCatalog exposes published, unbound quotes to the gateway.
@@ -36,6 +37,55 @@ var ErrMarketplaceUnsupportedRequest = errors.New("unsupported shared request")
 type marketplaceBuyerContextKey struct{}
 type marketplaceModelContextKey struct{}
 type marketplaceOutputLimitContextKey struct{}
+type marketplaceExecutionContextKey struct{}
+type marketplaceBeforeSendContextKey struct{}
+
+// WithMarketplaceBeforeSend commits the attempt immediately before transport.
+func WithMarketplaceBeforeSend(ctx context.Context, fn func(context.Context) error) context.Context {
+	return context.WithValue(ctx, marketplaceBeforeSendContextKey{}, fn)
+}
+
+func marketplaceBeforeSend(ctx context.Context) error {
+	if fn, ok := ctx.Value(marketplaceBeforeSendContextKey{}).(func(context.Context) error); ok {
+		return fn(ctx)
+	}
+	if isMarketplaceRequest(ctx) {
+		return ErrMarketplaceRequestState
+	}
+	return nil
+}
+
+// Bound the detached execution, including header wait and draining after disconnect.
+const marketplaceExecutionTimeout = 5 * time.Minute
+
+func WithMarketplaceExecution(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
+	timeout := marketplaceExecutionTimeout
+	if timeoutSeconds > 0 && timeoutSeconds <= 3600 {
+		timeout = time.Duration(timeoutSeconds) * time.Second
+	}
+	return marketplaceWithExecutionTimeout(ctx, timeout)
+}
+
+func marketplaceWithExecutionTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	execution, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	return context.WithValue(ctx, marketplaceExecutionContextKey{}, execution), cancel
+}
+
+func marketplaceExecutionContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	execution, _ := ctx.Value(marketplaceExecutionContextKey{}).(context.Context)
+	return execution
+}
+
+// Supplier slots follow upstream execution rather than client connection lifetime.
+func MarketplaceSlotReleaseContext(ctx context.Context) context.Context {
+	if isMarketplaceRequest(ctx) {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
+}
 
 // WithMarketplaceBuyer is used only after a request has been authenticated and
 // identified as a shared-group request. Fresh qualification is still mandatory.
@@ -59,6 +109,26 @@ func marketplaceValidateOutbound(ctx context.Context, body []byte) error {
 	decoder.UseNumber()
 	if decoder.Decode(&obj) != nil || obj == nil {
 		return ErrMarketplaceUnsupportedRequest
+	}
+	if hasMarketplaceUnsupportedValue(obj) {
+		return ErrMarketplaceUnsupportedRequest
+	}
+	if prompt, ok := obj["prompt"]; ok {
+		if _, valid := prompt.(string); !valid {
+			return ErrMarketplaceUnsupportedRequest
+		}
+	}
+	if tools, ok := obj["tools"]; ok {
+		list, valid := tools.([]any)
+		if !valid {
+			return ErrMarketplaceUnsupportedRequest
+		}
+		for _, raw := range list {
+			tool, valid := raw.(map[string]any)
+			if !valid || tool["type"] != "function" {
+				return ErrMarketplaceUnsupportedRequest
+			}
+		}
 	}
 	model, ok := obj["model"].(string)
 	if !ok || !marketplaceModelMatches(ctx, model) {
@@ -118,13 +188,26 @@ func MarketplaceEnforceTextRequest(body []byte, protocol string, maxOutput int64
 	if decoder.Decode(&obj) != nil || obj == nil {
 		return nil, ErrMarketplaceUnsupportedRequest
 	}
+	if !marketplaceAllowedTopLevelFields(obj, protocol) {
+		return nil, ErrMarketplaceUnsupportedRequest
+	}
+	if prompt, ok := obj["prompt"]; ok {
+		if _, stringPrompt := prompt.(string); !stringPrompt {
+			return nil, ErrMarketplaceUnsupportedRequest
+		}
+	}
 	if hasMarketplaceUnsupportedValue(obj) {
+		return nil, ErrMarketplaceUnsupportedRequest
+	}
+	// An ID in a Responses input item can refer to server-side state. We do
+	// not have a durable ownership and size binding for such references.
+	if protocol == "responses" && marketplaceInputHasID(obj["input"]) {
 		return nil, ErrMarketplaceUnsupportedRequest
 	}
 	if background, ok := obj["background"]; ok && background != false {
 		return nil, ErrMarketplaceUnsupportedRequest
 	}
-	for _, field := range []string{"conversation", "client_metadata", "context_management"} {
+	for _, field := range []string{"conversation", "client_metadata", "context_management", "previous_response_id"} {
 		if _, ok := obj[field]; ok {
 			return nil, ErrMarketplaceUnsupportedRequest
 		}
@@ -197,13 +280,13 @@ func hasMarketplaceUnsupportedValue(v any) bool {
 	case map[string]any:
 		if raw, ok := value["type"].(string); ok {
 			t := strings.ToLower(raw)
-			if strings.Contains(t, "image") || strings.Contains(t, "audio") || strings.Contains(t, "video") || strings.Contains(t, "search") || t == "computer_use_preview" || t == "file_search" || t == "input_file" {
+			if strings.Contains(t, "image") || strings.Contains(t, "audio") || strings.Contains(t, "video") || strings.Contains(t, "search") || t == "computer_use_preview" || t == "file_search" || t == "input_file" || t == "item_reference" || t == "compaction" || t == "additional_tools" || t == "mcp" || t == "code_interpreter" || t == "computer" || t == "shell" {
 				return true
 			}
 		}
 		for key, child := range value {
 			k := strings.ToLower(key)
-			if k == "modalities" || k == "audio" || k == "web_search_options" {
+			if k == "modalities" || k == "audio" || k == "image_url" || k == "web_search_options" || k == "encrypted_content" || k == "file_id" || k == "file_url" || k == "file_data" || k == "previous_response_id" {
 				return true
 			}
 			if hasMarketplaceUnsupportedValue(child) {
@@ -218,4 +301,46 @@ func hasMarketplaceUnsupportedValue(v any) bool {
 		}
 	}
 	return false
+}
+
+func marketplaceInputHasID(value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if _, ok := v["id"]; ok {
+			return true
+		}
+		for _, child := range v {
+			if marketplaceInputHasID(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if marketplaceInputHasID(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Unknown top-level fields can activate provider-side state or unpriced tools.
+// Shared requests are limited to the inline text/function compatibility surface.
+func marketplaceAllowedTopLevelFields(obj map[string]any, protocol string) bool {
+	common := map[string]bool{"model": true, "background": true, "stream": true, "stream_options": true, "temperature": true, "top_p": true, "user": true, "service_tier": true, "tools": true, "tool_choice": true, "parallel_tool_calls": true, "prompt_cache_key": true, "prompt_cache_retention": true, "safety_identifier": true, "store": true, "metadata": true, "seed": true, "frequency_penalty": true, "presence_penalty": true, "stop": true, "reasoning_effort": true}
+	responses := map[string]bool{"input": true, "instructions": true, "prompt": true, "messages": true, "commands": true, "reasoning": true, "text": true, "max_output_tokens": true, "max_tool_calls": true, "include": true, "truncation": true, "top_logprobs": true}
+	chat := map[string]bool{"messages": true, "instructions": true, "max_tokens": true, "max_completion_tokens": true, "n": true, "functions": true, "function_call": true, "response_format": true, "logprobs": true, "top_logprobs": true, "logit_bias": true, "prompt_cache_options": true}
+	for k := range obj {
+		if common[k] {
+			continue
+		}
+		if protocol == "responses" && responses[k] {
+			continue
+		}
+		if protocol == "chat_completions" && chat[k] {
+			continue
+		}
+		return false
+	}
+	return true
 }

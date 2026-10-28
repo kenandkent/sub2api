@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -43,6 +44,50 @@ func lockMarketplaceBuyer(ctx context.Context, tx *sql.Tx, buyer, key, group int
 	}
 	return nil
 }
+
+type marketplaceReplayQuery interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// lookupMarketplaceReplay reveals a receipt only to its authenticated owner and
+// exact API key. Quota, debt and feature state control new requests, not reads.
+func lookupMarketplaceReplay(ctx context.Context, q marketplaceReplayQuery, c service.MarketplacePrepareCommand) (*service.MarketplaceReceipt, error) {
+	if c.IdempotencyKey == nil {
+		return nil, nil
+	}
+	if c.BuyerUserID <= 0 || c.APIKeyID <= 0 || c.GroupID <= 0 || strings.TrimSpace(c.RequestDigest) == "" || strings.TrimSpace(*c.IdempotencyKey) == "" || len(*c.IdempotencyKey) > 255 {
+		return nil, service.ErrMarketplaceRequestInvalid
+	}
+	receipt, err := scanMarketplaceReceipt(q.QueryRowContext(ctx, `SELECT `+receiptColumns+` FROM marketplace_requests r WHERE r.buyer_user_id=$1 AND r.api_key_id=$2 AND r.idempotency_key=$3 AND EXISTS (SELECT 1 FROM users u JOIN api_keys k ON k.user_id=u.id WHERE u.id=$1 AND u.status='active' AND u.deleted_at IS NULL AND k.id=$2 AND k.deleted_at IS NULL AND k.status IN ('active','quota_exhausted') AND (k.expires_at IS NULL OR k.expires_at>now()))`, c.BuyerUserID, c.APIKeyID, *c.IdempotencyKey))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if receipt.GroupID != c.GroupID || receipt.RequestDigest != c.RequestDigest {
+		return nil, service.ErrMarketplaceIdempotencyConflict
+	}
+	return receipt, nil
+}
+
+// MarketplaceReplayExists is an admission hint only. A positive result must
+// lead to LookupReplay with the actual payload digest, and never to dispatch.
+func (r *MarketplaceGatewayRepository) MarketplaceReplayExists(ctx context.Context, buyer, key, group int64, idempotency string) (bool, error) {
+	if buyer <= 0 || key <= 0 || group <= 0 || strings.TrimSpace(idempotency) == "" || len(idempotency) > 255 {
+		return false, nil
+	}
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM marketplace_requests r JOIN users u ON u.id=r.buyer_user_id JOIN api_keys k ON k.id=r.api_key_id AND k.user_id=u.id WHERE r.buyer_user_id=$1 AND r.api_key_id=$2 AND r.group_id=$3 AND r.idempotency_key=$4 AND u.status='active' AND u.deleted_at IS NULL AND k.deleted_at IS NULL AND k.status IN ('active','quota_exhausted') AND (k.expires_at IS NULL OR k.expires_at>now()))`, buyer, key, group, idempotency).Scan(&exists)
+	return exists, err
+}
+
+// LookupReplay is intended for use immediately after authentication, before
+// catalog, availability, and billing admission checks for new business.
+func (r *MarketplaceGatewayRepository) LookupReplay(ctx context.Context, c service.MarketplacePrepareCommand) (*service.MarketplaceReceipt, error) {
+	return lookupMarketplaceReplay(ctx, r.db, c)
+}
+
 func (r *MarketplaceGatewayRepository) PrepareAndReserve(ctx context.Context, c service.MarketplacePrepareCommand, budget service.Money) (*service.MarketplaceReceipt, bool, error) {
 	if c.BuyerUserID <= 0 || c.APIKeyID <= 0 || c.GroupID <= 0 || strings.TrimSpace(c.RequestDigest) == "" || !validMoney(budget) || (c.IdempotencyKey != nil && (strings.TrimSpace(*c.IdempotencyKey) == "" || len(*c.IdempotencyKey) > 255)) {
 		return nil, false, service.ErrMarketplaceRequestInvalid
@@ -52,6 +97,23 @@ func (r *MarketplaceGatewayRepository) PrepareAndReserve(ctx context.Context, c 
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if c.IdempotencyKey != nil {
+		// Serialize first creation with concurrent retries, including one whose
+		// eligibility changes while the original operation is committing.
+		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, fmt.Sprintf("marketplace:request:%d:%d:%s", c.BuyerUserID, c.APIKeyID, *c.IdempotencyKey)); err != nil {
+			return nil, false, err
+		}
+		existing, e := lookupMarketplaceReplay(ctx, tx, c)
+		if e != nil {
+			return nil, false, e
+		}
+		if existing != nil {
+			if err = tx.Commit(); err != nil {
+				return nil, false, err
+			}
+			return existing, false, nil
+		}
+	}
 	if err = lockMarketplaceBuyer(ctx, tx, c.BuyerUserID, c.APIKeyID, c.GroupID); err != nil {
 		return nil, false, err
 	}

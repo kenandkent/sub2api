@@ -47,21 +47,26 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	os.Exit(runIntegrationTests(m))
+}
+
+// Return through defers so disposable containers are reclaimed with Ryuk disabled.
+func runIntegrationTests(m *testing.M) int {
 	ctx := context.Background()
 
 	if err := timezone.Init("UTC"); err != nil {
 		log.Printf("failed to init timezone: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	if !dockerIsAvailable(ctx) {
 		// In CI we expect Docker to be available so integration tests should fail loudly.
 		if os.Getenv("CI") != "" {
 			log.Printf("docker is not available (CI=true); failing integration tests")
-			os.Exit(1)
+			return 1
 		}
 		log.Printf("docker is not available; skipping integration tests (start Docker to enable)")
-		os.Exit(0)
+		return 0
 	}
 
 	postgresImage := selectDockerImage(ctx, postgresImageTag)
@@ -75,7 +80,7 @@ func TestMain(m *testing.M) {
 	)
 	if err != nil {
 		log.Printf("failed to start postgres container: %v", err)
-		os.Exit(1)
+		return 1
 	}
 	defer func() { _ = pgContainer.Terminate(ctx) }()
 
@@ -85,48 +90,53 @@ func TestMain(m *testing.M) {
 	)
 	if err != nil {
 		log.Printf("failed to start redis container: %v", err)
-		os.Exit(1)
+		return 1
 	}
 	defer func() { _ = redisContainer.Terminate(ctx) }()
 
 	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
 	if err != nil {
 		log.Printf("failed to get postgres dsn: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
 	if err != nil {
 		log.Printf("failed to open sql db: %v", err)
-		os.Exit(1)
+		return 1
 	}
 	if err := ApplyMigrations(ctx, integrationDB); err != nil {
 		log.Printf("failed to apply db migrations: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Clone a pristine migrated database before any test can create fixtures.
 	// Some tests need committed transactions and immutable rows, so rollback
 	// and row-by-row cleanup cannot reliably isolate them.
 	if err := integrationDB.Close(); err != nil {
-		log.Fatalf("close migrated database: %v", err)
+		log.Printf("close migrated database: %v", err)
+		return 1
 	}
 	parsedDSN, err := url.Parse(dsn)
 	if err != nil {
-		log.Fatalf("parse postgres dsn: %v", err)
+		log.Printf("parse postgres dsn: %v", err)
+		return 1
 	}
 	parsedDSN.Path = "/postgres"
 	integrationAdminDB, err = openSQLWithRetry(ctx, parsedDSN.String(), 30*time.Second)
 	if err != nil {
-		log.Fatalf("open postgres administration database: %v", err)
+		log.Printf("open postgres administration database: %v", err)
+		return 1
 	}
 	if _, err := integrationAdminDB.ExecContext(ctx, `CREATE DATABASE sub2api_test_template TEMPLATE sub2api_test`); err != nil {
-		log.Fatalf("clone migrated test database: %v", err)
+		log.Printf("clone migrated test database: %v", err)
+		return 1
 	}
 	integrationDSN = dsn
 	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
 	if err != nil {
-		log.Fatalf("reopen test database: %v", err)
+		log.Printf("reopen test database: %v", err)
+		return 1
 	}
 
 	// 创建 ent client 用于集成测试
@@ -136,12 +146,12 @@ func TestMain(m *testing.M) {
 	redisHost, err := redisContainer.Host(ctx)
 	if err != nil {
 		log.Printf("failed to get redis host: %v", err)
-		os.Exit(1)
+		return 1
 	}
 	redisPort, err := redisContainer.MappedPort(ctx, "6379/tcp")
 	if err != nil {
 		log.Printf("failed to get redis port: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	integrationRedis = redisclient.NewClient(&redisclient.Options{
@@ -150,7 +160,7 @@ func TestMain(m *testing.M) {
 	})
 	if err := integrationRedis.Ping(ctx).Err(); err != nil {
 		log.Printf("failed to ping redis: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	code := m.Run()
@@ -160,7 +170,7 @@ func TestMain(m *testing.M) {
 	_ = integrationAdminDB.Close()
 	_ = integrationDB.Close()
 
-	os.Exit(code)
+	return code
 }
 
 func dockerIsAvailable(ctx context.Context) bool {

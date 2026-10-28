@@ -165,11 +165,7 @@ func (r *SharingOfferRepository) SaveSupplierAuthorization(ctx context.Context, 
 		return 0, service.ErrSupplierAuthorizationFailed
 	}
 	if purpose == "reauthorize" {
-		reviewStatus := "pending_review"
-		if accountID == "" {
-			reviewStatus = "draft"
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE sharing_offers SET review_status=$3,enabled=false,version=version+1,revoked_at=NULL,updated_at=NOW() WHERE account_id=$1 AND owner_user_id=$2`, id, owner, reviewStatus)
+		_, err = tx.ExecContext(ctx, `UPDATE sharing_offers SET review_status='draft',enabled=false,version=version+1,revoked_at=NULL,updated_at=NOW() WHERE account_id=$1 AND owner_user_id=$2`, id, owner)
 		if err != nil {
 			return 0, err
 		}

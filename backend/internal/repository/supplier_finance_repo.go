@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -15,6 +16,26 @@ type SupplierFinanceRepository struct{ db *sql.DB }
 
 func NewSupplierFinanceRepository(db *sql.DB) *SupplierFinanceRepository {
 	return &SupplierFinanceRepository{db}
+}
+func (r *SupplierFinanceRepository) AdminReceipt(ctx context.Context, actor int64, receipt string) (*service.MarketplaceAdminReceipt, error) {
+	if _, err := uuid.Parse(receipt); err != nil || actor <= 0 {
+		return nil, service.ErrSupplierFinanceInvalid
+	}
+	var v service.MarketplaceAdminReceipt
+	err := r.db.QueryRowContext(ctx, `SELECT r.id::text,r.status,COALESCE(c.consumer_charge,0)::text,c.id IS NOT NULL,
+	 COALESCE(c.refunded_charge,0)::text,
+	 CASE WHEN c.status IN ('pending','matured') THEN greatest(c.consumer_charge-c.refunded_charge,0) ELSE 0 END::text,
+	 COALESCE(c.status,''),r.created_at,r.updated_at
+	 FROM marketplace_requests r LEFT JOIN marketplace_captures c ON c.receipt_id=r.id
+	 WHERE r.id=$1 AND EXISTS(SELECT 1 FROM users a WHERE a.id=$2 AND a.role='admin' AND a.status='active' AND a.deleted_at IS NULL)`, receipt, actor).
+		Scan(&v.ReceiptID, &v.Status, &v.ActualCharge, &v.Captured, &v.RefundedAmount, &v.RefundableAmount, &v.CaptureStatus, &v.CreatedAt, &v.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrSupplierFinanceNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 func financePage(total int64, p, n int) service.FinancePage {
 	pages := int((total + int64(n) - 1) / int64(n))
@@ -71,13 +92,13 @@ func (r *SupplierFinanceRepository) Earnings(ctx context.Context, id int64, f se
 	return result, rows.Err()
 }
 
-const statementFields = `id,to_char(month,'YYYY-MM'),currency,version,opening_pending::text,opening_available::text,opening_reserved::text,closing_pending::text,closing_available::text,closing_reserved::text,earned_net::text,platform_fee::text,refund_net::text,payout_paid::text,cutoff_ledger_id,created_at`
+const statementFields = `id,to_char(month,'YYYY-MM'),currency,version,opening_pending::text,opening_available::text,opening_reserved::text,opening_debt::text,closing_pending::text,closing_available::text,closing_reserved::text,closing_debt::text,debt_offset::text,earned_net::text,platform_fee::text,refund_net::text,payout_paid::text,cutoff_ledger_id,created_at`
 
 type financeScanner interface{ Scan(...any) error }
 
 func scanStatement(row financeScanner) (*service.SupplierStatement, error) {
 	var s service.SupplierStatement
-	err := row.Scan(&s.ID, &s.Month, &s.Currency, &s.Version, &s.OpeningPending, &s.OpeningAvailable, &s.OpeningReserved, &s.ClosingPending, &s.ClosingAvailable, &s.ClosingReserved, &s.EarnedNet, &s.PlatformFee, &s.RefundNet, &s.PayoutPaid, &s.CutoffLedgerID, &s.CreatedAt)
+	err := row.Scan(&s.ID, &s.Month, &s.Currency, &s.Version, &s.OpeningPending, &s.OpeningAvailable, &s.OpeningReserved, &s.OpeningDebt, &s.ClosingPending, &s.ClosingAvailable, &s.ClosingReserved, &s.ClosingDebt, &s.DebtOffset, &s.EarnedNet, &s.PlatformFee, &s.RefundNet, &s.PayoutPaid, &s.CutoffLedgerID, &s.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrSupplierFinanceNotFound
 	}
@@ -101,14 +122,14 @@ func (r *SupplierFinanceRepository) StatementEntries(ctx context.Context, owner,
 		return nil, err
 	}
 	out := &service.SupplierStatementEntriesPage{FinancePage: financePage(total, page, size), Items: []service.SupplierStatementEntry{}}
-	rows, err := r.db.QueryContext(ctx, `SELECT e.operation_id,e.entry_date,e.account_id,e.account_name,e.model,e.kind,e.consumer_charge::text,e.platform_fee::text,e.supplier_net::text FROM supplier_statement_entries e JOIN supplier_statements s ON s.id=e.statement_id WHERE s.supplier_id=$1 AND s.id=$2 ORDER BY e.entry_date,e.id LIMIT $3 OFFSET $4`, owner, statement, size, (page-1)*size)
+	rows, err := r.db.QueryContext(ctx, `SELECT e.operation_id,e.entry_date,e.account_id,e.account_name,e.model,e.kind,e.consumer_charge::text,e.platform_fee::text,e.supplier_net::text,e.supplier_debt_offset::text FROM supplier_statement_entries e JOIN supplier_statements s ON s.id=e.statement_id WHERE s.supplier_id=$1 AND s.id=$2 ORDER BY e.entry_date,e.id LIMIT $3 OFFSET $4`, owner, statement, size, (page-1)*size)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var v service.SupplierStatementEntry
-		if err = rows.Scan(&v.OperationID, &v.Date, &v.AccountID, &v.AccountName, &v.Model, &v.Kind, &v.ConsumerCharge, &v.PlatformFee, &v.SupplierNet); err != nil {
+		if err = rows.Scan(&v.OperationID, &v.Date, &v.AccountID, &v.AccountName, &v.Model, &v.Kind, &v.ConsumerCharge, &v.PlatformFee, &v.SupplierNet, &v.SupplierDebtOffset); err != nil {
 			return nil, err
 		}
 		out.Items = append(out.Items, v)
@@ -217,23 +238,24 @@ func (r *SupplierFinanceRepository) generate(ctx context.Context, actor, id int6
 		if err = tx.QueryRowContext(ctx, `SELECT coalesce(max(id),0) FROM ledger_transactions WHERE sealed`).Scan(&cutoff); err != nil {
 			return nil, err
 		}
-		s, err = scanStatement(tx.QueryRowContext(ctx, `INSERT INTO supplier_statements(supplier_id,month,version,cutoff_ledger_id,opening_pending,opening_available,opening_reserved,closing_pending,closing_available,closing_reserved,earned_net,platform_fee,refund_net,payout_paid)
+		s, err = scanStatement(tx.QueryRowContext(ctx, `INSERT INTO supplier_statements(supplier_id,month,version,cutoff_ledger_id,opening_pending,opening_available,opening_reserved,opening_debt,closing_pending,closing_available,closing_reserved,closing_debt,debt_offset,earned_net,platform_fee,refund_net,payout_paid)
  SELECT $1,($2::timestamptz AT TIME ZONE 'UTC')::date,1,$3,
- coalesce(sum(delta) FILTER(WHERE account='supplier_pending' AND created_at<$2::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_available' AND created_at<$2::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_payout_reserved' AND created_at<$2::timestamptz),0),
- coalesce(sum(delta) FILTER(WHERE account='supplier_pending' AND created_at<$4::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_available' AND created_at<$4::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_payout_reserved' AND created_at<$4::timestamptz),0),
+ coalesce(sum(delta) FILTER(WHERE account='supplier_pending' AND created_at<$2::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_available' AND created_at<$2::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_payout_reserved' AND created_at<$2::timestamptz),0),-coalesce(sum(delta) FILTER(WHERE account='supplier_debt' AND created_at<$2::timestamptz),0),
+ coalesce(sum(delta) FILTER(WHERE account='supplier_pending' AND created_at<$4::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_available' AND created_at<$4::timestamptz),0),coalesce(sum(delta) FILTER(WHERE account='supplier_payout_reserved' AND created_at<$4::timestamptz),0),-coalesce(sum(delta) FILTER(WHERE account='supplier_debt' AND created_at<$4::timestamptz),0),
+ (SELECT coalesce(sum(c.supplier_debt_offset),0) FROM marketplace_captures c JOIN ledger_transactions ct ON ct.id=c.ledger_transaction_id WHERE c.owner_user_id=$1 AND ct.id<=$3 AND ct.booked_at >= $2::timestamptz AND ct.booked_at < $4::timestamptz),
  (SELECT coalesce(sum(c.supplier_net),0) FROM marketplace_captures c JOIN ledger_transactions ct ON ct.id=c.ledger_transaction_id WHERE c.owner_user_id=$1 AND ct.id<=$3 AND ct.booked_at >= $2::timestamptz AND ct.booked_at < $4::timestamptz),
  (SELECT coalesce(sum(c.platform_fee),0) FROM marketplace_captures c JOIN ledger_transactions ct ON ct.id=c.ledger_transaction_id WHERE c.owner_user_id=$1 AND ct.id<=$3 AND ct.booked_at >= $2::timestamptz AND ct.booked_at < $4::timestamptz),
  (SELECT coalesce(sum(f.supplier_amount),0) FROM marketplace_refunds f JOIN marketplace_captures c ON c.receipt_id=f.receipt_id JOIN ledger_transactions ft ON ft.id=f.ledger_transaction_id WHERE c.owner_user_id=$1 AND ft.id<=$3 AND ft.booked_at >= $2::timestamptz AND ft.booked_at < $4::timestamptz),
  coalesce(sum(delta) FILTER(WHERE account='supplier_paid' AND created_at >= $2::timestamptz AND created_at < $4::timestamptz),0)
- FROM (SELECT e.account,t.booked_at AS created_at,CASE e.side WHEN 'credit' THEN e.amount ELSE -e.amount END delta FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id WHERE e.subject_id=$1 AND t.sealed AND t.id<=$3) l RETURNING `+statementFields, id, month, cutoff, month.AddDate(0, 1, 0)))
+ FROM (SELECT e.account,t.booked_at AS created_at,CASE e.side WHEN 'credit' THEN e.amount ELSE -e.amount END delta FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id WHERE e.subject_id=$1 AND e.account IN ('supplier_pending','supplier_available','supplier_payout_reserved','supplier_debt','supplier_paid') AND t.sealed AND t.id<=$3) l RETURNING `+statementFields, id, month, cutoff, month.AddDate(0, 1, 0)))
 
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO supplier_statement_entries(statement_id,operation_id,entry_date,account_id,account_name,model,kind,consumer_charge,platform_fee,supplier_net)
-           SELECT $1::bigint,ct.operation_id,ct.booked_at,a.account_id,ac.name,coalesce(a.quote->>'public_model',''),'capture',c.consumer_charge,c.platform_fee,c.supplier_net
+			_, err = tx.ExecContext(ctx, `INSERT INTO supplier_statement_entries(statement_id,operation_id,entry_date,account_id,account_name,model,kind,consumer_charge,platform_fee,supplier_net,supplier_debt_offset)
+           SELECT $1::bigint,ct.operation_id,ct.booked_at,a.account_id,ac.name,coalesce(a.quote->>'public_model',''),'capture',c.consumer_charge,c.platform_fee,c.supplier_net,c.supplier_debt_offset
            FROM marketplace_captures c JOIN marketplace_attempts a ON a.id=c.attempt_id JOIN accounts ac ON ac.id=a.account_id JOIN ledger_transactions ct ON ct.id=c.ledger_transaction_id
            WHERE c.owner_user_id=$2 AND ct.id<=$3 AND ct.booked_at>=$4::timestamptz AND ct.booked_at<$5::timestamptz
            UNION ALL
-           SELECT $1::bigint,ft.operation_id,ft.booked_at,a.account_id,ac.name,coalesce(a.quote->>'public_model',''),'refund',f.amount,f.platform_amount,f.supplier_amount
+           SELECT $1::bigint,ft.operation_id,ft.booked_at,a.account_id,ac.name,coalesce(a.quote->>'public_model',''),'refund',f.amount,f.platform_amount,f.supplier_amount,0
            FROM marketplace_refunds f JOIN marketplace_captures c ON c.receipt_id=f.receipt_id JOIN marketplace_attempts a ON a.id=c.attempt_id JOIN accounts ac ON ac.id=a.account_id JOIN ledger_transactions ft ON ft.id=f.ledger_transaction_id
            WHERE c.owner_user_id=$2 AND ft.id<=$3 AND ft.booked_at>=$4::timestamptz AND ft.booked_at<$5::timestamptz`, s.ID, id, cutoff, month, month.AddDate(0, 1, 0))
 		}
@@ -275,15 +297,33 @@ func (r *SupplierFinanceRepository) Reconciliation(ctx context.Context, status s
 	if err != nil {
 		return nil, err
 	}
+	if err = r.db.QueryRowContext(ctx, `SELECT count(*),COALESCE(greatest(extract(epoch FROM now()-min(created_at))::bigint,0),0)
+	 FROM (SELECT created_at FROM marketplace_cache_tasks WHERE processed_at IS NULL
+	 UNION ALL SELECT created_at FROM marketplace_balance_invalidation_tasks WHERE processed_at IS NULL) tasks`).
+		Scan(&out.Totals.CacheBacklog, &out.Totals.CacheOldestAgeSeconds); err != nil {
+		return nil, err
+	}
+	if err = r.db.QueryRowContext(ctx, `SELECT count(*),COALESCE(greatest(extract(epoch FROM now()-min(matures_at))::bigint,0),0)
+	 FROM marketplace_captures WHERE status='pending' AND matures_at<=now()`).
+		Scan(&out.Totals.MaturityBacklog, &out.Totals.MaturityOldestAgeSeconds); err != nil {
+		return nil, err
+	}
+	if err = r.db.QueryRowContext(ctx, `SELECT count(*),COALESCE(greatest(extract(epoch FROM now()-min(f.first_failed_at))::bigint,0),0)
+	 FROM marketplace_maturity_failures f JOIN marketplace_captures c ON c.id=f.capture_id WHERE c.status='pending'`).
+		Scan(&out.Totals.MaturityFailures, &out.Totals.MaturityOldestFailureAgeSeconds); err != nil {
+		return nil, err
+	}
 	const issues = `WITH issues AS (
  SELECT 'receipt'::text kind,id::text id,status,extract(epoch from (now()-updated_at))::bigint age_seconds,NULL::text difference FROM marketplace_requests WHERE status IN ('usage_pending','needs_review','dispatched')
  UNION ALL SELECT 'ledger',t.id::text,'unbalanced',extract(epoch from (now()-t.created_at))::bigint,coalesce(sum(CASE e.side WHEN 'debit' THEN e.amount ELSE -e.amount END),0)::text FROM ledger_transactions t LEFT JOIN ledger_entries e ON e.transaction_id=t.id GROUP BY t.id HAVING NOT t.sealed OR count(e.id)<2 OR coalesce(sum(CASE e.side WHEN 'debit' THEN e.amount ELSE -e.amount END),0)<>0
  UNION ALL SELECT 'wallet',w.user_id::text,'projection_difference',extract(epoch from (now()-w.created_at))::bigint, (abs(w.pending-coalesce(l.pending,0))+abs(w.available-coalesce(l.available,0))+abs(w.payout_reserved-coalesce(l.reserved,0))+abs(w.debt-coalesce(l.debt,0)))::text FROM supplier_wallets w LEFT JOIN LATERAL (SELECT sum(CASE WHEN e.account='supplier_pending' THEN CASE e.side WHEN 'credit' THEN e.amount ELSE -e.amount END ELSE 0 END) pending, sum(CASE WHEN e.account='supplier_available' THEN CASE e.side WHEN 'credit' THEN e.amount ELSE -e.amount END ELSE 0 END) available, sum(CASE WHEN e.account='supplier_payout_reserved' THEN CASE e.side WHEN 'credit' THEN e.amount ELSE -e.amount END ELSE 0 END) reserved, sum(CASE WHEN e.account='supplier_debt' THEN CASE e.side WHEN 'debit' THEN e.amount ELSE -e.amount END ELSE 0 END) debt FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id AND t.sealed WHERE e.subject_id=w.user_id) l ON true WHERE w.pending<>coalesce(l.pending,0) OR w.available<>coalesce(l.available,0) OR w.payout_reserved<>coalesce(l.reserved,0) OR w.debt<>coalesce(l.debt,0)
  UNION ALL SELECT 'funding',u.id::text,'projection_difference',extract(epoch from (now()-u.created_at))::bigint,(coalesce(l.remaining,0)-coalesce(s.debt,0)-u.balance-u.frozen_balance)::text FROM users u JOIN wallet_funding_states s ON s.user_id=u.id LEFT JOIN LATERAL (SELECT sum(remaining) remaining,sum(reserved) reserved FROM wallet_funding_lots WHERE user_id=u.id) l ON true WHERE coalesce(l.remaining,0)-s.debt<>u.balance+u.frozen_balance OR coalesce(l.reserved,0)<>u.frozen_balance
+ UNION ALL SELECT 'buyer_ledger',b.user_id::text,'projection_difference',extract(epoch from (now()-b.created_at))::bigint,b.difference::text FROM (` + BuyerLedgerDifferencesSQL + `) b
+ UNION ALL SELECT 'maturity',f.capture_id::text,'retrying',extract(epoch from (now()-f.first_failed_at))::bigint,NULL::text FROM marketplace_maturity_failures f JOIN marketplace_captures c ON c.id=f.capture_id WHERE c.status='pending'
  UNION ALL SELECT 'outbox',id::text,'aged',extract(epoch from (now()-created_at))::bigint,NULL FROM marketplace_outbox WHERE processed_at IS NULL AND created_at < now()-interval '15 minutes'
  UNION ALL SELECT 'payout',id::text,'processing',extract(epoch from (now()-updated_at))::bigint,NULL FROM supplier_payouts WHERE status='processing'
  ) `
-	if err = r.db.QueryRowContext(ctx, issues+`SELECT count(*) FILTER(WHERE kind='ledger'),count(*) FILTER(WHERE kind='wallet'),count(*) FILTER(WHERE kind='funding'),count(*) FILTER(WHERE kind='outbox'),count(*) FILTER(WHERE kind='payout'),count(*) FILTER(WHERE $1='' OR status=$1) FROM issues`, status).Scan(&out.Totals.UnbalancedTransactions, &out.Totals.WalletDifferences, &out.Totals.FundingDifferences, &out.Totals.AgedOutbox, &out.Totals.UncertainPayouts, &out.Total); err != nil {
+	if err = r.db.QueryRowContext(ctx, issues+`SELECT count(*) FILTER(WHERE kind='ledger'),count(*) FILTER(WHERE kind='wallet'),count(*) FILTER(WHERE kind='funding'),count(*) FILTER(WHERE kind='buyer_ledger'),count(*) FILTER(WHERE kind='outbox'),count(*) FILTER(WHERE kind='payout'),count(*) FILTER(WHERE $1='' OR status=$1) FROM issues`, status).Scan(&out.Totals.UnbalancedTransactions, &out.Totals.WalletDifferences, &out.Totals.FundingDifferences, &out.Totals.BuyerLedgerDifferences, &out.Totals.AgedOutbox, &out.Totals.UncertainPayouts, &out.Total); err != nil {
 		return nil, err
 	}
 	out.FinancePage = financePage(out.Total, p, n)

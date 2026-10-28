@@ -97,13 +97,14 @@ func (h *SupplierAccountHandler) Action(action string) gin.HandlerFunc {
 			return
 		}
 		var in struct {
-			ExpectedVersion int64 `json:"expected_version"`
+			ExpectedVersion       int64 `json:"expected_version"`
+			ExpectedPolicyVersion int64 `json:"expected_policy_version"`
 		}
 		if c.ShouldBindJSON(&in) != nil {
 			response.BadRequest(c, "Invalid action")
 			return
 		}
-		v, e := h.svc.Transition(c.Request.Context(), user, id, in.ExpectedVersion, action)
+		v, e := h.svc.Transition(c.Request.Context(), user, id, in.ExpectedVersion, action, in.ExpectedPolicyVersion)
 		if response.ErrorFrom(c, e) {
 			return
 		}
@@ -147,15 +148,16 @@ func (h *SupplierAccountHandler) AdminReview(c *gin.Context) {
 		return
 	}
 	var in struct {
-		ExpectedVersion int64  `json:"expected_version"`
-		Status          string `json:"status"`
-		Reason          string `json:"reason"`
+		ExpectedVersion  int64  `json:"expected_version"`
+		Status           string `json:"status"`
+		Reason           string `json:"reason"`
+		IdentityReviewed bool   `json:"identity_reviewed"`
 	}
 	if c.ShouldBindJSON(&in) != nil {
 		response.BadRequest(c, "Invalid review")
 		return
 	}
-	v, e := h.svc.AdminReview(c.Request.Context(), admin, id, in.ExpectedVersion, in.Status, in.Reason)
+	v, e := h.svc.AdminReview(c.Request.Context(), admin, id, in.ExpectedVersion, in.Status, in.Reason, in.IdentityReviewed)
 	if response.ErrorFrom(c, e) {
 		return
 	}

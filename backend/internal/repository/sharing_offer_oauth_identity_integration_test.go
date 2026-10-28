@@ -91,7 +91,7 @@ func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(dto), "account-private")
 	require.NotContains(t, string(dto), "access-private")
-	_, err = accounts.Review(ctx, other, a.Offer.ID, a.Offer.Version, "approved", "reviewed", []int64{group})
+	_, err = accounts.Review(ctx, other, a.Offer.ID, a.Offer.Version, "approved", "reviewed", []int64{group}, true)
 	require.NoError(t, err)
 	// Owner and operation bindings are checked before any credential or review changes.
 	_, err = repo.SaveSupplierAuthorization(operation(other, "wrong-owner", "reauthorize", id), other, "reauthorize", id, "openai", token(valid, "wrong-secret"))
@@ -106,7 +106,7 @@ func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
 	require.Error(t, err)
 	a, err = accounts.Get(ctx, owner, id)
 	require.NoError(t, err)
-	require.Equal(t, "pending_review", a.Offer.ReviewStatus)
+	require.Equal(t, "draft", a.Offer.ReviewStatus, "reauthorization requires renewed policy confirmation")
 	require.False(t, a.Offer.Enabled)
 	// An identity collision during reauthorization must roll back credentials,
 	// old fingerprint, operation completion, and offer state together.
@@ -151,7 +151,7 @@ func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
 		require.NoError(t, e)
 		offer, e := accounts.Get(ctx, owner, badID)
 		require.NoError(t, e)
-		_, e = accounts.Review(ctx, other, offer.Offer.ID, offer.Offer.Version, "approved", "reviewed", []int64{group})
+		_, e = accounts.Review(ctx, other, offer.Offer.ID, offer.Offer.Version, "approved", "reviewed", []int64{group}, true)
 		require.Error(t, e)
 	}
 }

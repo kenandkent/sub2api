@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/wire"
 )
@@ -22,7 +24,12 @@ var ProviderSet = wire.NewSet(
 	NewJWTAuthMiddleware,
 	NewOptionalJWTAuthMiddleware,
 	NewAdminAuthMiddleware,
-	NewAPIKeyAuthMiddleware,
+	ProvideAPIKeyAuthMiddleware,
 	NewAuditLogMiddleware,
 	NewStepUpAuthMiddleware,
 )
+
+// ProvideAPIKeyAuthMiddleware wires durable receipt replay into API-key authentication.
+func ProvideAPIKeyAuthMiddleware(keys *service.APIKeyService, subscriptions *service.SubscriptionService, cfg *config.Config, resolver MarketplaceReplayResolver) APIKeyAuthMiddleware {
+	return NewAPIKeyAuthMiddleware(keys, subscriptions, cfg, resolver)
+}

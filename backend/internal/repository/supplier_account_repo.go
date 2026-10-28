@@ -215,11 +215,19 @@ func (r *SupplierAccountRepository) Patch(ctx context.Context, user, id int64, i
 		for _, m := range a.Offer.AllowedModels {
 			old[m] = true
 		}
+		changed := len(old) != len(*in.AllowedModels)
 		for _, m := range *in.AllowedModels {
+			if !old[m] {
+				changed = true
+			}
 			if !old[m] && review == "approved" {
-				review = "pending_review"
+				review = "draft"
 				enabled = false
 			}
+		}
+		if changed && review == "pending_review" {
+			review = "draft"
+			enabled = false
 		}
 		a.Offer.AllowedModels = *in.AllowedModels
 	}
@@ -244,11 +252,32 @@ func (r *SupplierAccountRepository) Patch(ctx context.Context, user, id int64, i
 	return r.Get(ctx, user, id)
 }
 func (r *SupplierAccountRepository) Transition(ctx context.Context, user, id, version int64, action string) (*service.SupplierAccountDetail, error) {
+	return r.transition(ctx, user, id, version, action, 0)
+}
+func (r *SupplierAccountRepository) TransitionWithPolicy(ctx context.Context, user, id, version int64, action string, policyVersion int64) (*service.SupplierAccountDetail, error) {
+	return r.transition(ctx, user, id, version, action, policyVersion)
+}
+func (r *SupplierAccountRepository) transition(ctx context.Context, user, id, version int64, action string, policyVersion int64) (*service.SupplierAccountDetail, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if action == "submit" {
+		if policyVersion <= 0 {
+			return nil, apperrors.Conflict("policy_version_conflict", "Review the current marketplace policy")
+		}
+		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(738241016260)`); err != nil {
+			return nil, err
+		}
+		var current sql.NullInt64
+		if err = tx.QueryRowContext(ctx, `SELECT max(p.version) FROM marketplace_policies p JOIN marketplace_price_versions v ON v.version=p.version WHERE p.published_at IS NOT NULL AND v.published_at IS NOT NULL`).Scan(&current); err != nil {
+			return nil, err
+		}
+		if !current.Valid || current.Int64 != policyVersion {
+			return nil, apperrors.Conflict("policy_version_conflict", "Review the current marketplace policy")
+		}
+	}
 	if err = activeSupplier(ctx, tx, user); err != nil {
 		return nil, err
 	}
@@ -289,6 +318,11 @@ func (r *SupplierAccountRepository) Transition(ctx context.Context, user, id, ve
 	_, err = tx.ExecContext(ctx, `UPDATE sharing_offers SET review_status=$1,enabled=$2,version=version+1,revoked_at=CASE WHEN $1::varchar='revoked' THEN NOW() ELSE revoked_at END,updated_at=NOW() WHERE account_id=$3 AND owner_user_id=$4`, status, enabled, id, user)
 	if err != nil {
 		return nil, err
+	}
+	if action == "submit" {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO sharing_offer_policy_acceptances(offer_id,owner_user_id,offer_version,policy_version) VALUES($1,$2,$3,$4)`, a.Offer.ID, user, version, policyVersion); err != nil {
+			return nil, err
+		}
 	}
 	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		return nil, err
@@ -367,7 +401,10 @@ func (r *SupplierAccountRepository) GetForReview(ctx context.Context, id int64) 
 	}
 	return r.Get(ctx, owner, account)
 }
-func (r *SupplierAccountRepository) Review(ctx context.Context, admin, id, version int64, status, reason string, groups []int64) (*service.SupplierAccountDetail, error) {
+func (r *SupplierAccountRepository) Review(ctx context.Context, admin, id, version int64, status, reason string, groups []int64, identityReviewed bool) (*service.SupplierAccountDetail, error) {
+	if status == "approved" && !identityReviewed {
+		return nil, apperrors.BadRequest("identity_review_required", "Manual identity review is required")
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -417,7 +454,7 @@ func (r *SupplierAccountRepository) Review(ctx context.Context, admin, id, versi
 	if err != nil {
 		return nil, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO sharing_offer_review_audits(offer_id,admin_user_id,previous_status,new_status,reason) VALUES($1,$2,$3,$4,$5)`, id, admin, previous, status, reason)
+	_, err = tx.ExecContext(ctx, `INSERT INTO sharing_offer_review_audits(offer_id,admin_user_id,previous_status,new_status,reason,identity_reviewed) VALUES($1,$2,$3,$4,$5,$6)`, id, admin, previous, status, reason, identityReviewed)
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +537,7 @@ func (r *SupplierAccountRepository) ReplaceCredentials(ctx context.Context, user
 	if n != 1 {
 		return nil, apperrors.Conflict("duplicate_credential", "Credential already registered")
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE sharing_offers SET review_status='pending_review',enabled=false,version=version+1,revoked_at=NULL,updated_at=NOW() WHERE account_id=$1 AND owner_user_id=$2`, id, user)
+	_, err = tx.ExecContext(ctx, `UPDATE sharing_offers SET review_status='draft',enabled=false,version=version+1,revoked_at=NULL,updated_at=NOW() WHERE account_id=$1 AND owner_user_id=$2`, id, user)
 	if err != nil {
 		return nil, err
 	}
@@ -638,7 +675,7 @@ func (r *SupplierAccountRepository) ListAdminOffers(ctx context.Context, f servi
 	for rows.Next() {
 		var a service.AdminSupplierOffer
 		var models []byte
-		if err := rows.Scan(&a.ID, &a.AccountID, &a.OwnerUserID, &a.AccountName, &a.Platform, &a.Type, &a.AccountStatus, &a.SupplierStatus, &a.IdentityVerified, &a.Concurrency, &a.ReviewStatus, &a.Enabled, &models, &a.Version); err != nil {
+		if err := rows.Scan(&a.ID, &a.AccountID, &a.OwnerUserID, &a.AccountName, &a.Platform, &a.Type, &a.AccountStatus, &a.SupplierStatus, &a.CredentialFingerprintPresent, &a.Concurrency, &a.ReviewStatus, &a.Enabled, &models, &a.Version); err != nil {
 			return nil, 0, err
 		}
 		a.OfferID = a.ID

@@ -60,7 +60,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -76,6 +76,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: make test-frontend
+      - name: Run all frontend regression tests
+        run: pnpm --dir frontend run test:run
 
   image:
     needs: [deployment-checks, backend, frontend]

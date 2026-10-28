@@ -292,7 +292,7 @@ func (s *SupplierAccountService) Patch(ctx context.Context, user, id int64, in S
 	}
 	return s.store.Patch(ctx, user, id, in)
 }
-func (s *SupplierAccountService) Transition(ctx context.Context, user, id, version int64, action string) (*SupplierAccountDetail, error) {
+func (s *SupplierAccountService) Transition(ctx context.Context, user, id, version int64, action string, policyVersions ...int64) (*SupplierAccountDetail, error) {
 	if err := s.authorize(ctx, user, true); err != nil {
 		return nil, err
 	}
@@ -313,6 +313,9 @@ func (s *SupplierAccountService) Transition(ctx context.Context, user, id, versi
 		}
 	}
 	if action == "submit" {
+		if len(policyVersions) != 1 || policyVersions[0] <= 0 {
+			return nil, apperrors.Conflict("policy_version_conflict", "Review the current marketplace policy")
+		}
 		if a.CredentialStatus != "valid" && a.CredentialStatus != "configured" {
 			return nil, apperrors.Conflict("credentials_missing", "Credential required")
 		}
@@ -338,6 +341,15 @@ func (s *SupplierAccountService) Transition(ctx context.Context, user, id, versi
 	}
 	if action != "submit" && action != "pause" && action != "resume" && action != "revoke" {
 		return nil, apperrors.BadRequest("invalid_action", "Invalid action")
+	}
+	if action == "submit" {
+		store, ok := s.store.(interface {
+			TransitionWithPolicy(context.Context, int64, int64, int64, string, int64) (*SupplierAccountDetail, error)
+		})
+		if !ok {
+			return nil, apperrors.Conflict("policy_version_conflict", "Policy confirmation unavailable")
+		}
+		return store.TransitionWithPolicy(ctx, user, id, version, action, policyVersions[0])
 	}
 	return s.store.Transition(ctx, user, id, version, action)
 }
@@ -418,13 +430,17 @@ func (s *SupplierAccountService) List(ctx context.Context, user int64, f Supplie
 
 type SupplierAccountReviewStore interface {
 	GetForReview(context.Context, int64) (*SupplierAccountDetail, error)
-	Review(context.Context, int64, int64, int64, string, string, []int64) (*SupplierAccountDetail, error)
+	Review(context.Context, int64, int64, int64, string, string, []int64, bool) (*SupplierAccountDetail, error)
 }
 
-func (s *SupplierAccountService) AdminReview(ctx context.Context, admin, id, version int64, status, reason string) (*SupplierAccountDetail, error) {
+func (s *SupplierAccountService) AdminReview(ctx context.Context, admin, id, version int64, status, reason string, identityReviewed ...bool) (*SupplierAccountDetail, error) {
 	reason = strings.TrimSpace(reason)
 	if admin <= 0 || id <= 0 || version <= 0 || len(reason) == 0 || len(reason) > 1000 || (status != "approved" && status != "rejected") {
 		return nil, apperrors.BadRequest("invalid_review", "Valid status and reason required")
+	}
+	attested := len(identityReviewed) == 1 && identityReviewed[0]
+	if status == "approved" && !attested {
+		return nil, apperrors.BadRequest("identity_review_required", "Manual identity review is required")
 	}
 	if s == nil || s.store == nil || s.cfg == nil || !s.cfg.Marketplace.Enabled || config.NormalizeRunMode(s.cfg.RunMode) != config.RunModeStandard {
 		return nil, apperrors.Forbidden("marketplace_disabled", "Marketplace unavailable")
@@ -478,7 +494,7 @@ func (s *SupplierAccountService) AdminReview(ctx context.Context, admin, id, ver
 			return nil, apperrors.Conflict("price_unavailable", "Marketplace prices unavailable")
 		}
 	}
-	return store.Review(ctx, admin, id, version, status, reason, groups)
+	return store.Review(ctx, admin, id, version, status, reason, groups, attested)
 }
 
 type SupplierCredentialStore interface {
@@ -609,21 +625,21 @@ func (s *SupplierAccountService) Overview(ctx context.Context, user int64) (*Sup
 
 // AdminSupplierOffer contains only metadata suitable for an administrator review queue.
 type AdminSupplierOffer struct {
-	ID               int64    `json:"id"`
-	OfferID          int64    `json:"offer_id"`
-	AccountID        int64    `json:"account_id"`
-	OwnerUserID      int64    `json:"owner_user_id"`
-	AccountName      string   `json:"account_name"`
-	Platform         string   `json:"platform"`
-	Type             string   `json:"type"`
-	AccountStatus    string   `json:"account_status"`
-	SupplierStatus   string   `json:"supplier_status"`
-	IdentityVerified bool     `json:"identity_verified"`
-	Concurrency      int      `json:"concurrency"`
-	ReviewStatus     string   `json:"review_status"`
-	Enabled          bool     `json:"enabled"`
-	AllowedModels    []string `json:"allowed_models"`
-	Version          int64    `json:"version"`
+	ID                           int64    `json:"id"`
+	OfferID                      int64    `json:"offer_id"`
+	AccountID                    int64    `json:"account_id"`
+	OwnerUserID                  int64    `json:"owner_user_id"`
+	AccountName                  string   `json:"account_name"`
+	Platform                     string   `json:"platform"`
+	Type                         string   `json:"type"`
+	AccountStatus                string   `json:"account_status"`
+	SupplierStatus               string   `json:"supplier_status"`
+	CredentialFingerprintPresent bool     `json:"credential_fingerprint_present"`
+	Concurrency                  int      `json:"concurrency"`
+	ReviewStatus                 string   `json:"review_status"`
+	Enabled                      bool     `json:"enabled"`
+	AllowedModels                []string `json:"allowed_models"`
+	Version                      int64    `json:"version"`
 }
 type AdminSupplierOfferPage struct {
 	Items    []AdminSupplierOffer `json:"items"`

@@ -8,6 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
@@ -78,7 +79,12 @@ func provideMarketplaceHandlers(db *sql.DB, rdb *redis.Client, cfg *config.Confi
 		Catalog:                catalogHandler,
 		Refunds:                refunds,
 		PaymentFundingRecovery: handler.NewPaymentFundingRecoveryHandler(payments, totp, users),
+		Vault:                  handler.NewMarketplaceVaultRotationHandler(repository.NewMarketplaceVaultRotationRepository(db, envelope), totp, users),
 		Gateway:                service.NewMarketplaceGateway(catalog, gatewayStore, runtime),
 		Stop:                   background.Stop,
 	}, nil
+}
+
+func provideMarketplaceReplayResolver(db *sql.DB, cfg *config.Config) middleware.MarketplaceReplayResolver {
+	return repository.NewMarketplaceGatewayRepository(db, cfg)
 }

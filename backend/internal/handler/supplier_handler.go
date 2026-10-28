@@ -138,14 +138,15 @@ func (h *SupplierHandler) AdminReview(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Status service.SupplierStatus `json:"status"`
-		Reason string                 `json:"reason"`
+		Status          service.SupplierStatus `json:"status"`
+		Reason          string                 `json:"reason"`
+		ExpectedVersion int64                  `json:"expected_version"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		response.BadRequest(c, "Invalid review")
 		return
 	}
-	v, e := h.svc.Review(c.Request.Context(), id, admin, req.Status, req.Reason)
+	v, e := h.svc.Review(c.Request.Context(), id, admin, req.ExpectedVersion, req.Status, req.Reason)
 	if response.ErrorFrom(c, e) {
 		return
 	}
@@ -159,6 +160,7 @@ func (h *SupplierHandler) Options(c *gin.Context) {
 	options := h.svc.Options()
 	if h.catalog != nil {
 		if current, err := h.catalog.Current(c.Request.Context()); err == nil {
+			options.PolicyVersion = &current.Policy.Version
 			options.FeeBPS = &current.Policy.FeeBPS
 			options.HoldHours = &current.Policy.HoldHours
 			options.MaxSupplierConcurrency = &current.Policy.MaxSupplierConcurrency
@@ -170,6 +172,14 @@ func (h *SupplierHandler) Options(c *gin.Context) {
 		providers, err := h.accounts.Providers(c.Request.Context())
 		if response.ErrorFrom(c, err) {
 			return
+		}
+		for _, provider := range providers {
+			for _, price := range provider.Prices {
+				if options.PolicyVersion == nil || price.PriceVersion != *options.PolicyVersion {
+					response.Error(c, 503, "Marketplace policy changed; retry")
+					return
+				}
+			}
 		}
 		options.Providers = providers
 	}

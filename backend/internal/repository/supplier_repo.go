@@ -47,19 +47,24 @@ func (r *supplierRepository) Apply(ctx context.Context, user, agreement int64, f
 	}
 	return p, e
 }
-func (r *supplierRepository) Review(ctx context.Context, user, admin int64, status service.SupplierStatus, reason string) (*service.SupplierProfile, error) {
+func (r *supplierRepository) Review(ctx context.Context, user, admin, version int64, status service.SupplierStatus, reason string) (*service.SupplierProfile, error) {
 	tx, e := r.db.BeginTx(ctx, nil)
 	if e != nil {
 		return nil, e
 	}
 	defer func() { _ = tx.Rollback() }()
 	var previous string
-	e = tx.QueryRowContext(ctx, `SELECT status FROM supplier_profiles WHERE user_id=$1 FOR UPDATE`, user).Scan(&previous)
+	var current, agreement int64
+	var fields []byte
+	e = tx.QueryRowContext(ctx, `SELECT status,version,COALESCE(agreement_version,0),application_fields FROM supplier_profiles WHERE user_id=$1 FOR UPDATE`, user).Scan(&previous, &current, &agreement, &fields)
 	if errors.Is(e, sql.ErrNoRows) {
 		return nil, apperrors.NotFound("supplier_not_found", "Supplier profile not found")
 	}
 	if e != nil {
 		return nil, e
+	}
+	if current != version {
+		return nil, apperrors.Conflict("version_conflict", "Supplier application changed")
 	}
 	valid := (previous == "pending" && (status == service.SupplierStatusActive || status == service.SupplierStatusRejected)) || (previous == "active" && status == service.SupplierStatusSuspended) || (previous == "suspended" && status == service.SupplierStatusActive)
 	if !valid {
@@ -69,7 +74,7 @@ func (r *supplierRepository) Review(ctx context.Context, user, admin int64, stat
 	if e != nil {
 		return nil, e
 	}
-	if _, e = tx.ExecContext(ctx, `INSERT INTO supplier_review_audits (supplier_user_id,admin_user_id,previous_status,new_status,reason) VALUES ($1,$2,$3,$4,$5)`, user, admin, previous, status, reason); e != nil {
+	if _, e = tx.ExecContext(ctx, `INSERT INTO supplier_review_audits (supplier_user_id,admin_user_id,previous_status,new_status,reason,reviewed_version,agreement_version,application_fields) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, user, admin, previous, status, reason, version, agreement, string(fields)); e != nil {
 		return nil, e
 	}
 	if e = tx.Commit(); e != nil {

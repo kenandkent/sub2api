@@ -310,6 +310,20 @@ func (s *BillingCacheService) logCacheWriteDrop(task cacheWriteTask, reason stri
 
 // GetUserBalance 获取用户余额（优先从缓存读取）
 func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) (float64, error) {
+	// Migrated balances can change during a marketplace hold without passing
+	// through the legacy cache. Read the committed projection for admission;
+	// already admitted postpaid requests retain their existing overdraft rules.
+	if reader, ok := s.userRepo.(interface {
+		CurrentFundingBalance(context.Context, int64) (float64, bool, error)
+	}); ok {
+		balance, migrated, err := reader.CurrentFundingBalance(ctx, userID)
+		if err != nil {
+			return 0, err
+		}
+		if migrated {
+			return balance, nil
+		}
+	}
 	if s.cache == nil {
 		// Redis不可用，直接查询数据库
 		return s.getUserBalanceFromDB(ctx, userID)

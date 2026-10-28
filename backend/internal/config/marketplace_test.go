@@ -45,3 +45,37 @@ func TestMarketplaceAgreementEnvironment(t *testing.T) {
 	require.Equal(t, "/terms", cfg.Marketplace.AgreementURL)
 	require.Equal(t, []string{"contact", "company"}, cfg.Marketplace.ApplicationFields)
 }
+
+func TestMarketplaceAttestedInputCeiling(t *testing.T) {
+	c := MarketplaceConfig{Providers: []MarketplaceProviderConfig{
+		{Platform: "openai", Models: []string{"m"}, MaxBillableInputTokensByModel: map[string]int64{"m": 1000}},
+		{Platform: "openai", Models: []string{"m"}, MaxBillableInputTokensByModel: map[string]int64{"m": 2000}},
+	}}
+	n, ok := c.AttestedInputCeiling("openai", "m")
+	require.True(t, ok)
+	require.EqualValues(t, 2000, n)
+	c.Providers[1].MaxBillableInputTokensByModel = nil
+	_, ok = c.AttestedInputCeiling("openai", "m")
+	require.False(t, ok)
+	c.Providers[1].MaxBillableInputTokensByModel = map[string]int64{"m": 4000001}
+	require.Error(t, c.Validate("standard"))
+	c.Providers[1].MaxBillableInputTokensByModel = map[string]int64{"wrong": 1}
+	require.Error(t, c.Validate("standard"))
+}
+
+func TestMarketplaceUpstreamTimeoutValidation(t *testing.T) {
+	for _, n := range []int{0, 1, 300, 3600} {
+		require.NoError(t, (MarketplaceConfig{UpstreamTimeoutSeconds: n}).Validate("standard"))
+	}
+	for _, n := range []int{-1, 3601} {
+		require.Error(t, (MarketplaceConfig{UpstreamTimeoutSeconds: n}).Validate("standard"))
+	}
+}
+
+func TestMarketplaceUpstreamTimeoutEnvironment(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("MARKETPLACE_UPSTREAM_TIMEOUT_SECONDS", "45")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 45, cfg.Marketplace.UpstreamTimeoutSeconds)
+}

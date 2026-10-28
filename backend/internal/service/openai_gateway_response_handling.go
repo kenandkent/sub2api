@@ -27,12 +27,15 @@ import (
 
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
-	usage            *OpenAIUsage
-	firstTokenMs     *int
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
-	searchCount      int
+	usage *OpenAIUsage
+	// terminalFailedUsage is populated only from a valid raw response.failed
+	// event, never from an earlier partial counter.
+	terminalFailedUsage *OpenAIUsage
+	firstTokenMs        *int
+	responseID          string
+	imageCount          int
+	imageOutputSizes    []string
+	searchCount         int
 }
 
 type openaiNonStreamingResult struct {
@@ -350,14 +353,16 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// Dedup search tool calls across SSE events (item.done + response.completed
 	// both list the same call_id — counting both would ~2× the surcharge).
 	streamSearchSeen := make(map[string]struct{})
+	var terminalFailedUsage *OpenAIUsage
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
-			usage:            usage,
-			firstTokenMs:     firstTokenMs,
-			responseID:       responseID,
-			imageCount:       imageCounter.Count(),
-			imageOutputSizes: imageCounter.Sizes(),
-			searchCount:      searchCounter,
+			usage:               usage,
+			terminalFailedUsage: terminalFailedUsage,
+			firstTokenMs:        firstTokenMs,
+			responseID:          responseID,
+			imageCount:          imageCounter.Count(),
+			imageOutputSizes:    imageCounter.Sizes(),
+			searchCount:         searchCounter,
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -539,6 +544,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
 				// 而漏记真实用量。对齐 WS V2 / Chat 流式路径（均先解析 usage 再 Mark）。
 				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				if eventType == "response.failed" {
+					if reported, ok := extractOpenAIUsageFromJSONBytes(dataBytes); ok && reported.Reported {
+						terminalFailedUsage = &reported
+					}
+				}
 				if hit, code, msg := detectOpenAICyberPolicy(dataBytes); hit {
 					cyberHit = true
 					MarkOpsCyberPolicy(c, CyberPolicyMark{

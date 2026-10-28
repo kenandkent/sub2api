@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -52,4 +53,62 @@ func TestMarketplaceOutboundMustMatchQuoteAndCap(t *testing.T) {
 	}
 	require.NoError(t, marketplaceValidateOutbound(ctx, []byte(`{"model":"actual","max_output_tokens":100}`)))
 	require.NoError(t, marketplaceValidateOutbound(ctx, []byte(`{"model":"actual","max_completion_tokens":42}`)))
+}
+
+func TestMarketplaceRejectsOpaqueReferences(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","input":"hello","previous_response_id":"resp_123"}`,
+		`{"model":"m","input":[{"type":"item_reference","id":"msg_123"}]}`,
+		`{"model":"m","input":[{"type":"reasoning","encrypted_content":"opaque"}]}`,
+		`{"model":"m","input":[{"type":"message","id":"msg_stored","role":"user","content":"hi"}]}`,
+	} {
+		_, err := MarketplaceEnforceTextRequest([]byte(body), "responses", 100)
+		require.Error(t, err, body)
+	}
+}
+
+func TestMarketplaceExecutionSurvivesClientCancelButRetainsDeadline(t *testing.T) {
+	ctx, cancelClient := context.WithCancel(WithMarketplaceBuyer(context.Background(), 1))
+	wrapped, cancelExecution := WithMarketplaceExecution(ctx, 0)
+	defer cancelExecution()
+	detached, release := detachUpstreamContext(wrapped)
+	defer release()
+	_, hasDeadline := detached.Deadline()
+	require.True(t, hasDeadline)
+	cancelClient()
+	require.NoError(t, detached.Err())
+	cancelExecution()
+	require.ErrorIs(t, detached.Err(), context.Canceled)
+}
+
+func TestMarketplaceDetachedExecutionExpires(t *testing.T) {
+	wrapped, cancel := marketplaceWithExecutionTimeout(WithMarketplaceBuyer(context.Background(), 1), 20*time.Millisecond)
+	defer cancel()
+	detached, release := detachUpstreamContext(wrapped)
+	defer release()
+	select {
+	case <-detached.Done():
+		require.ErrorIs(t, detached.Err(), context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("detached upstream ignored execution deadline")
+	}
+}
+
+func TestMarketplaceRejectsStoredPromptAndUnknownTopLevelFields(t *testing.T) {
+	for _, raw := range []string{
+		`{"model":"m","prompt":{"id":"pmpt_supplier","variables":{"x":"hello"}}}`,
+		`{"model":"m","input":"hello","future_remote_context":{"id":"foreign"}}`,
+		`{"model":"m","input":[{"type":"additional_tools","tools":[{"type":"mcp","server_label":"x"}]}]}`,
+	} {
+		_, err := MarketplaceEnforceTextRequest([]byte(raw), "responses", 100)
+		require.Error(t, err, raw)
+	}
+	legacy, err := MarketplaceEnforceTextRequest([]byte(`{"model":"m","prompt":"hello"}`), "responses", 100)
+	require.NoError(t, err)
+	normalized, changed, err := normalizeOpenAIResponsesLegacyIngressWithConfig(nil, legacy)
+	require.NoError(t, err)
+	require.True(t, changed)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(normalized, &got))
+	require.Equal(t, "hello", got["input"])
 }

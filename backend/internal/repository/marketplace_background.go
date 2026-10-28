@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -79,26 +80,32 @@ const marketplaceStaleReviewReason = "request inactive for over two hours; manua
 
 // MarketplaceBackgroundWorker continues after marketplace dispatch is disabled.
 type MarketplaceBackgroundWorker struct {
-	db          *sql.DB
-	outbox      *MarketplaceOutboxWorker
-	cache       *MarketplaceCacheWorker
-	settlement  *service.SupplierSettlementService
-	finance     *service.SupplierFinanceService
-	ctx         context.Context
-	cancel      context.CancelFunc
-	start, stop sync.Once
-	wg          sync.WaitGroup
+	db                  *sql.DB
+	outbox              *MarketplaceOutboxWorker
+	cache               *MarketplaceCacheWorker
+	balanceInvalidation *MarketplaceBalanceInvalidationWorker
+	settlement          *service.SupplierSettlementService
+	finance             *service.SupplierFinanceService
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	start, stop         sync.Once
+	wg                  sync.WaitGroup
 }
 
 func NewMarketplaceBackgroundWorker(db *sql.DB, cache MarketplaceCacheInvalidator, settlement *service.SupplierSettlementService, finance *service.SupplierFinanceService) *MarketplaceBackgroundWorker {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &MarketplaceBackgroundWorker{db: db, outbox: NewMarketplaceOutboxWorker(db), cache: NewMarketplaceCacheWorker(db, cache), settlement: settlement, finance: finance, ctx: ctx, cancel: cancel}
+	return &MarketplaceBackgroundWorker{db: db, outbox: NewMarketplaceOutboxWorker(db), cache: NewMarketplaceCacheWorker(db, cache), balanceInvalidation: NewMarketplaceBalanceInvalidationWorker(db, cache), settlement: settlement, finance: finance, ctx: ctx, cancel: cancel}
 }
 func (w *MarketplaceBackgroundWorker) Start() {
 	if w == nil || w.db == nil || w.cache.Cache == nil || w.settlement == nil || w.finance == nil {
 		return
 	}
-	w.start.Do(func() { w.wg.Add(1); go w.run() })
+	w.start.Do(func() {
+		for _, run := range []func(){w.runProjection, w.runBalanceInvalidation, w.runRecovery, w.runMaturity, w.runStatements} {
+			w.wg.Add(1)
+			go func(f func()) { defer w.wg.Done(); f() }(run)
+		}
+	})
 }
 func (w *MarketplaceBackgroundWorker) Stop() {
 	if w == nil {
@@ -106,13 +113,25 @@ func (w *MarketplaceBackgroundWorker) Stop() {
 	}
 	w.stop.Do(func() { w.cancel(); w.wg.Wait() })
 }
-func (w *MarketplaceBackgroundWorker) run() {
-	defer w.wg.Done()
-	tick := time.NewTicker(time.Second)
+func (w *MarketplaceBackgroundWorker) every(interval time.Duration, fn func()) {
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
-	nextFinance := time.Time{}
-	nextRecovery := time.Time{}
 	for {
+		if w.ctx.Err() != nil {
+			return
+		}
+		fn()
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// Keep projection and cache work independent of potentially slow finance scans.
+func (w *MarketplaceBackgroundWorker) runProjection() {
+	w.every(time.Second, func() {
 		for i := 0; i < 100; i++ {
 			done, err := w.outbox.ProcessOne(w.ctx)
 			if err != nil {
@@ -137,30 +156,102 @@ func (w *MarketplaceBackgroundWorker) run() {
 				break
 			}
 		}
-		if time.Now().After(nextRecovery) {
-			count, err := w.reviewStaleReceipts(w.ctx)
-			if err != nil && w.ctx.Err() == nil {
-				slog.Error("marketplace stale receipt scan failed", "error", err)
-			} else if count > 0 {
-				slog.Warn("marketplace stale receipts require review", "count", count)
-			}
-			nextRecovery = time.Now().Add(time.Minute)
+	})
+}
+func (w *MarketplaceBackgroundWorker) runRecovery() {
+	w.every(time.Minute, func() {
+		count, err := w.reviewStaleReceipts(w.ctx)
+		if err != nil && w.ctx.Err() == nil {
+			slog.Error("marketplace stale receipt scan failed", "error", err)
+		} else if count > 0 {
+			slog.Warn("marketplace stale receipts require review", "count", count)
 		}
-		if time.Now().After(nextFinance) {
-			if _, err := w.settlement.MatureDue(w.ctx, time.Now().UTC(), 100); err != nil && w.ctx.Err() == nil {
-				slog.Error("marketplace maturity failed", "error", err)
+	})
+}
+func (w *MarketplaceBackgroundWorker) runBalanceInvalidation() {
+	w.every(time.Second, func() {
+		for i := 0; i < 100; i++ {
+			done, err := w.balanceInvalidation.ProcessOne(w.ctx)
+			if err != nil {
+				if w.ctx.Err() == nil {
+					slog.Error("marketplace balance invalidation failed", "error", err)
+				}
+				break
 			}
-			if err := w.closeMonths(w.ctx); err != nil && w.ctx.Err() == nil {
-				slog.Error("marketplace statement generation failed", "error", err)
+			if !done {
+				break
 			}
-			nextFinance = time.Now().Add(time.Minute)
 		}
-		select {
-		case <-w.ctx.Done():
-			return
-		case <-tick.C:
+	})
+}
+
+func drainMaturityBatches(ctx context.Context, batchSize, maxBatches int, process func(context.Context, int) (int, error)) (int, error) {
+	total := 0
+	for i := 0; i < maxBatches; i++ {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		n, err := process(ctx, batchSize)
+		total += n
+		if err != nil {
+			return total, err
+		}
+		if n < batchSize {
+			break
 		}
 	}
+	return total, nil
+}
+
+// A session lock prevents instances selecting the same earliest batch. All
+// settlement transactions reuse this connection, even with a pool size of one.
+func (w *MarketplaceBackgroundWorker) maturePass(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	conn, err := w.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	const lockID int64 = 75084321640951481
+	var locked bool
+	if err = conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, lockID).Scan(&locked); err != nil {
+		// An interrupted query may have acquired the lock before its reply was
+		// lost; discard the session rather than returning it to the pool.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		return err
+	}
+	if !locked {
+		return nil
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var released bool
+		if err := conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock($1)`, lockID).Scan(&released); err != nil || !released {
+			// Never return a connection that may still hold a session lock to the pool.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			slog.Error("marketplace maturity unlock failed", "error", err)
+		}
+	}()
+	_, err = drainMaturityBatches(ctx, 100, 10, func(ctx context.Context, limit int) (int, error) {
+		return w.settlement.MatureDueOnConn(ctx, conn, time.Now().UTC(), limit)
+	})
+	return err
+}
+func (w *MarketplaceBackgroundWorker) runMaturity() {
+	w.every(time.Second, func() {
+		if err := w.maturePass(w.ctx); err != nil && w.ctx.Err() == nil {
+			slog.Error("marketplace maturity failed", "error", err)
+		}
+	})
+}
+func (w *MarketplaceBackgroundWorker) runStatements() {
+	w.every(time.Minute, func() {
+		if err := w.closeMonths(w.ctx); err != nil && w.ctx.Err() == nil {
+			slog.Error("marketplace statement generation failed", "error", err)
+		}
+	})
 }
 
 // reviewStaleReceipts changes only receipt state and reason. The lock skips

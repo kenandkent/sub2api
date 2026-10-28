@@ -1,0 +1,1 @@
+ALTER TABLE accounts VALIDATE CONSTRAINT accounts_owner_user_id_fkey;

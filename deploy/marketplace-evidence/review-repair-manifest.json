@@ -1,0 +1,132 @@
+{
+  "date": "2026-10-28",
+  "branch": "mysubapi",
+  "base_commit": "bddb7cbcef6867d64b756d6ffe76b41242715bea",
+  "online_deployment": false,
+  "real_model_calls": false,
+  "real_bank_calls": false,
+  "changed_source_files": 165,
+  "tested_source_snapshot_sha256": "d9106be38fcd441a01fcbec83ee7887c38b657be083f0988190595bc49460f22",
+  "method": "Full baseline suites with explicitly scoped final amendments; log hashes are evidence indices, not claims that every test was repeated after formatting. Independent subagent race/lock/upgrade regression logs remain in their project worktrees.",
+  "checks": [
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/backend-default.log",
+      "scope": "Full default backend suite, before final scoped amendments",
+      "exit_code": 0,
+      "sha256": "4714a18c3e99205833803db098e90c1776ae9b98d2f965e103d9dbb0a30a047f",
+      "bytes": 8242
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/backend-unit-all.log",
+      "scope": "Unit-tag service, handlers, server, config and cmd/server suites",
+      "exit_code": 0,
+      "sha256": "7ce4dd198b6140b75a5f257f35c8ab06bd2ec2336480e5a41866e20e94ca1ae3",
+      "bytes": 602
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/repository-integration-all.log",
+      "scope": "Full repository integration suite; followed by final maturity, refresh and reclassification amendments",
+      "exit_code": 0,
+      "sha256": "6ca325936b3d9401b2ccf673c279baa977248e97fc1e31a6e799e75f0e2001ba",
+      "bytes": 61
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/integrated-delta-infrastructure.log",
+      "scope": "Final PG/Redis maturity, reconciliation, owned refresh-lock, OAuth rotation and real handler gateway amendments",
+      "exit_code": 0,
+      "sha256": "8a8b941e97c31f49bc6be6c4d6ea7d192427633cb213a2a77f1c37e401e6160e",
+      "bytes": 118
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/final-finance-integration.log",
+      "scope": "Final funding admin replay/order/actor locks, vault handler, route and audit regression",
+      "exit_code": 0,
+      "sha256": "bf72e5f41196a71b7fcb84b53a4dac1884750da3b1990de71e8efd9f868eedcb",
+      "bytes": 390
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/production-server-green.log",
+      "scope": "Production process six calls, tools-first ordering and fresh-process exhausted-key replay",
+      "exit_code": 0,
+      "sha256": "3ee3d328a1bb392d4bc506aa4148251ca884f47a8f882b0fc859b217bd2e1d9b",
+      "bytes": 3199
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/production-server-final.log",
+      "scope": "Latest binary six calls, normal-first ordering and fresh-process exhausted-key replay",
+      "exit_code": 0,
+      "sha256": "3d46462d234ef4052c4c60824dee0b5075d94ba059bf7e3e36feddaf35521afa",
+      "bytes": 3198
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/refresh-lock-integration-compile.log",
+      "scope": "Final supplier runtime refresh/deadline focused unit cases",
+      "exit_code": 0,
+      "sha256": "cd9dd8a76e78a8dd3e74fee9a1aca2fb287c66ea292bf42893b916b20d29288b",
+      "bytes": 57
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/frontend-all.log",
+      "scope": "Full Vitest suite: 399 files, 3066 tests",
+      "exit_code": 0,
+      "sha256": "87d472df5e3d90f39418bf20e9a00a966ac73ccb0888d9dde25d0140c312f6ba",
+      "bytes": 230632
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/frontend-typecheck.log",
+      "scope": "vue-tsc --noEmit",
+      "exit_code": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/frontend-build.log",
+      "scope": "Production Vite build",
+      "exit_code": 0,
+      "sha256": "20065ad9cae0e0e935b6e73cd29dd7b5bbcea08161e9f29398dbd180786ff2ff",
+      "bytes": 45036
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/frontend-lint-final.log",
+      "scope": "Full frontend ESLint, after formatting-only correction",
+      "exit_code": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/frontend-final-incremental.log",
+      "scope": "Post-format funding dialog, reconciliation and locale checks: 3 files, 31 tests",
+      "exit_code": 0,
+      "sha256": "80e82bad2e10182c88e4201840e19bd6ba1902dd2963d125208a79d1d3679ac6",
+      "bytes": 675
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/backend-lint-final.log",
+      "scope": "Full backend golangci-lint: 0 issues",
+      "exit_code": 0,
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "bytes": 10
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/deployment-checks.log",
+      "scope": "8 deployment and 11 development Python tests plus all CI Compose/security/runtime/Caddy shell checks",
+      "exit_code": 0,
+      "sha256": "5d4b862ecb5ed3d759ea12024cf07f81dccda742697eaa9e0dd4932296020ecb",
+      "bytes": 1150
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/routes-audit-green.log",
+      "scope": "Root route authorization/audit and cleanup wiring checks",
+      "exit_code": 0,
+      "sha256": "21ae4157c916a4be1031a9c9923ee054e06fa637531c380d790d5b2f0c0b3066",
+      "bytes": 181
+    },
+    {
+      "log": ".superpowers/sdd/2026-10-28-marketplace-review-fixes/wire-generate.log",
+      "scope": "Wire generation",
+      "exit_code": 0,
+      "sha256": "32bc8db97a20f7b663a07b4241efd0fe4b0c0c2ac4688b5939affa543640125b",
+      "bytes": 224
+    }
+  ]
+}

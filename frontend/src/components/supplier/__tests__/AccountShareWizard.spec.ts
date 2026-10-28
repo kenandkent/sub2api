@@ -21,8 +21,8 @@ async function configure(wrapper: ReturnType<typeof setup>, type: 'api_key' | 'o
 beforeEach(() => { vi.resetAllMocks(); localStorage.clear() })
 describe('account share wizard', () => {
   it('retains non-sensitive fields when authorization fails and clears the key', async () => {
-    api.createAccount.mockRejectedValue({ status: 400 })
-    const wrapper = setup(); await configure(wrapper); await wrapper.get('form').trigger('submit'); await flushPromises()
+    api.createAccount.mockRejectedValue({ status: 400 }); api.getSupplierOperation.mockResolvedValue({ status: 'failed' })
+    const wrapper = setup(); await configure(wrapper); await wrapper.get('form').trigger('submit'); await flushPromises(); await wrapper.get('[data-test=check-operation]').trigger('click'); await flushPromises()
     expect(wrapper.text()).toContain('marketplace.authorizationFailed')
     await wrapper.get('[data-test="back"]').trigger('click')
     expect((wrapper.get('[data-test="name"]').element as HTMLInputElement).value).toBe('My account')
@@ -30,7 +30,7 @@ describe('account share wizard', () => {
     expect((wrapper.get('[data-test="api-key"]').element as HTMLInputElement).value).toBe('')
   })
   it('reports a rejected OAuth state and never displays callback credentials', async () => {
-    api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'session' }); api.completeAuthorization.mockRejectedValue({ status: 400 }); vi.spyOn(window, 'open').mockImplementation(() => null)
+    api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'session' }); api.completeAuthorization.mockRejectedValue({ status: 400 }); api.getAuthorizationStatus.mockResolvedValue({ status: 'failed' }); vi.spyOn(window, 'open').mockImplementation(() => null)
     const wrapper = setup('oauth'); await configure(wrapper, 'oauth'); await wrapper.get('form').trigger('submit'); await flushPromises()
     await wrapper.get('input[autocomplete=off]').setValue('https://example.test/callback?state=bad&code=secretcode')
     await wrapper.get('form').trigger('submit'); await flushPromises()
@@ -69,7 +69,7 @@ describe('account share wizard', () => {
   })
 
   it('clears consumed authorization sessions after definitive state rejection', async () => {
-    api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'old' }); api.completeAuthorization.mockRejectedValue({ status: 400 })
+    api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'old' }); api.completeAuthorization.mockRejectedValue({ status: 400 }); api.getAuthorizationStatus.mockResolvedValue({ status: 'failed' })
     const wrapper = setup('oauth'); await configure(wrapper, 'oauth'); await wrapper.get('form').trigger('submit'); await flushPromises()
     await wrapper.get('input[autocomplete=off]').setValue('https://example.test/?state=bad&code=bad'); await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(wrapper.find('[data-test="authorization-link"]').exists()).toBe(false)
@@ -102,7 +102,7 @@ describe('account share wizard', () => {
     api.createAccount.mockRejectedValue({ code: 'ETIMEDOUT' }); api.getSupplierOperation.mockResolvedValue({ status: 'completed', account_id: 9 })
     const wrapper = setup(); await configure(wrapper); await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(wrapper.text()).toContain('marketplace.operationUnknown')
-    expect(routeGuard.leave?.()).toBe(false)
+    expect(routeGuard.leave?.()).toBe(true)
     await wrapper.get('[data-test="check-operation"]').trigger('click'); await flushPromises()
     expect(api.createAccount).toHaveBeenCalledTimes(1); expect(wrapper.emitted('created')?.[0]).toEqual([9])
   })
@@ -140,4 +140,50 @@ describe('account share wizard', () => {
     expect(wrapper.text()).toContain('marketplace.versionConflict'); expect(wrapper.text()).not.toContain('marketplace.operationUnknown'); expect(wrapper.text()).toContain('Other'); expect(wrapper.get('[data-test="create"]').attributes('disabled')).toBeDefined()
   })
 
+})
+
+it('recovers an in-flight API key creation without saving its secret or changing the operation key', async () => {
+  sessionStorage.clear()
+  let resolve!: (value: unknown) => void; let retried: unknown
+  api.createAccount.mockImplementationOnce(() => new Promise(r => { resolve = r })).mockImplementationOnce(async (payload, key) => { retried = [{ ...payload }, key]; return {} })
+  const first = setup(); await first.setProps({ ownerId: 42 } as any); await configure(first); await first.get('form').trigger('submit'); await flushPromises()
+  const op = api.createAccount.mock.calls[0][1]
+  expect(JSON.stringify(sessionStorage)).toContain(op); expect(JSON.stringify(sessionStorage)).not.toContain('secret')
+  first.unmount()
+  const second = setup(); await second.setProps({ ownerId: 42 } as any); await flushPromises()
+  await second.get('[data-test=recovery-key]').setValue('secret'); await second.get('[data-test=retry-creation]').trigger('click'); await flushPromises()
+  expect(retried).toEqual([expect.objectContaining({ name: 'My account', api_key: 'secret', allowed_models: ['model'] }), op])
+  resolve({}); second.unmount(); sessionStorage.clear()
+})
+
+it('restores an uncertain OAuth completion without persisting callback secrets and surfaces manual review', async () => {
+  sessionStorage.clear(); api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 's1' }); api.completeAuthorization.mockRejectedValue({ code: 'ETIMEDOUT' }); api.getAuthorizationStatus.mockResolvedValue({ status: 'needs_review' })
+  const first = setup('oauth'); await first.setProps({ ownerId: 42 } as any); await configure(first, 'oauth'); await first.get('form').trigger('submit'); await flushPromises(); await first.get('input[autocomplete=off]').setValue('https://example.test/?state=private-state&code=private-code'); await first.get('form').trigger('submit'); await flushPromises()
+  expect(JSON.stringify(sessionStorage)).toContain('s1'); expect(JSON.stringify(sessionStorage)).not.toContain('private-state'); expect(JSON.stringify(sessionStorage)).not.toContain('private-code'); first.unmount()
+  const second = setup('oauth'); await second.setProps({ ownerId: 42 } as any); await flushPromises(); await second.get('[data-test=check-authorization]').trigger('click'); await flushPromises()
+  expect(second.text()).toContain('marketplace.authorizationNeedsReview'); expect(api.completeAuthorization).toHaveBeenCalledTimes(1); second.unmount(); sessionStorage.clear()
+})
+it('restores an uncertain configuration CAS and retries the original version and payload', async () => {
+  sessionStorage.clear(); api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 's1' }); api.completeAuthorization.mockResolvedValue({ account_id: 42 }); api.getAccount.mockResolvedValue({ id: 42, name: 'Old', concurrency: 1, offer: { version: 3, allowed_models: ['model'] } }); api.updateAccount.mockRejectedValueOnce({ code: 'ETIMEDOUT' }).mockResolvedValueOnce({})
+  const first = setup('oauth'); await first.setProps({ ownerId: 42 } as any); await configure(first, 'oauth'); await first.get('form').trigger('submit'); await flushPromises(); await first.get('input[autocomplete=off]').setValue('https://example.test/?state=s&code=c'); await first.get('form').trigger('submit'); await flushPromises()
+  const original = api.updateAccount.mock.calls[0]; expect(JSON.stringify(sessionStorage)).toContain('configuration'); first.unmount()
+  const second = setup('oauth'); await second.setProps({ ownerId: 42 } as any); await flushPromises(); await second.get('[data-test=retry-patch]').trigger('click'); await flushPromises()
+  expect(api.updateAccount.mock.calls[1]).toEqual(original); expect(api.completeAuthorization).toHaveBeenCalledTimes(1); second.unmount(); sessionStorage.clear()
+})
+
+it('ignores a delayed account creation response after the user changes', async () => {
+  sessionStorage.clear(); let resolve!: (value: unknown) => void; api.createAccount.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+  const w = setup(); await w.setProps({ ownerId: 42 } as any); await configure(w); await w.get('form').trigger('submit'); await flushPromises(); await w.setProps({ ownerId: 43 } as any); resolve({}); await flushPromises()
+  expect(w.emitted('created')).toBeUndefined(); await w.get('[data-test=back]').trigger('click'); expect((w.get('[data-test=name]').element as HTMLInputElement).value).not.toBe('My account'); w.unmount(); sessionStorage.clear()
+})
+
+it('does not apply a previous user authorization status after switching users', async () => {
+  sessionStorage.clear(); api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'old-session' }); api.completeAuthorization.mockRejectedValue({ code: 'ETIMEDOUT' }); let resolveStatus!: (value: unknown) => void; api.getAuthorizationStatus.mockImplementation(() => new Promise(r => { resolveStatus = r }))
+  const w = setup('oauth'); await w.setProps({ ownerId: 42 } as any); await configure(w, 'oauth'); await w.get('form').trigger('submit'); await flushPromises(); await w.get('input[autocomplete=off]').setValue('https://example.test/?state=s&code=c'); await w.get('form').trigger('submit'); await flushPromises(); await w.setProps({ ownerId: 43 } as any); resolveStatus({ status: 'completed', account_id: 99 }); await flushPromises()
+  expect(w.emitted('created')).toBeUndefined(); expect(w.text()).not.toContain('old-session'); expect(sessionStorage.getItem('supplier-create-operation:43')).toBeNull(); w.unmount(); sessionStorage.clear()
+})
+
+it('keeps the configuration operation after an ambiguous 400 and retries the same CAS', async () => {
+  sessionStorage.clear(); api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 's1' }); api.completeAuthorization.mockResolvedValue({ account_id: 42 }); api.getAccount.mockResolvedValue({ id: 42, name: 'Old', concurrency: 1, offer: { version: 3, allowed_models: ['model'] } }); api.updateAccount.mockRejectedValueOnce({ status: 400 }).mockResolvedValueOnce({})
+  const w = setup('oauth'); await w.setProps({ ownerId: 42 } as any); await configure(w, 'oauth'); await w.get('form').trigger('submit'); await flushPromises(); await w.get('input[autocomplete=off]').setValue('https://example.test/?state=s&code=c'); await w.get('form').trigger('submit'); await flushPromises(); expect(w.text()).toContain('marketplace.operationUnknown'); await w.get('[data-test=retry-patch]').trigger('click'); await flushPromises(); expect(api.updateAccount.mock.calls[1]).toEqual(api.updateAccount.mock.calls[0]); w.unmount(); sessionStorage.clear()
 })

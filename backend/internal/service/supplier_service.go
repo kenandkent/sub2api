@@ -38,7 +38,7 @@ type UserCapabilities struct {
 type SupplierRepository interface {
 	GetProfile(context.Context, int64) (*SupplierProfile, error)
 	Apply(context.Context, int64, int64, map[string]string) (*SupplierProfile, error)
-	Review(context.Context, int64, int64, SupplierStatus, string) (*SupplierProfile, error)
+	Review(context.Context, int64, int64, int64, SupplierStatus, string) (*SupplierProfile, error)
 	ListProfiles(context.Context, int, int) ([]SupplierProfile, int64, error)
 	ListAccounts(context.Context, int64) ([]SupplierAccount, error)
 	GetAccount(context.Context, int64, int64) (*SupplierAccount, error)
@@ -133,12 +133,12 @@ func (s *SupplierService) Apply(ctx context.Context, user, agreement int64, fiel
 	}
 	return s.repo.Apply(ctx, user, agreement, fields)
 }
-func (s *SupplierService) Review(ctx context.Context, user, admin int64, status SupplierStatus, reason string) (*SupplierProfile, error) {
+func (s *SupplierService) Review(ctx context.Context, user, admin, version int64, status SupplierStatus, reason string) (*SupplierProfile, error) {
 	reason = strings.TrimSpace(reason)
-	if user <= 0 || admin <= 0 || reason == "" || len(reason) > 1000 || (status != SupplierStatusActive && status != SupplierStatusRejected && status != SupplierStatusSuspended) {
+	if user <= 0 || admin <= 0 || version <= 0 || reason == "" || len(reason) > 1000 || (status != SupplierStatusActive && status != SupplierStatusRejected && status != SupplierStatusSuspended) {
 		return nil, apperrors.BadRequest("invalid_review", "Valid status and reason are required")
 	}
-	return s.repo.Review(ctx, user, admin, status, reason)
+	return s.repo.Review(ctx, user, admin, version, status, reason)
 }
 func (s *SupplierService) ListProfiles(ctx context.Context, page, pageSize int) ([]SupplierProfile, int64, error) {
 	return s.repo.ListProfiles(ctx, page, pageSize)
@@ -184,6 +184,7 @@ func validSupplierAgreement(text, raw string) bool {
 }
 
 type SupplierOptions struct {
+	PolicyVersion          *int64                   `json:"policy_version"`
 	Providers              []SupplierProviderOption `json:"providers"`
 	AgreementText          string                   `json:"agreement_text"`
 	AgreementURL           string                   `json:"agreement_url"`

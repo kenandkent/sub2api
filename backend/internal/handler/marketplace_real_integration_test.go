@@ -98,6 +98,7 @@ type realGatewayUpstream struct {
 	entered           chan struct{}
 	release           chan struct{}
 	before            func()
+	honorContext      bool
 	active, peak      map[int64]int
 }
 
@@ -122,7 +123,15 @@ func (u *realGatewayUpstream) Do(req *http.Request, _ string, account int64, _ i
 		case u.entered <- struct{}{}:
 		default:
 		}
-		<-u.release
+		if u.honorContext {
+			select {
+			case <-u.release:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		} else {
+			<-u.release
+		}
 	}
 	if u.err != nil {
 		return nil, u.err
@@ -187,7 +196,8 @@ func newRealGatewayFixture(t *testing.T, db *sql.DB, rdb *redis.Client, caps ...
 	exec(`INSERT INTO marketplace_policies(version,fee_bps,hold_hours,max_supplier_concurrency,minimum_payout_usd,published_by,published_at) VALUES($1,1000,0,$3,0,$2,now())`, version, f.owner, maxConcurrency)
 	exec(`INSERT INTO marketplace_price_versions(version,rules,published_by,published_at) VALUES($1,$2,$3,now())`, version, string(data), f.owner)
 	f.quote = service.QuoteSnapshot{Currency: "USD", PublicModel: "public", ActualModel: "gpt-5.4", PriceVersion: version, PolicyVersion: version, RateMultiplier: &rate, Tiers: tiers, FeeBPS: 1000, SnapshotAt: time.Now().UTC()}
-	f.cfg = &config.Config{RunMode: config.RunModeStandard, Marketplace: config.MarketplaceConfig{Enabled: true, DispatchEnabled: true, Providers: []config.MarketplaceProviderConfig{{Platform: "openai", AccountTypes: []string{"apikey"}, Models: []string{"gpt-5.4"}}}}}
+	f.cfg = &config.Config{RunMode: config.RunModeStandard, Marketplace: config.MarketplaceConfig{Enabled: true, DispatchEnabled: true, Providers: []config.MarketplaceProviderConfig{{Platform: "openai", AccountTypes: []string{"apikey"}, Models: []string{"gpt-5.4"}, MaxBillableInputTokensByModel: map[string]int64{"gpt-5.4": 1000}}}}}
+	f.cfg.Gateway.ConcurrencySlotTTLMinutes = 15
 	account := service.Account{ID: f.account, OwnerUserID: &f.owner, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{f.group}, Credentials: map[string]any{"_supplier_envelope": sealed}, Extra: map[string]any{"openai_responses_supported": true}}
 	f.repo = &grokCredentialHandlerRepo{accounts: []service.Account{account}, missingOnGet: map[int64]bool{}}
 	return f
@@ -244,6 +254,9 @@ func (f *realGatewayFixture) router(t *testing.T, up *realGatewayUpstream, buyer
 		keys[fmt.Sprint(b.id)] = &service.APIKey{ID: b.key, UserID: b.id, GroupID: &f.group, User: &service.User{ID: b.id, Status: service.StatusActive}, Group: &group}
 	}
 	router.Use(func(c *gin.Context) {
+		if c.GetHeader("X-Require-Network-Deadline") != "true" {
+			c.Writer = &marketplaceDeadlineTestWriter{ResponseWriter: c.Writer}
+		}
 		selected := key
 		if len(keys) > 0 {
 			selected = keys[c.GetHeader("X-Test-Buyer")]
@@ -335,7 +348,10 @@ func TestMarketplaceGatewayRealInfrastructure(t *testing.T) {
 		body := `{"model":"public","input":"hello"}`
 		rec := sendReal(router, "/v1/responses", body, "same")
 		require.Equal(t, 200, rec.Code, rec.Body.String())
-		require.Equal(t, 409, sendReal(router, "/v1/responses", body, "same").Code)
+		replay := sendReal(router, "/v1/responses", body, "same")
+		require.Equal(t, 200, replay.Code)
+		require.Contains(t, replay.Body.String(), `"status":"settled"`)
+		require.Contains(t, replay.Body.String(), `"receipt_id":`)
 		require.Equal(t, 1, up.count())
 		var state string
 		var charge, balance, frozen, pending decimal.Decimal

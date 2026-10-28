@@ -75,6 +75,11 @@ type migrationChecksumCompatibilityRule struct {
 // 规则必须同时匹配「迁移名 + 数据库 checksum + 当前文件 checksum」且两者都落在该迁移的已知版本集合内才会放行，
 // 避免放宽全局校验，也允许将误改的历史 migration 回滚为已发布版本而不要求人工修 checksum。
 var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibilityRule{
+	// These exact prototype versions built large indexes in transactional DDL.
+	// The split versions move index builds to new concurrent migrations. Existing
+	// prototype databases retain their recorded checksums and already-built indexes.
+	"250_marketplace_identity.sql":                            newMigrationChecksumCompatibilityRule("afba1cc0ef30d478868c8b1f2e927f3fb8ed41bd35fb4aff87d96a8fe79a4373", "bd0d4c07d48ebf7b3d7d97e702245e6610f484921f2290ed3d6e19f49f8a9bf8"),
+	"265_marketplace_projection.sql":                          newMigrationChecksumCompatibilityRule("bcd9454b10ecddf96534fab9ff9baa325c1d7bb6dc55272ada881b3bbc3753bc", "4f306df8f38ded0718413dc94cff6c01c86dd69f527fb6179b9294250bbaeab2"),
 	"054_drop_legacy_cache_columns.sql":                       newMigrationChecksumCompatibilityRule("82de761156e03876653e7a6a4eee883cd927847036f779b0b9f34c42a8af7a7d", "182c193f3359946cf094090cd9e57d5c3fd9abaffbc1e8fc378646b8a6fa12b4"),
 	"061_add_usage_log_request_type.sql":                      newMigrationChecksumCompatibilityRule("66207e7aa5dd0429c2e2c0fabdaf79783ff157fa0af2e81adff2ee03790ec65c", "08a248652cbab7cfde147fc6ef8cda464f2477674e20b718312faa252e0481c0", "222b4a09c797c22e5922b6b172327c824f5463aaa8760e4f621bc5c22e2be0f3"),
 	"109_auth_identity_compat_backfill.sql":                   newMigrationChecksumCompatibilityRule("0580b4602d85435edf9aca1633db580bb3932f26517f75134106f80275ec2ace", "551e498aa5616d2d91096e9d72cf9fb36e418ee22eacc557f8811cadbc9e20ee"),
@@ -309,6 +314,22 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 		return nil
 	case usageLogsUpstreamRequestIDIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamRequestIDIndex)
+	case "249_zz_marketplace_owner_indexes_notx.sql", "265_z_marketplace_receipt_index_notx.sql", "283_marketplace_indexes_notx.sql":
+		var names []string
+		switch name {
+		case "249_zz_marketplace_owner_indexes_notx.sql":
+			names = []string{"accounts_owner_user_id_idx", "accounts_id_owner_user_id_key"}
+		case "265_z_marketplace_receipt_index_notx.sql":
+			names = []string{"usage_logs_marketplace_receipt_unique"}
+		case "283_marketplace_indexes_notx.sql":
+			names = []string{"marketplace_captures_pending_maturity_idx", "marketplace_captures_owner_ledger_idx"}
+		}
+		for _, indexName := range names {
+			if err := dropInvalidIndexIfPresent(ctx, db, indexName); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return nil
 	}

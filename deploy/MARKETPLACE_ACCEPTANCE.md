@@ -2,6 +2,8 @@
 
 状态：**本地软件验证已执行并记录，生产启用未批准。** 功能保留默认关闭。本次结论不包含真实模型、银行、线上部署或生产数据迁移验证。
 
+本轮 F01–F30 审查修复和最新验证结果见 [审查修复记录](marketplace-evidence/2026-10-28-review-repairs.md) 与 [本轮指纹清单](marketplace-evidence/review-repair-manifest.json)；下方旧版测试数量保留为原实施阶段记录。
+
 详细 R01–R12 测试映射、命令、环境、回归问题与未执行项见 [本地验证记录](marketplace-evidence/2026-10-28-local-validation.md)；执行日志指纹见 [验证清单](marketplace-evidence/verification-manifest.json)。设计与计划已同步用户最新决定：误判未执行后仅登记异常和证据，补偿金额由人工核定，不自动入供应收益、不再次扣消费者。
 
 ## 已验证的软件行为

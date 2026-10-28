@@ -1,0 +1,1 @@
+ALTER TABLE usage_logs VALIDATE CONSTRAINT usage_logs_marketplace_receipt_id_fkey;

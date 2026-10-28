@@ -13,6 +13,7 @@ type MarketplaceHandlers struct {
 	Catalog                *MarketplaceCatalogHandler
 	Refunds                *MarketplaceRefundHandler
 	PaymentFundingRecovery *PaymentFundingRecoveryHandler
+	Vault                  *MarketplaceVaultRotationHandler
 	Gateway                *service.MarketplaceGateway
 	Stop                   func()
 }

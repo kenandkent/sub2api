@@ -175,6 +175,8 @@ marketplace:
       base_url: %s/v1
       account_types: [apikey]
       models: [mock-text]
+      max_billable_input_tokens_by_model:
+        mock-text: 1000
 `, strconv.Quote(filepath.Join(data, "pricing")), strconv.Quote(filepath.Join(data, "fallback.json")), strconv.Quote(filepath.Join(data, "plugins")), strconv.Quote(filepath.Join(data, "app.log")), base64.StdEncoding.EncodeToString(key), fake.URL)
 	configPath := filepath.Join(data, "e2e-config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(cfg), 0600))
@@ -296,6 +298,9 @@ marketplace:
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer "+keys[tc.protocol])
 			req.Header.Set("Content-Type", "application/json")
+			if i == 0 {
+				req.Header.Set("Idempotency-Key", "fixture-replay-first")
+			}
 			if i == 2 {
 				payload, err := rdb.Get(ctx, fmt.Sprintf("sched:meta:%d", account)).Bytes()
 				require.NoError(t, err)
@@ -317,6 +322,50 @@ marketplace:
 			}
 		})
 	}
+	t.Run("production auth returns settled replay after quota and balance exhaustion", func(t *testing.T) {
+		first := cases[0]
+		_, err := db.Exec(`UPDATE api_keys SET status='quota_exhausted' WHERE key=$1`, keys[first.protocol])
+		require.NoError(t, err)
+		_, err = db.Exec(`UPDATE users SET balance=0 WHERE id=$1`, buyer)
+		require.NoError(t, err)
+		require.NoError(t, rdb.FlushDB(ctx).Err())
+		// Start a fresh process so an active-key in-memory auth cache cannot mask
+		// missing replay-resolver wiring after the key has exhausted its quota.
+		require.NoError(t, cmd.Process.Kill())
+		var stopped *exec.ExitError
+		require.ErrorAs(t, cmd.Wait(), &stopped)
+		previous := cmd
+		cmd = exec.Command(previous.Path, previous.Args[1:]...)
+		cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = previous.Dir, previous.Env, previous.Stdout, previous.Stderr
+		require.NoError(t, cmd.Start())
+		client.CloseIdleConnections()
+		require.Eventually(t, func() bool {
+			response, e := client.Get(base + "/health")
+			if e != nil {
+				return false
+			}
+			defer response.Body.Close()
+			return response.StatusCode == http.StatusOK
+		}, 45*time.Second, 250*time.Millisecond, "cold server did not start")
+		req, err := http.NewRequest(http.MethodPost, base+first.path, strings.NewReader(first.body))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+keys[first.protocol])
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "fixture-replay-first")
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var replay struct {
+			ReceiptID string `json:"receipt_id"`
+			Status    string `json:"status"`
+		}
+		require.NoError(t, json.Unmarshal(body, &replay))
+		require.NotEmpty(t, replay.ReceiptID)
+		require.Equal(t, "settled", replay.Status)
+	})
 	mu.Lock()
 	gotCalls := calls
 	mu.Unlock()

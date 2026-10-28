@@ -780,6 +780,19 @@ func (w *opsCaptureWriter) Flush() {
 	defer finishDelegatedCall(state)
 	rw.Flush()
 }
+
+// SetWriteDeadline preserves the pooled writer lease for the whole delegated
+// operation. Returning the underlying writer through Unwrap would let stale
+// handles reach a subsequent request after this lease is released.
+func (w *opsCaptureWriter) SetWriteDeadline(deadline time.Time) error {
+	state, rw := w.beginDelegatedCall()
+	if state == nil {
+		return errors.New("response writer released")
+	}
+	state.mu.Unlock()
+	defer finishDelegatedCall(state)
+	return http.NewResponseController(rw).SetWriteDeadline(deadline)
+}
 func (w *opsCaptureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	state, rw := w.beginDelegatedCall()
 	if state == nil {

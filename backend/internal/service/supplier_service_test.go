@@ -30,7 +30,7 @@ func (r *supplierTestRepo) Apply(_ context.Context, id, agreement int64, fields 
 	r.profile = &SupplierProfile{UserID: id, Status: SupplierStatusPending, AgreementVersion: agreement, ApplicationFields: fields}
 	return r.profile, nil
 }
-func (r *supplierTestRepo) Review(_ context.Context, user, admin int64, status SupplierStatus, reason string) (*SupplierProfile, error) {
+func (r *supplierTestRepo) Review(_ context.Context, user, admin, version int64, status SupplierStatus, reason string) (*SupplierProfile, error) {
 	return nil, errors.New("unused")
 }
 func (r *supplierTestRepo) ListProfiles(context.Context, int, int) ([]SupplierProfile, int64, error) {

@@ -52,11 +52,18 @@ func registerAdminSupplierRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	marketplace.GET("/funding-refunds", m.PaymentFundingRecovery.List)
 	marketplace.POST("/funding-refunds/resolve", m.PaymentFundingRecovery.Resolve)
 	marketplace.POST("/funding-chargebacks", m.PaymentFundingRecovery.Chargeback)
+	marketplace.POST("/funding-reclassifications", m.PaymentFundingRecovery.Reclassify)
+	marketplace.GET("/funding-risks", m.PaymentFundingRecovery.Risks)
+	marketplace.POST("/funding-risks/:id/clear", m.PaymentFundingRecovery.ClearRisk)
+	if m.Vault != nil {
+		marketplace.POST("/vault/rotate", m.Vault.Rotate)
+	}
 	marketplace.GET("/policies", m.Catalog.AdminCurrent)
 	marketplace.POST("/policies", m.Catalog.Publish)
 	marketplace.POST("/wallets/:id/migrate", m.Catalog.MigrateWallet)
 	marketplace.GET("/reconciliation", m.Finance.AdminReconciliation)
 	marketplace.POST("/statements/generate", m.Finance.AdminGenerateStatement)
+	marketplace.GET("/receipts/:id", m.Finance.AdminReceipt)
 	marketplace.POST("/receipts/:id/reconcile", m.Finance.AdminResolve)
 	marketplace.POST("/receipts/:id/execution-incidents", m.Finance.AdminRegisterExecutionIncident)
 	marketplace.GET("/receipts/:id/execution-incidents", m.Finance.AdminListExecutionIncidents)

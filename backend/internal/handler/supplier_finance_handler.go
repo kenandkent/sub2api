@@ -14,6 +14,7 @@ import (
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type SupplierFinanceRecoveryResolver interface {
@@ -176,17 +177,17 @@ func (h *SupplierFinanceHandler) ExportStatement(c *gin.Context) {
 	}
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"month", "currency", "version", "opening_pending", "opening_available", "opening_reserved", "closing_pending", "closing_available", "closing_reserved", "earned_net", "platform_fee", "refund_net", "payout_paid", "cutoff_ledger_id"})
-	fields := []string{v.Month, v.Currency, strconv.Itoa(v.Version), v.OpeningPending, v.OpeningAvailable, v.OpeningReserved, v.ClosingPending, v.ClosingAvailable, v.ClosingReserved, v.EarnedNet, v.PlatformFee, v.RefundNet, v.PayoutPaid, strconv.FormatInt(v.CutoffLedgerID, 10)}
+	_ = w.Write([]string{"month", "currency", "version", "opening_pending", "opening_available", "opening_reserved", "opening_debt", "closing_pending", "closing_available", "closing_reserved", "closing_debt", "debt_offset", "earned_net", "platform_fee", "refund_net", "payout_paid", "cutoff_ledger_id"})
+	fields := []string{v.Month, v.Currency, strconv.Itoa(v.Version), v.OpeningPending, v.OpeningAvailable, v.OpeningReserved, v.OpeningDebt, v.ClosingPending, v.ClosingAvailable, v.ClosingReserved, v.ClosingDebt, v.DebtOffset, v.EarnedNet, v.PlatformFee, v.RefundNet, v.PayoutPaid, strconv.FormatInt(v.CutoffLedgerID, 10)}
 	for i := range fields {
 		fields[i] = service.SupplierCSVCell(fields[i])
 	}
 	_ = w.Write(fields)
 	_ = w.Write([]string{})
-	_ = w.Write([]string{"operation_id", "date", "account_id", "account_name", "model", "kind", "consumer_charge", "platform_fee", "supplier_net"})
+	_ = w.Write([]string{"operation_id", "date", "account_id", "account_name", "model", "kind", "consumer_charge", "platform_fee", "supplier_net", "supplier_debt_offset"})
 	for page := 1; ; page++ {
 		for _, e := range entries.Items {
-			row := []string{e.OperationID, e.Date.UTC().Format(time.RFC3339Nano), strconv.FormatInt(e.AccountID, 10), e.AccountName, e.Model, e.Kind, e.ConsumerCharge, e.PlatformFee, e.SupplierNet}
+			row := []string{e.OperationID, e.Date.UTC().Format(time.RFC3339Nano), strconv.FormatInt(e.AccountID, 10), e.AccountName, e.Model, e.Kind, e.ConsumerCharge, e.PlatformFee, e.SupplierNet, e.SupplierDebtOffset}
 			for i := range row {
 				row[i] = service.SupplierCSVCell(row[i])
 			}
@@ -217,6 +218,24 @@ func (h *SupplierFinanceHandler) AdminReconciliation(c *gin.Context) {
 	}
 	p, n := response.ParsePagination(c)
 	v, err := h.finance.Reconciliation(c.Request.Context(), c.Query("status"), p, n)
+	if err != nil {
+		financeError(c, err)
+		return
+	}
+	response.Success(c, v)
+}
+func (h *SupplierFinanceHandler) AdminReceipt(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	actor, ok := h.actor(c, true, true)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.BadRequest(c, "Invalid receipt")
+		return
+	}
+	v, err := h.finance.AdminReceipt(c.Request.Context(), actor, id.String())
 	if err != nil {
 		financeError(c, err)
 		return

@@ -39,3 +39,19 @@ func gatewayMaxBodySize(cfg *config.Config) int64 {
 	}
 	return cfg.Gateway.MaxBodySize
 }
+
+// readMarketplaceRawJSON captures the decoded wire payload before the
+// compatibility normalizer rewrites BOMs or control characters.
+func readMarketplaceRawJSON(req *http.Request, cfg *config.Config) ([]byte, error) {
+	body, err := pkghttputil.ReadRequestBodyWithPrealloc(req)
+	if err != nil {
+		return nil, err
+	}
+	if limit := gatewayMaxBodySize(cfg); limit > 0 && int64(len(body)) > limit {
+		return nil, &http.MaxBytesError{Limit: limit}
+	}
+	return body, nil
+}
+func normalizeMarketplaceRawJSON(body []byte, cfg *config.Config) ([]byte, error) {
+	return pkghttputil.NormalizeLenientJSONRequestBody(body, gatewayMaxBodySize(cfg))
+}

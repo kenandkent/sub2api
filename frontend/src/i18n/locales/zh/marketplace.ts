@@ -1,4 +1,16 @@
-export default { marketplace: {
+export default {
+ marketplace: {
+  operationReference: '操作编号',
+
+  authorizationNeedsReview: '授权需要人工审核。请联系支持人员并保留此操作记录，不要重新发起授权。',
+
+  reviewPolicySummary: '政策版本 {version}；平台费率 {fee} 基点；收益等待期 {hours} 小时。',
+
+  opening_debt: '期初债务', closing_debt: '期末债务', debt_offset: '债务抵扣', supplierDebtOffset: '债务抵扣', credentialFingerprint: '凭据指纹', present: '存在', absent: '不存在',
+
+  acceptReviewPolicy: '我已了解并同意当前价格和条款。',
+  policyChanged: '政策或账号已变化，请重新核对最新条款后提交。',
+
   consumer: '消费者模式', supplier: '供应者模式', switchWorkspace: '切换工作区',
   unsavedTitle: '未保存的修改', unsavedMessage: '放弃未保存的修改并切换？',
   onboarding: '供应申请', overview: '供应概览',
@@ -200,7 +212,7 @@ export default { marketplace: {
   payoutStatus_risk_cancelled: '风控取消',
   entryRefund: '退款',
   entryCapture: '扣款',
-  destinationRecoveryHelp: '离开页面时收款资料已清除。请稍后再次查询状态，或联系支持人员，再提交新的收款方式。',
+  destinationRecoveryHelp: '离开页面时收款资料已清除。请重新输入相同资料以重试同一操作，或查询操作状态。',
   earningStatus_pending: '待结算',
   earningStatus_matured: '已结算',
   earningStatus_reversed: '已冲正',

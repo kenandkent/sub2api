@@ -96,6 +96,18 @@ func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user i
 	if !errors.Is(err, sql.ErrNoRows) {
 		return true, err
 	}
+	// The user lock serializes this cap with refunds and chargebacks for the
+	// same owner. Do not lock the order here: payment claims lock it first.
+	var orderAmount, prior decimal.Decimal
+	if err = scanSingleRow(ctx, q, `SELECT amount FROM payment_orders WHERE id=$1 AND user_id=$2 AND order_type='balance'`, []any{order, user}, &orderAmount); err != nil {
+		return true, err
+	}
+	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state IN ('reserved','confirmed')),0)`, []any{order}, &prior); err != nil {
+		return true, err
+	}
+	if prior.Add(a).GreaterThan(orderAmount) {
+		return true, service.ErrInsufficientFunding
+	}
 	// Lock all lots in fixed order, and verify the projection before touching it.
 	rows, err := q.QueryContext(ctx, `SELECT id,kind,origin_type,origin_id,remaining,reserved FROM wallet_funding_lots WHERE user_id=$1 ORDER BY id FOR UPDATE`, user)
 	if err != nil {

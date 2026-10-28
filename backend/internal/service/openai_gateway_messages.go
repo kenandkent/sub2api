@@ -863,13 +863,13 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 						acc.ProcessEvent(&event)
 						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
 							if event.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+								replaceOpenAIUsageFromResponsesUsage(&usage, event.Usage, []byte(payload), "usage")
 								if response.Usage == nil {
 									response.Usage = event.Usage
 								}
 							}
 							if response.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+								replaceOpenAIUsageFromResponsesUsage(&usage, response.Usage, []byte(payload), "response.usage", "usage")
 							}
 							return response, usage, acc, nil
 						}
@@ -912,13 +912,13 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 
 			if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
 				if event.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+					replaceOpenAIUsageFromResponsesUsage(&usage, event.Usage, []byte(payload), "usage")
 					if response.Usage == nil {
 						response.Usage = event.Usage
 					}
 				}
 				if response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+					replaceOpenAIUsageFromResponsesUsage(&usage, response.Usage, []byte(payload), "response.usage", "usage")
 				}
 				return response, usage, acc, nil
 			}
@@ -1043,11 +1043,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					responseID = id
 				}
 				if event.Response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+					replaceOpenAIUsageFromResponsesUsage(&usage, event.Response.Usage, []byte(payload), "response.usage")
 				}
 			}
 			if event.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+				replaceOpenAIUsageFromResponsesUsage(&usage, event.Usage, []byte(payload), "usage")
 			}
 			// cyber_policy 致命不可重试：标记供 handler 事后记录；以 Anthropic SSE error 事件
 			// 回写让客户端感知并停止重试（F4），丢弃后续转换输出。
@@ -1380,6 +1380,29 @@ func buildAnthropicStreamErrorSSE(errType, message string) string {
 		return "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"" + errType + "\",\"message\":\"upstream error\"}}\n\n"
 	}
 	return "event: error\ndata: " + string(payload) + "\n\n"
+}
+
+// Preserve raw-source presence when converting the typed response for billing.
+func replaceOpenAIUsageFromResponsesUsage(dst *OpenAIUsage, src *apicompat.ResponsesUsage, payload []byte, paths ...string) {
+	// Once a valid raw report has been seen, a typed conversion of an
+	// incomplete object must not replace its counts with synthetic zeroes.
+	if dst.Reported {
+		parsed, ok := extractOpenAIUsageFromJSONBytes(payload)
+		valid := false
+		for _, path := range paths {
+			value := gjson.GetBytes(payload, path)
+			if value.Exists() {
+				valid = ok && parsed.Reported && openAIUsageHasReportedCounts(value)
+				break
+			}
+		}
+		if !valid {
+			return
+		}
+	}
+	reported := dst.Reported
+	*dst = copyOpenAIUsageFromResponsesUsage(src)
+	dst.Reported = reported
 }
 
 func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUsage {

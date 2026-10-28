@@ -309,7 +309,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
 
-		if u := extractCCStreamUsage(payload); u != nil {
+		if u := extractCCStreamUsage(payload); u != nil && (u.Reported || !st.Usage.Reported) {
 			st.Usage = *u
 		}
 

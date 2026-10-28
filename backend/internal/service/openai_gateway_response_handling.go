@@ -1239,8 +1239,13 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	if !ok {
 		return
 	}
+	if usage.Reported && !parsedUsage.Reported {
+		// Do not let a later incomplete usage object erase an actual report.
+		return
+	}
 	if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)) {
 		if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
+			usage.Reported = usage.Reported || parsedUsage.Reported
 			return
 		}
 		*usage = parsedUsage
@@ -1257,6 +1262,7 @@ func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {
 	if dst == nil {
 		return
 	}
+	dst.Reported = dst.Reported || src.Reported
 	if src.InputTokens > 0 {
 		dst.InputTokens = src.InputTokens
 	}
@@ -1367,6 +1373,17 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 	for _, candidate := range candidates {
 		if usage, ok := openAIUsageFromGJSON(gjson.GetBytes(body, candidate.usagePath)); ok {
 			mergeHostedImageGenToolUsage(gjson.GetBytes(body, candidate.imageUsagePath), &usage)
+			if usage.Reported {
+				objects := 0
+				for _, other := range candidates {
+					if gjson.GetBytes(body, other.usagePath).IsObject() {
+						objects++
+					}
+				}
+				if objects != 1 || openAIJSONHasDuplicateKeys(gjson.ParseBytes(body)) {
+					usage.Reported = false
+				}
+			}
 			return usage, true
 		}
 	}
@@ -1556,6 +1573,7 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		value.Get("prompt_tokens_details.image_tokens"),
 	)
 	return OpenAIUsage{
+		Reported:                 openAIUsageHasReportedCounts(value),
 		InputTokens:              int(inputTokens),
 		ImageInputTokens:         imageInputTokens,
 		OutputTokens:             int(outputTokens),
@@ -1563,6 +1581,48 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		CacheReadInputTokens:     cacheReadTokens,
 		ImageOutputTokens:        int(imageOutputTokens),
 	}, true
+}
+
+// Conflicting duplicate keys can be interpreted differently by the billing
+// parser and by JSON decoders, so they cannot establish trusted usage.
+func openAIJSONHasDuplicateKeys(value gjson.Result) bool {
+	if value.IsArray() {
+		found := false
+		value.ForEach(func(_, child gjson.Result) bool { found = openAIJSONHasDuplicateKeys(child); return !found })
+		return found
+	}
+	if !value.IsObject() {
+		return false
+	}
+	seen := make(map[string]struct{})
+	duplicate := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		if _, exists := seen[key.String()]; exists {
+			duplicate = true
+			return false
+		}
+		seen[key.String()] = struct{}{}
+		duplicate = openAIJSONHasDuplicateKeys(child)
+		return !duplicate
+	})
+	return duplicate
+}
+
+// openAIUsageHasReportedCounts accepts only a complete pair from the raw
+// usage object. Zero is a valid count; strings, fractional values and overflow
+// are not. Integral exponent notation is accepted when normalization agrees.
+// Never infer presence from normalized token totals.
+func openAIUsageHasReportedCounts(value gjson.Result) bool {
+	valid := func(v gjson.Result) bool {
+		n, ok := boundedJSONNonNegativeInt(v)
+		return ok && v.Int() == int64(n)
+	}
+	input, output := value.Get("input_tokens"), value.Get("output_tokens")
+	prompt, completion := value.Get("prompt_tokens"), value.Get("completion_tokens")
+	// Do not trust ambiguous mixed schemas: the legacy normalizer chooses
+	// fields independently and could otherwise produce different counts.
+	return (valid(input) && valid(output) && !prompt.Exists() && !completion.Exists()) ||
+		(valid(prompt) && valid(completion) && !input.Exists() && !output.Exists())
 }
 
 func openAICacheReadTokensFromUsage(value gjson.Result) int {
@@ -1741,7 +1801,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 
 	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
-		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
+		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed && (parsedUsage.Reported || !usage.Reported) {
 			*usage = parsedUsage
 		}
 		// When the terminal event has an empty output array, reconstruct

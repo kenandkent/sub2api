@@ -763,6 +763,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,
+		UsageReported:                 usage.Reported,
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,
@@ -885,6 +886,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			RequestID:                     requestID,
 			UpstreamHeaders:               resp.Header,
 			Usage:                         usage,
+			UsageReported:                 usage.Reported,
 			Model:                         originalModel,
 			BillingModel:                  billingModel,
 			UpstreamModel:                 upstreamModel,
@@ -928,10 +930,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if isTerminalEvent {
 			terminalEventType = strings.TrimSpace(event.Type)
 			if event.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+				replaceOpenAIUsageFromResponsesUsage(&usage, event.Usage, []byte(payload), "usage")
 			}
 			if event.Response != nil && event.Response.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+				replaceOpenAIUsageFromResponsesUsage(&usage, event.Response.Usage, []byte(payload), "response.usage")
 			}
 		}
 		if strings.TrimSpace(event.Type) == "response.failed" || strings.TrimSpace(event.Type) == "error" {

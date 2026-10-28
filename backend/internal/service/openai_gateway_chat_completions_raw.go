@@ -366,7 +366,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			if trimmedPayload != "[DONE]" {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
-				if u := extractCCStreamUsage(payload); u != nil {
+				if u := extractCCStreamUsage(payload); u != nil && (u.Reported || !usage.Reported) {
 					usage = *u
 				}
 				if firstTokenMs == nil && !usageOnlyChunk {
@@ -396,6 +396,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			RequestID:                     requestID,
 			UpstreamHeaders:               resp.Header,
 			Usage:                         usage,
+			UsageReported:                 usage.Reported,
 			Model:                         originalModel,
 			BillingModel:                  billingModel,
 			UpstreamModel:                 upstreamModel,
@@ -501,6 +502,9 @@ func isOpenAIChatUsageOnlyStreamChunk(payload string) bool {
 // CC 协议中 usage 仅出现在末尾 chunk（且仅当 include_usage 生效时），
 // 但上游可能在多个 chunk 中重复——总是用最新值。
 func extractCCStreamUsage(payload string) *OpenAIUsage {
+	if !gjson.Valid(payload) {
+		return nil
+	}
 	usageResult := gjson.Get(payload, "usage")
 	if !usageResult.Exists() || !usageResult.IsObject() {
 		return nil
@@ -508,6 +512,9 @@ func extractCCStreamUsage(payload string) *OpenAIUsage {
 	u, ok := openAIUsageFromGJSON(usageResult)
 	if !ok {
 		return nil
+	}
+	if u.Reported && openAIJSONHasDuplicateKeys(gjson.Parse(payload)) {
+		u.Reported = false
 	}
 	return &u
 }
@@ -566,6 +573,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,
+		UsageReported:                 usage.Reported,
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,

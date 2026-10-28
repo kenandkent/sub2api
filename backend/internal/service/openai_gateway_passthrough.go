@@ -526,6 +526,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		UpstreamHeaders:               resp.Header,
 		ResponseID:                    responseID,
 		Usage:                         *usage,
+		UsageReported:                 usage.Reported,
 		Model:                         reqModel,
 		UpstreamModel:                 upstreamPassthroughModel,
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
@@ -2410,7 +2411,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 
 	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
-		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
+		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed && (parsedUsage.Reported || !usage.Reported) {
 			*usage = parsedUsage
 		}
 		// When the terminal event has an empty output array, reconstruct

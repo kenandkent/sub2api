@@ -51,6 +51,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UsageReported)
 	require.NotNil(t, upstream.lastReq)
 
 	forwarded := upstream.lastBody
@@ -107,6 +108,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_SanitizesNativeToolItemIDs(t *tes
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
+			require.True(t, result.UsageReported)
 			require.NotNil(t, upstream.lastReq)
 			require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", upstream.lastReq.URL.String())
 			require.False(t, gjson.GetBytes(upstream.lastBody, "input.0.id").Exists())
@@ -149,6 +151,7 @@ func TestOpenAIGatewayService_SetupTokenLegacy_SanitizesAndTransforms(t *testing
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UsageReported)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", upstream.lastReq.URL.String())
 	require.Equal(t, false, gjson.GetBytes(upstream.lastBody, "store").Bool())

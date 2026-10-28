@@ -96,7 +96,7 @@ func refundPayoutFixture(t *testing.T) (string, string, int64, int64, *SupplierP
 	require.NoError(t, err)
 	dest, err := repo.CreateDestination(ctx, owner, "ending 1234", []byte("secret"), s+":dest", env)
 	require.NoError(t, err)
-	_, err = repo.VerifyDestination(ctx, dest.ID, admin, s+":verify")
+	_, err = repo.VerifyDestination(ctx, dest.ID, admin, s+":verify", "verified beneficiary fixture")
 	require.NoError(t, err)
 	payout, err := repo.Request(ctx, owner, dest.ID, decimal.NewFromInt(2), s+":request")
 	require.NoError(t, err)

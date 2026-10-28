@@ -1,4 +1,6 @@
 export default {
+  freezePayouts: '冻结提现', unfreezePayouts: '解除提现冻结', freezeHint: '请填写原因。解除冻结要求供应商没有未偿债务。',
+
   title: '共享市场', kind: '类型', difference: '差额', statusFilter: '状态筛选', filter: '筛选', receiptStatuses: '请求状态', unbalanced_transactions: '不平衡交易', wallet_differences: '钱包差异', funding_differences: '资金来源差异', aged_outbox: '滞留发件箱', uncertain_payouts: '结果未知的提现', migrateConfirm: '确认迁移并核对该用户钱包？请检查操作后的余额。', eligible_available: '共享可用余额', reserved: '冻结余额', excluded_available: '不可用于共享余额', debt: '债务', migrated: '已迁移', reconciled: '已对账',
   suppliers: '供应商申请', offers: '上架审核', policies: '共享市场政策', payouts: '提现管理', reconciliation: '资金对账',
   reviewHint: '查看申请详情并为每项决定记录理由。', id: '编号', status: '状态', account: '账号', supplier: '供应商', details: '详情', actions: '操作', review: '审核', agreement: '协议版本', frozen: '提现已冻结', notFrozen: '提现未冻结', enabled: '已启用', disabled: '已停用', version: '版本', decision: '决定', reason: '理由', active: '启用', approved: '通过', rejected: '拒绝', suspended: '暂停', confirmReview: '确认审核', reloadLatest: '重新加载最新版本', versionConflict: '记录已变化。输入已保留；请刷新并重新核对最新版本。', loadError: '加载失败。', actionError: '操作未能完成。重试前请核查当前状态。',

@@ -90,7 +90,7 @@ async function submit() {
     if (phase === 'complete' && ![400, 401, 403, 404, 410].includes(status || 0)) unknown.value = 'authorization'
     else if (phase === 'create' && ![400, 401, 403, 404, 410, 422].includes(status || 0)) unknown.value = 'creation'
     else if (phase === 'configure' && (status === 409 || ![400, 401, 403, 404, 410, 422].includes(status || 0))) { unknown.value = 'configuration'; inspectConflict = status === 409 }
-    else { if (phase === 'complete') { session.value = ''; authUrl.value = '' }; if (phase === 'create') operationKey.value = ''; error.value = status === 409 ? t('marketplace.versionConflict') : t('marketplace.authorizationFailed') }
+    else { if (phase === 'complete') { session.value = ''; authUrl.value = '' } if (phase === 'create') operationKey.value = ''; error.value = status === 409 ? t('marketplace.versionConflict') : t('marketplace.authorizationFailed') }
   } finally { busy.value = false }
   if (unknown.value === 'authorization') await checkAuthorization()
   else if (unknown.value === 'configuration' && inspectConflict) await checkOperation()

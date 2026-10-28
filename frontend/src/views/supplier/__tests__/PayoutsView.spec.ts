@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PayoutsView from '../PayoutsView.vue'
 const stepRun = vi.hoisted(() => vi.fn())
-const api = vi.hoisted(() => ({ listPayouts: vi.fn(), listDestinations: vi.fn(), getSupplierOptions: vi.fn(), getEarnings: vi.fn(), requestPayout: vi.fn(), getPayoutOperation: vi.fn(), getPayout: vi.fn() }))
+const api = vi.hoisted(() => ({ listPayouts: vi.fn(), listDestinations: vi.fn(), getSupplierOptions: vi.fn(), getEarnings: vi.fn(), requestPayout: vi.fn(), cancelPayout: vi.fn(), getPayoutOperation: vi.fn(), getPayout: vi.fn() }))
 vi.mock('@/api/supplier', () => api)
 vi.mock('@/stores/workMode', () => ({ useWorkModeStore: () => ({ dirty: false }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 42 } }) }))
@@ -63,4 +63,30 @@ describe('supplier payouts', () => {
     expect(api.requestPayout).toHaveBeenCalledTimes(2)
     expect(api.requestPayout.mock.calls[1]).toEqual(api.requestPayout.mock.calls[0])
   })
+  it('recovers an uncertain cancellation with the same key after checking status', async () => {
+    const payout = { id: 7, masked_label: 'bank', amount: '10.00', currency: 'USD', status: 'requested', created_at: '2026-01-01' }
+    api.listPayouts.mockResolvedValue([payout]); api.getPayout.mockResolvedValue(payout)
+    api.cancelPayout.mockRejectedValueOnce({ status: 0 }).mockResolvedValueOnce({ ...payout, status: 'cancelled' })
+    const w = mountView(); await flushPromises()
+    await w.findAll('button').find(b => b.text() === 'marketplace.cancelPayout')!.trigger('click')
+    const confirm = Array.from(document.body.querySelectorAll('button')).find(b => b.textContent?.trim() === 'common.confirm')
+    expect(confirm).toBeDefined(); confirm!.click(); await flushPromises()
+    await w.get('[data-test=check-cancellation]').trigger('click'); await flushPromises()
+    await w.get('[data-test=retry-cancellation]').trigger('click'); await flushPromises()
+    expect(api.cancelPayout).toHaveBeenCalledTimes(2)
+    expect(api.cancelPayout.mock.calls[1]).toEqual(api.cancelPayout.mock.calls[0])
+    w.unmount()
+  })
+
+  it('retains an in-flight payout request across page navigation', async () => {
+    api.requestPayout.mockReturnValue(new Promise(() => {}))
+    const first = mountView(); await flushPromises()
+    await first.get('[data-test=destination]').setValue('1'); await first.get('[data-test=amount]').setValue('10.00')
+    await first.get('[data-test=request]').trigger('click'); first.unmount()
+    const second = mountView(); await flushPromises()
+    expect(second.text()).toContain('marketplace.operationUnknown')
+    expect(second.get('[data-test=request]').attributes('disabled')).toBeDefined()
+    second.unmount()
+  })
+
 })

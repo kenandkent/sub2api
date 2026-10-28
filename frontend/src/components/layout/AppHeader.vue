@@ -103,7 +103,7 @@
           </div>
         </div>
 
-        <div v-if="user && workMode.mode === 'supplier'" class="hidden rounded-xl bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 dark:bg-primary-900/20 dark:text-primary-300 sm:block">{{ t('marketplace.withdrawable') }}: —</div>
+        <div v-if="user && workMode.mode === 'supplier'" class="hidden rounded-xl bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 dark:bg-primary-900/20 dark:text-primary-300 sm:block">{{ t('marketplace.withdrawable') }}: <span v-if="supplierWallet.loading.value && supplierWallet.available.value === null">{{ t('marketplace.loading') }}</span><span v-else-if="supplierWallet.error.value">{{ t('marketplace.loadFailed') }} <button class="underline" @click="supplierWallet.refresh">{{ t('marketplace.retry') }}</button></span><span v-else>{{ supplierWallet.available.value ?? '—' }}</span></div>
         <!-- User Dropdown -->
         <div v-if="user" class="relative" ref="dropdownRef">
           <button
@@ -155,7 +155,7 @@
                 </div>
               </div>
 
-              <div v-if="workMode.mode === 'supplier'" class="border-b border-gray-100 px-4 py-2 text-sm text-gray-700 dark:border-dark-700 dark:text-dark-200 sm:hidden">{{ t('marketplace.withdrawable') }}: —</div>
+              <div v-if="workMode.mode === 'supplier'" class="border-b border-gray-100 px-4 py-2 text-sm text-gray-700 dark:border-dark-700 dark:text-dark-200 sm:hidden">{{ t('marketplace.withdrawable') }}: <span v-if="supplierWallet.loading.value && supplierWallet.available.value === null">{{ t('marketplace.loading') }}</span><span v-else-if="supplierWallet.error.value">{{ t('marketplace.loadFailed') }} <button class="underline" @click="supplierWallet.refresh">{{ t('marketplace.retry') }}</button></span><span v-else>{{ supplierWallet.available.value ?? '—' }}</span></div>
               <div class="py-1">
                 <router-link to="/profile" @click="closeDropdown" class="dropdown-item">
                   <Icon name="user" size="sm" />
@@ -268,6 +268,7 @@ import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 import { resolveRouteMetaKeys } from '@/router/title'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
+import { useSupplierHeaderWallet } from '@/composables/useSupplierHeaderWallet'
 
 const router = useRouter()
 const route = useRoute()
@@ -279,6 +280,7 @@ const adminSettingsStore = useAdminSettingsStore()
 const onboardingStore = useOnboardingStore()
 
 const user = computed(() => authStore.user)
+const supplierWallet = useSupplierHeaderWallet(computed(() => user.value?.id), computed(() => workMode.mode), computed(() => route.fullPath))
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)

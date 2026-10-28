@@ -38,7 +38,7 @@ async function submit() {
     key.value = ''; callback.value = ''; const status = (e as { status?: number }).status
     if (phase === 'complete' && ![400, 401, 403, 404, 410].includes(status || 0)) unknown.value = 'authorization'
     else if (phase === 'key' && ![400, 401, 403, 404, 409, 410, 422].includes(status || 0)) unknown.value = 'credential'
-    else { if (phase === 'complete') { session.value = ''; authUrl.value = '' }; if (phase === 'key') operationKey.value = ''; error.value = status === 409 ? t('marketplace.versionConflict') : t('marketplace.authorizationFailed') }
+    else { if (phase === 'complete') { session.value = ''; authUrl.value = '' } if (phase === 'key') operationKey.value = ''; error.value = status === 409 ? t('marketplace.versionConflict') : t('marketplace.authorizationFailed') }
   } finally { busy.value = false }
   if (unknown.value === 'authorization') await check()
 }

@@ -2,18 +2,27 @@ package handler
 
 import (
 	"context"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 type fundingRecoveryService interface {
 	ListPendingFundingRefunds(context.Context, int) ([]service.FundingRefundReviewItem, error)
 	ResolveUncertainFunding(context.Context, service.UncertainFundingResolution) (*service.UncertainFundingResolutionResult, error)
 }
+
+type manualChargebackService interface {
+	RecordExternalChargebackExact(context.Context, int64, int64, decimal.Decimal, string, string) error
+}
+
+var chargebackAmountPattern = regexp.MustCompile(`^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,8})?$`)
 
 type PaymentFundingRecoveryHandler struct {
 	payments fundingRecoveryService
@@ -84,4 +93,38 @@ func (h *PaymentFundingRecoveryHandler) Resolve(c *gin.Context) {
 		return
 	}
 	response.Success(c, v)
+}
+
+// Chargeback registers a manually verified provider event; it never calls the bank.
+func (h *PaymentFundingRecoveryHandler) Chargeback(c *gin.Context) {
+	actor, ok := h.admin(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		OrderID         int64  `json:"order_id"`
+		CreditedAmount  string `json:"credited_amount"`
+		ProviderEventID string `json:"provider_event_id"`
+		Evidence        string `json:"evidence"`
+	}
+	if c.ShouldBindJSON(&req) != nil || req.OrderID <= 0 || !chargebackAmountPattern.MatchString(req.CreditedAmount) {
+		response.BadRequest(c, "Invalid chargeback request")
+		return
+	}
+	amount, err := decimal.NewFromString(req.CreditedAmount)
+	event, evidence := strings.TrimSpace(req.ProviderEventID), strings.TrimSpace(req.Evidence)
+	if err != nil || !amount.IsPositive() || event == "" || len(event) > 255 || evidence == "" || len(evidence) > 4000 {
+		response.BadRequest(c, "Invalid chargeback request")
+		return
+	}
+	payments, ok := h.payments.(manualChargebackService)
+	if !ok {
+		response.Error(c, 503, "Chargeback recovery unavailable")
+		return
+	}
+	if err := payments.RecordExternalChargebackExact(c.Request.Context(), req.OrderID, actor, amount, event, evidence); err != nil {
+		response.BadRequest(c, "Chargeback could not be recorded")
+		return
+	}
+	response.Success(c, gin.H{"recorded": true})
 }

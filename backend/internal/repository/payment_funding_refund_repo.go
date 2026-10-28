@@ -310,15 +310,23 @@ func (r *userRepository) SettlePaymentRefund(ctx context.Context, attempt string
 // RecordPaymentChargeback handles an independently verified bank event. It
 // never changes supplier earnings or consumes another origin's funding.
 func (r *userRepository) RecordPaymentChargeback(ctx context.Context, order, user, actor int64, value float64, event, evidence string) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return service.ErrInvalidFunding
+	}
+	return r.RecordPaymentChargebackExact(ctx, order, user, actor, decimal.NewFromFloat(value).Round(8), event, evidence)
+}
+
+// RecordPaymentChargebackExact preserves the provider's decimal amount end to end.
+func (r *userRepository) RecordPaymentChargebackExact(ctx context.Context, order, user, actor int64, value decimal.Decimal, event, evidence string) error {
 	event, evidence = strings.TrimSpace(event), strings.TrimSpace(evidence)
+	if !value.Equal(value.Round(8)) {
+		return service.ErrInvalidFunding
+	}
 	q, err := r.refundExecutor(ctx)
 	if err != nil {
 		return err
 	}
-	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return service.ErrInvalidFunding
-	}
-	amount, err := fundingAmount(decimal.NewFromFloat(value))
+	amount, err := fundingAmount(value)
 	if err != nil || event == "" || evidence == "" || actor <= 0 {
 		return service.ErrInvalidFunding
 	}

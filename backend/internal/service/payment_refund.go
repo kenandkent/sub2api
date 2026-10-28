@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -63,6 +64,43 @@ func (s *PaymentService) RecordExternalChargeback(ctx context.Context, orderID, 
 		return err
 	}
 	s.invalidateRefundBalanceCache(ctx, userID)
+	return nil
+}
+
+// RecordExternalChargebackExact records a verified manual event using the
+// persisted order owner and an exact credited-balance amount (including its
+// proportional bonus). It does not convert a bank amount or contact a provider.
+func (s *PaymentService) RecordExternalChargebackExact(ctx context.Context, orderID, actorID int64, amount decimal.Decimal, eventID, evidence string) error {
+	eventID, evidence = strings.TrimSpace(eventID), strings.TrimSpace(evidence)
+	if orderID <= 0 || actorID <= 0 || !amount.IsPositive() || !amount.Equal(amount.Round(8)) || amount.GreaterThanOrEqual(decimal.NewFromInt(1000000000000)) || eventID == "" || len(eventID) > 255 || evidence == "" || len(evidence) > 4000 {
+		return errors.New("invalid chargeback evidence or amount")
+	}
+	repo, ok := s.userRepo.(interface {
+		RecordPaymentChargebackExact(context.Context, int64, int64, int64, decimal.Decimal, string, string) error
+	})
+	if !ok {
+		return errors.New("payment chargeback repository unavailable")
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txCtx := dbent.NewTxContext(ctx, tx)
+	order, err := tx.PaymentOrder.Get(txCtx, orderID)
+	if err != nil {
+		return err
+	}
+	if err = repo.RecordPaymentChargebackExact(txCtx, orderID, order.UserID, actorID, amount, eventID, evidence); err != nil {
+		return err
+	}
+	if err = createPaymentAuditLogTx(txCtx, tx.Client(), orderID, fundingAuditAction("PAYMENT_CHARGEBACK"), map[string]any{"eventID": eventID, "actorID": actorID, "amount": amount.String(), "evidence": evidence}); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	s.invalidateRefundBalanceCache(ctx, order.UserID)
 	return nil
 }
 

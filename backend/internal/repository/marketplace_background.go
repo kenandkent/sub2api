@@ -72,6 +72,11 @@ func (w *MarketplaceCacheWorker) ProcessOne(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// Stale requests are reviewed after two hours of inactivity, well beyond the
+// default upstream header timeout. Review does not prove a request has ended
+// and never releases its hold.
+const marketplaceStaleReviewReason = "request inactive for over two hours; manual review required"
+
 // MarketplaceBackgroundWorker continues after marketplace dispatch is disabled.
 type MarketplaceBackgroundWorker struct {
 	db          *sql.DB
@@ -106,6 +111,7 @@ func (w *MarketplaceBackgroundWorker) run() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	nextFinance := time.Time{}
+	nextRecovery := time.Time{}
 	for {
 		for i := 0; i < 100; i++ {
 			done, err := w.outbox.ProcessOne(w.ctx)
@@ -131,6 +137,15 @@ func (w *MarketplaceBackgroundWorker) run() {
 				break
 			}
 		}
+		if time.Now().After(nextRecovery) {
+			count, err := w.reviewStaleReceipts(w.ctx)
+			if err != nil && w.ctx.Err() == nil {
+				slog.Error("marketplace stale receipt scan failed", "error", err)
+			} else if count > 0 {
+				slog.Warn("marketplace stale receipts require review", "count", count)
+			}
+			nextRecovery = time.Now().Add(time.Minute)
+		}
 		if time.Now().After(nextFinance) {
 			if _, err := w.settlement.MatureDue(w.ctx, time.Now().UTC(), 100); err != nil && w.ctx.Err() == nil {
 				slog.Error("marketplace maturity failed", "error", err)
@@ -146,6 +161,23 @@ func (w *MarketplaceBackgroundWorker) run() {
 		case <-tick.C:
 		}
 	}
+}
+
+// reviewStaleReceipts changes only receipt state and reason. The lock skips
+// active transactions and serializes with dispatch, settlement and recovery.
+func (w *MarketplaceBackgroundWorker) reviewStaleReceipts(ctx context.Context) (int64, error) {
+	result, err := w.db.ExecContext(ctx, `WITH candidates AS (
+		SELECT id FROM marketplace_requests
+		WHERE status IN ('prepared','budget_reserved','dispatched','usage_pending')
+		  AND updated_at < now() - interval '2 hours'
+		ORDER BY updated_at, id FOR UPDATE SKIP LOCKED LIMIT 100
+	) UPDATE marketplace_requests r
+	  SET status='needs_review',review_reason=$1,updated_at=now()
+	  FROM candidates WHERE r.id=candidates.id`, marketplaceStaleReviewReason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 func (w *MarketplaceBackgroundWorker) closeMonths(ctx context.Context) error {
 	rows, err := w.db.QueryContext(ctx, `SELECT p.user_id, months.month FROM supplier_profiles p CROSS JOIN LATERAL generate_series(date_trunc('month',p.created_at AT TIME ZONE 'UTC'),date_trunc('month',now() AT TIME ZONE 'UTC')-interval '1 month',interval '1 month') AS months(month) WHERE NOT EXISTS(SELECT 1 FROM supplier_statements s WHERE s.supplier_id=p.user_id AND s.month=months.month::date) ORDER BY months.month,p.user_id LIMIT 100`)

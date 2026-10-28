@@ -378,7 +378,28 @@ func (r *MarketplaceGatewayRepository) AdminRecoveryResolve(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if (receipt.Status != "needs_review" && receipt.Status != "usage_pending" && receipt.Status != "dispatched") || receipt.BillableAttemptID == nil {
+		if receipt.BillableAttemptID == nil {
+			// Only the stale scanner's review of an unattempted receipt can be
+			// released here. The receipt lock prevents a concurrent new attempt.
+			var reason sql.NullString
+			var hasAttemptOrCapture bool
+			if err = tx.QueryRowContext(ctx, `SELECT review_reason, EXISTS(SELECT 1 FROM marketplace_attempts WHERE receipt_id=$1) OR EXISTS(SELECT 1 FROM marketplace_captures WHERE receipt_id=$1) FROM marketplace_requests WHERE id=$1`, receiptID).Scan(&reason, &hasAttemptOrCapture); err != nil {
+				return err
+			}
+			if receipt.Status != "needs_review" || !reason.Valid || reason.String != marketplaceStaleReviewReason || hasAttemptOrCapture {
+				return service.ErrMarketplaceRequestState
+			}
+			if receipt.Budget.IsPositive() {
+				if err = NewWalletFundingRepository().SettleHold(ctx, tx, buyer, "marketplace:void:"+receiptID, marketplaceActor, marketplaceHoldID(receiptID), decimal.Zero); err != nil {
+					return err
+				}
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE marketplace_requests SET status='voided',review_reason=NULL,updated_at=now() WHERE id=$1`, receiptID); err != nil {
+				return err
+			}
+			return tx.Commit()
+		}
+		if receipt.Status != "needs_review" && receipt.Status != "usage_pending" && receipt.Status != "dispatched" {
 			return service.ErrMarketplaceRequestState
 		}
 		status, _, usage, err := lockMarketplaceAttempt(ctx, tx, receiptID, *receipt.BillableAttemptID)

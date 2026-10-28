@@ -92,6 +92,6 @@ func TestSupplierAccountRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	draftAccount, err := repo.Get(ctx, owner, *draftOp.AccountID)
 	require.NoError(t, err)
-	require.Equal(t, "missing", draftAccount.CredentialStatus)
+	require.Equal(t, "pending", draftAccount.CredentialStatus)
 
 }

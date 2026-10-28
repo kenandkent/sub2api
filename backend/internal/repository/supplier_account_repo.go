@@ -48,14 +48,14 @@ func scanAccount(row interface{ Scan(...any) error }) (*service.SupplierAccountD
 	if err = json.Unmarshal(models, &a.Offer.AllowedModels); err != nil {
 		return nil, err
 	}
-	a.CredentialStatus = "missing"
+	a.CredentialStatus = "pending"
 	if hasCred {
-		a.CredentialStatus = "configured"
+		a.CredentialStatus = "valid"
 	}
 	return &a, nil
 }
 
-const supplierAccountSelect = `SELECT a.id,a.name,a.platform,a.type,a.status,a.concurrency,(a.credentials ? '_supplier_envelope'),o.id,o.review_status,o.enabled,o.allowed_models,o.version FROM accounts a JOIN sharing_offers o ON o.account_id=a.id AND o.owner_user_id=a.owner_user_id WHERE a.id=$1 AND a.owner_user_id=$2 AND a.deleted_at IS NULL AND a.parent_account_id IS NULL`
+const supplierAccountSelect = `SELECT a.id,a.name,a.platform,a.type,a.status,a.concurrency,(a.credentials ? '_supplier_envelope' AND (a.type <> 'oauth' OR EXISTS (SELECT 1 FROM marketplace_credential_fingerprints f WHERE f.account_id=a.id AND f.provider='openai:oauth'))),o.id,o.review_status,o.enabled,o.allowed_models,o.version FROM accounts a JOIN sharing_offers o ON o.account_id=a.id AND o.owner_user_id=a.owner_user_id WHERE a.id=$1 AND a.owner_user_id=$2 AND a.deleted_at IS NULL AND a.parent_account_id IS NULL`
 
 func (r *SupplierAccountRepository) Get(ctx context.Context, user, id int64) (*service.SupplierAccountDetail, error) {
 	a, err := scanAccount(r.db.QueryRowContext(ctx, supplierAccountSelect, id, user))
@@ -305,7 +305,7 @@ func (r *SupplierAccountRepository) List(ctx context.Context, user int64, f serv
 		return nil, 0, err
 	}
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
-	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.name,a.platform,a.type,a.status,a.concurrency,(a.credentials ? '_supplier_envelope'),o.id,o.review_status,o.enabled,o.allowed_models,o.version`+from+` ORDER BY a.id DESC LIMIT $6 OFFSET $7`, args...)
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.name,a.platform,a.type,a.status,a.concurrency,(a.credentials ? '_supplier_envelope' AND (a.type <> 'oauth' OR EXISTS (SELECT 1 FROM marketplace_credential_fingerprints f WHERE f.account_id=a.id AND f.provider='openai:oauth'))),o.id,o.review_status,o.enabled,o.allowed_models,o.version`+from+` ORDER BY a.id DESC LIMIT $6 OFFSET $7`, args...)
 	if err != nil {
 		return nil, 0, err
 	}

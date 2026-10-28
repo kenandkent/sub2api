@@ -11,6 +11,10 @@ func TestSupplierAccountProviderValidation(t *testing.T) {
 	if err := validateSupplierProvider(p); err != nil {
 		t.Fatal(err)
 	}
+	p.AccountTypes = []string{"apikey", "oauth"}
+	if err := validateSupplierProvider(p); err != nil {
+		t.Fatalf("OAuth provider rejected: %v", err)
+	}
 	p.BaseURL = "http://127.0.0.1/"
 	if err := validateSupplierProvider(p); err == nil {
 		t.Fatal("unsafe provider URL accepted")

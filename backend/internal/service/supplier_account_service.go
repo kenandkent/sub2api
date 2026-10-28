@@ -28,7 +28,7 @@ func validateSupplierProvider(p config.MarketplaceProviderConfig) error {
 	}
 	seen := map[string]bool{}
 	for _, v := range p.AccountTypes {
-		if v != "apikey" || seen[v] {
+		if (v != "apikey" && v != "oauth") || seen[v] {
 			return errors.New("invalid marketplace account type")
 		}
 		seen[v] = true
@@ -225,7 +225,7 @@ func (s *SupplierAccountService) Transition(ctx context.Context, user, id, versi
 		return nil, err
 	}
 	if action == "submit" {
-		if a.CredentialStatus != "configured" {
+		if a.CredentialStatus != "valid" && a.CredentialStatus != "configured" {
 			return nil, apperrors.Conflict("credentials_missing", "Credential required")
 		}
 		if s.catalog == nil {

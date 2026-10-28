@@ -18,7 +18,7 @@ async function configure(wrapper: ReturnType<typeof setup>, type: 'api_key' | 'o
   await wrapper.get('[data-test="next"]').trigger('click')
   await wrapper.get('[type=checkbox]').setValue(true)
 }
-beforeEach(() => { vi.clearAllMocks(); localStorage.clear() })
+beforeEach(() => { vi.resetAllMocks(); localStorage.clear() })
 describe('account share wizard', () => {
   it('retains non-sensitive fields when authorization fails and clears the key', async () => {
     api.createAccount.mockRejectedValue({ status: 400 })
@@ -54,7 +54,7 @@ describe('account share wizard', () => {
   it('offers the server authorization link and retries a conflicting configuration without creating another account', async () => {
     api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'session' })
     api.completeAuthorization.mockResolvedValue({ account_id: 42, access_token: 'must-not-render' })
-    api.getAccount.mockResolvedValue({ id: 42, offer: { version: 2 } })
+    api.getAccount.mockResolvedValueOnce({ id: 42, name: 'Old', concurrency: 1, offer: { version: 1, allowed_models: ['model'] } }).mockResolvedValue({ id: 42, name: 'Other', concurrency: 1, offer: { version: 2, allowed_models: ['model'] } })
     api.updateAccount.mockRejectedValueOnce({ status: 409 }).mockResolvedValueOnce({})
     const wrapper = setup('oauth'); await configure(wrapper, 'oauth'); await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(wrapper.get('[data-test="authorization-link"]').attributes('href')).toBe('https://example.test/auth')
@@ -62,6 +62,7 @@ describe('account share wizard', () => {
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(wrapper.text()).toContain('marketplace.versionConflict')
     expect(wrapper.text()).not.toContain('must-not-render')
+    await wrapper.get('[data-test="acknowledge-conflict"]').trigger('click')
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(api.completeAuthorization).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('created')?.[0]).toEqual([42])
@@ -123,6 +124,20 @@ describe('account share wizard', () => {
     const wrapper = setup('oauth'); let allowed: boolean | undefined; await wrapper.setProps({ onCreated: () => { allowed = routeGuard.leave?.() } }); await configure(wrapper, 'oauth'); await wrapper.get('form').trigger('submit'); await flushPromises()
     await wrapper.get('input[autocomplete=off]').setValue('https://example.test/?state=x&code=y'); await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(wrapper.emitted('created')?.[0]).toEqual([42]); expect(allowed).toBe(true)
+  })
+
+  it('retries the original authorized-account CAS after an unchanged reread', async () => {
+    api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'session' }); api.completeAuthorization.mockResolvedValue({ account_id: 42 }); api.getAccount.mockResolvedValue({ id: 42, name: 'Old', concurrency: 1, offer: { version: 1, allowed_models: ['model'] } }); api.updateAccount.mockRejectedValueOnce({ code: 'ETIMEDOUT' }).mockResolvedValueOnce({})
+    const wrapper = setup('oauth'); await configure(wrapper, 'oauth'); await wrapper.get('form').trigger('submit'); await flushPromises(); await wrapper.get('input[autocomplete=off]').setValue('https://example.test/?state=x&code=y'); await wrapper.get('form').trigger('submit'); await flushPromises()
+    await wrapper.get('[data-test="check-operation"]').trigger('click'); await flushPromises(); expect(wrapper.text()).toContain('marketplace.operationUnknown')
+    await wrapper.get('[data-test="retry-patch"]').trigger('click'); await flushPromises()
+    expect(api.updateAccount).toHaveBeenCalledTimes(2); expect(api.updateAccount.mock.calls[1]).toEqual(api.updateAccount.mock.calls[0]); expect(api.completeAuthorization).toHaveBeenCalledTimes(1); expect(wrapper.emitted('created')?.[0]).toEqual([42])
+  })
+  it('unlocks an authorized-account CAS conflict without losing its configuration', async () => {
+    api.createAuthorization.mockResolvedValue({ auth_url: 'https://example.test/auth', session_id: 'session' }); api.completeAuthorization.mockResolvedValue({ account_id: 42 }); api.getAccount.mockResolvedValueOnce({ id: 42, name: 'Old', concurrency: 1, offer: { version: 1, allowed_models: ['model'] } }).mockResolvedValueOnce({ id: 42, name: 'Other', concurrency: 1, offer: { version: 2, allowed_models: ['model'] } }); api.updateAccount.mockRejectedValue({ code: 'ETIMEDOUT' })
+    const wrapper = setup('oauth'); await configure(wrapper, 'oauth'); await wrapper.get('form').trigger('submit'); await flushPromises(); await wrapper.get('input[autocomplete=off]').setValue('https://example.test/?state=x&code=y'); await wrapper.get('form').trigger('submit'); await flushPromises()
+    await wrapper.get('[data-test="check-operation"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('marketplace.versionConflict'); expect(wrapper.text()).not.toContain('marketplace.operationUnknown'); expect(wrapper.text()).toContain('Other'); expect(wrapper.get('[data-test="create"]').attributes('disabled')).toBeDefined()
   })
 
 })

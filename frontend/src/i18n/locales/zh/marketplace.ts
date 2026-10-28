@@ -115,4 +115,8 @@ export default { marketplace: {
   credential_credentials_invalid: "无效",
   credential_active: "有效",
   credential_pending: "处理中",
+  retrySameSave: "重试同一次保存",
+  latestConfiguration: "最新配置",
+  yourConfiguration: "您的修改",
+  reviewedConfiguration: "我已查看最新配置",
 } }

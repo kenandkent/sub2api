@@ -7,7 +7,7 @@ vi.mock('vue-i18n', async (original) => ({ ...await original<typeof import('vue-
 vi.mock('vue-router', async (original) => ({ ...await original<typeof import('vue-router')>(), useRoute: () => ({ params: { id: '1' } }), onBeforeRouteLeave: vi.fn(), onBeforeRouteUpdate: vi.fn() }))
 const store = vi.hoisted(() => ({ dirty: false, capabilities: { supplier_status: 'active' }, confirmLeave: vi.fn(async () => { store.dirty = false; return true }) }))
 vi.mock('@/stores/workMode', () => ({ useWorkModeStore: () => store }))
-beforeEach(() => { vi.clearAllMocks(); store.dirty = false })
+beforeEach(() => { vi.resetAllMocks(); store.dirty = false; store.confirmLeave.mockImplementation(async () => { store.dirty = false; return true }); api.getSupplierOptions.mockResolvedValue({ providers: [{ platform: 'openai', models: ['model'] }], max_supplier_concurrency: 4 }) })
 const account = { id: 1, name: 'Original', platform: 'openai', type: 'api_key', concurrency: 1, status: 'active', credential_status: 'valid', current_concurrency: 0, created_at: '', offer: { id: 2, review_status: 'approved', enabled: true, allowed_models: ['model'], version: 1 } }
 it('retains unsaved configuration when the server reports a version conflict', async () => {
   api.getAccount.mockResolvedValue(account)
@@ -67,4 +67,20 @@ it('keeps a timed-out update locked until a read confirms the submitted values',
   await wrapper.get('[data-test="check-save"]').trigger('click'); await flushPromises()
   expect(wrapper.text()).not.toContain('marketplace.operationUnknown')
   expect(api.updateAccount).toHaveBeenCalledTimes(1)
+})
+
+it('retries the same CAS update after an unchanged reread', async () => {
+  api.getAccount.mockResolvedValue(account); api.updateAccount.mockRejectedValueOnce({ code: 'ETIMEDOUT' }).mockResolvedValueOnce({ ...account, name: 'Changed', offer: { ...account.offer, version: 2 } })
+  const wrapper = mount(AccountDetailView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, RouterLink: { template: '<a><slot /></a>' }, ConfirmDialog: true } } }); await flushPromises()
+  await wrapper.get('input[required]').setValue('Changed'); await wrapper.get('form').trigger('submit'); await flushPromises()
+  await wrapper.get('[data-test="check-save"]').trigger('click'); await flushPromises()
+  expect(wrapper.text()).toContain('marketplace.operationUnknown')
+  await wrapper.get('[data-test="retry-save"]').trigger('click'); await flushPromises()
+  expect(api.updateAccount).toHaveBeenCalledTimes(2); expect(api.updateAccount.mock.calls[1]).toEqual(api.updateAccount.mock.calls[0]); expect(wrapper.text()).not.toContain('marketplace.operationUnknown')
+})
+it('unlocks to a conflict while preserving edits if a different update advanced the version', async () => {
+  api.getAccount.mockResolvedValueOnce(account).mockResolvedValueOnce({ ...account, name: 'Other', offer: { ...account.offer, version: 2 } }); api.updateAccount.mockRejectedValue({ code: 'ETIMEDOUT' })
+  const wrapper = mount(AccountDetailView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, RouterLink: { template: '<a><slot /></a>' }, ConfirmDialog: true } } }); await flushPromises()
+  await wrapper.get('input[required]').setValue('Changed'); await wrapper.get('form').trigger('submit'); await flushPromises(); await wrapper.get('[data-test="check-save"]').trigger('click'); await flushPromises()
+  expect(wrapper.text()).toContain('marketplace.versionConflict'); expect(wrapper.text()).not.toContain('marketplace.operationUnknown'); expect(wrapper.text()).toContain('Other'); expect(wrapper.text()).toContain('Changed'); expect((wrapper.get('input[required]').element as HTMLInputElement).value).toBe('Changed'); await wrapper.get('[data-test="ack-detail-conflict"]').trigger('click'); expect((wrapper.get('input[required]').element as HTMLInputElement).value).toBe('Changed')
 })

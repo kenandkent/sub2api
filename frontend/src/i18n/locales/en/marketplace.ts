@@ -116,4 +116,8 @@ export default { marketplace: {
   credential_credentials_invalid: "Invalid",
   credential_active: "Active",
   credential_pending: "Pending",
+  retrySameSave: "Retry the same save",
+  latestConfiguration: "Latest configuration",
+  yourConfiguration: "Your changes",
+  reviewedConfiguration: "I have reviewed the latest configuration",
 } }

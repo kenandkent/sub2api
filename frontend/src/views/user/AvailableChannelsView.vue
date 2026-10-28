@@ -2,6 +2,11 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
+        <div v-if="marketplaceEnabled" class="mb-4 space-y-3 lg:max-h-64 lg:overflow-y-auto" tabindex="0" :aria-label="t('marketplace.sharedPrices')">
+          <EligibleBalanceSummary :balance="balance" :loading="balanceLoading" :error="balanceError" @refresh="loadBalance" />
+          <p v-if="catalogError" role="alert" class="text-sm text-red-700">{{ catalogError }} <button class="underline" @click="loadCatalog">{{ t('marketplace.retry') }}</button></p>
+          <SharedGroupPriceDetails :groups="catalogGroups" />
+        </div>
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div class="flex flex-1 flex-wrap items-center gap-3">
             <div class="relative w-full sm:w-80">
@@ -38,6 +43,7 @@
           :rows="filteredChannels"
           :loading="loading"
           :user-group-rates="userGroupRates"
+          :shared-group-ids="catalogGroups.map(g => g.group_id)"
           pricing-key-prefix="availableChannels.pricing"
           :no-pricing-label="t('availableChannels.noPricing')"
           :no-models-label="t('availableChannels.noModels')"
@@ -49,7 +55,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useWorkModeStore } from '@/stores/workMode'
+import { getMarketplaceBalance, getMarketplaceCatalog, type MarketplaceBalance, type CatalogGroup } from '@/api/marketplace'
+import EligibleBalanceSummary from '@/components/marketplace/EligibleBalanceSummary.vue'
+import SharedGroupPriceDetails from '@/components/marketplace/SharedGroupPriceDetails.vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -63,6 +73,25 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 const { t } = useI18n()
 const appStore = useAppStore()
 
+const workMode = useWorkModeStore()
+const marketplaceEnabled = computed(() => !!workMode.capabilities?.marketplace_enabled)
+const balance = ref<MarketplaceBalance | null>(null)
+const balanceLoading = ref(false)
+const balanceError = ref('')
+const catalogGroups = ref<CatalogGroup[]>([])
+const catalogError = ref('')
+let marketplaceGeneration = 0
+async function loadBalance() {
+  const generation = marketplaceGeneration
+  balanceLoading.value = true; balanceError.value = ''
+  try { const value = await getMarketplaceBalance(); if (generation === marketplaceGeneration) balance.value = value } catch { if (generation === marketplaceGeneration) { balance.value = null; balanceError.value = t('marketplace.balanceLoadFailed') } } finally { if (generation === marketplaceGeneration) balanceLoading.value = false }
+}
+async function loadCatalog() {
+  const generation = marketplaceGeneration
+  catalogError.value = ''
+  try { const value = await getMarketplaceCatalog(); if (generation === marketplaceGeneration) catalogGroups.value = value.groups } catch { if (generation === marketplaceGeneration) { catalogGroups.value = []; catalogError.value = t('marketplace.catalogLoadFailed') } }
+}
+watch(marketplaceEnabled, (enabled) => { marketplaceGeneration++; if (enabled) { void loadBalance(); void loadCatalog() } else { balance.value = null; catalogGroups.value = [] } }, { immediate: true })
 const channels = ref<UserAvailableChannel[]>([])
 const userGroupRates = ref<Record<number, number>>({})
 const loading = ref(false)

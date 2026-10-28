@@ -6,6 +6,7 @@ import type { ApiKey } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
 
+const market = vi.hoisted(() => ({ enabled: false, getCatalog: vi.fn(), getBalance: vi.fn() }))
 const {
   listKeys,
   updateKey,
@@ -77,6 +78,9 @@ vi.mock('@/api', () => ({
     getUserGroupRates,
   },
 }))
+
+vi.mock('@/stores/workMode', () => ({ useWorkModeStore: () => ({ capabilities: { marketplace_enabled: market.enabled } }) }))
+vi.mock('@/api/marketplace', () => ({ getMarketplaceCatalog: market.getCatalog, getMarketplaceBalance: market.getBalance }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -269,6 +273,7 @@ const getButtonByText = (wrapper: VueWrapper, text: string) => {
 describe('user KeysView column settings', () => {
   beforeEach(() => {
     localStorage.clear()
+    market.enabled = false; market.getCatalog.mockReset(); market.getBalance.mockReset()
 
     listKeys.mockReset()
     updateKey.mockReset()
@@ -581,6 +586,18 @@ describe('user KeysView column settings', () => {
 
     beforeEach(() => {
       getAvailableGroups.mockResolvedValue(availableGroups)
+    })
+
+    it('shows shared pricing and eligible funding for a selected shared group', async () => {
+      market.enabled = true
+      market.getCatalog.mockResolvedValue({ groups: [{ group_id: 1, name: 'Shared group 1', platform: 'anthropic', protocol: 'anthropic', models: [{ public_model: 'model', actual_model: 'model', context_limit: 100, max_output_tokens: 10, rate_multiplier: '1', tiers: [{ from_tokens: 0, input_per_million: '0.12345678', output_per_million: '0', cache_read_per_million: '0', cache_write_per_million: '0' }] }] }] })
+      market.getBalance.mockResolvedValue({ currency: 'USD', eligible_available: '2.00', reserved: '1.00', excluded_available: '3.00', debt: '0', migrated: true, reconciled: true })
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 1); await nextTick()
+      expect(wrapper.text()).toContain('marketplace.sharedGroup')
+      expect(wrapper.text()).toContain('0.12345678')
+      expect(wrapper.text()).toContain('2.00')
+      expect(wrapper.text()).toContain('3.00')
     })
 
     it('classifies all configured platforms and retains the complete table filter', async () => {

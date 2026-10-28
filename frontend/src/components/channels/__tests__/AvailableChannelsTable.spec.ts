@@ -177,3 +177,11 @@ describe('AvailableChannelsTable responsive surfaces', () => {
     expect(wrapper.get('[data-testid="mobile-empty"]').text()).toContain('No channels')
   })
 })
+
+describe('shared marketplace labels', () => {
+  it('labels matching shared groups on both desktop and mobile without changing other groups', () => {
+    const wrapper = mountTable({ sharedGroupIds: [2] })
+    const labels = wrapper.text().match(/marketplace\.sharedGroup/g) || []
+    expect(labels).toHaveLength(2)
+  })
+})

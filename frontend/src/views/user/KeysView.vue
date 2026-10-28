@@ -174,7 +174,8 @@
                   :peak-end="row.group.peak_end"
                   :peak-rate-multiplier="row.group.peak_rate_multiplier"
                 />
-                <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
+                <span v-if="row.group && sharedGroupIds.has(row.group.id)" class="text-xs text-teal-700">{{ t('marketplace.sharedGroup') }}</span>
+                <span v-if="!row.group" class="text-sm text-gray-400 dark:text-dark-500">{{
                   t('keys.noGroup')
                 }}</span>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
@@ -563,6 +564,7 @@
               <span v-else class="text-gray-400">{{ t('keys.selectGroup') }}</span>
             </template>
             <template #option="{ option, selected }">
+              <span v-if="sharedGroupIds.has(Number(option.value))" class="text-xs text-teal-700">{{ t('marketplace.sharedGroup') }}</span>
               <GroupOptionItem
                 :name="(option as unknown as GroupOption).label"
                 :platform="(option as unknown as GroupOption).platform"
@@ -578,6 +580,12 @@
               />
             </template>
           </Select>
+          <p v-if="catalogError" class="mt-2 text-sm text-red-700" role="alert">{{ t('marketplace.catalogLoadFailed') }} <button class="underline" @click="loadCatalog">{{ t('marketplace.retry') }}</button></p>
+          <p v-if="formData.group_id && sharedGroupIds.has(formData.group_id)" class="mt-2 text-sm text-teal-700">{{ t('marketplace.sharedGroup') }}</p>
+          <template v-if="formData.group_id && sharedGroupIds.has(formData.group_id)">
+            <EligibleBalanceSummary class="mt-3" :balance="marketplaceBalance" :loading="marketplaceBalanceLoading" :error="marketplaceBalanceError" @refresh="loadMarketplaceBalance" />
+            <SharedGroupPriceDetails class="mt-3" :groups="catalogGroups.filter(g => g.group_id === formData.group_id)" />
+          </template>
         </div>
 
         <!-- Custom Key Section (only for create) -->
@@ -1171,6 +1179,7 @@
             ]"
             :title="option.description || undefined"
           >
+            <span v-if="option.value && sharedGroupIds.has(option.value)" class="text-xs text-teal-700">{{ t('marketplace.sharedGroup') }}</span>
             <GroupOptionItem
               :name="option.label"
               :platform="option.platform"
@@ -1222,6 +1231,10 @@ import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
 	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
+  import SharedGroupPriceDetails from '@/components/marketplace/SharedGroupPriceDetails.vue'
+  import EligibleBalanceSummary from '@/components/marketplace/EligibleBalanceSummary.vue'
+  import { getMarketplaceCatalog, getMarketplaceBalance, type MarketplaceBalance, type CatalogGroup } from '@/api/marketplace'
+  import { useWorkModeStore } from '@/stores/workMode'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -1511,6 +1524,33 @@ const onStatusFilterChange = (value: string | number | boolean | null) => {
 }
 
 // Convert groups to Select options format with rate multiplier and subscription type
+const catalogGroups = ref<CatalogGroup[]>([])
+const catalogError = ref(false)
+const marketplaceBalance = ref<MarketplaceBalance | null>(null)
+const marketplaceBalanceLoading = ref(false)
+const marketplaceBalanceError = ref('')
+const sharedGroupIds = computed(() => new Set(catalogGroups.value.map(group => group.group_id)))
+const workMode = useWorkModeStore()
+let catalogGeneration = 0
+let balanceGeneration = 0
+async function loadCatalog() {
+  const generation = ++catalogGeneration
+  catalogError.value = false
+  try { const catalog = await getMarketplaceCatalog(); if (generation === catalogGeneration && workMode.capabilities?.marketplace_enabled) catalogGroups.value = catalog.groups }
+  catch { if (generation === catalogGeneration && workMode.capabilities?.marketplace_enabled) { catalogGroups.value = []; catalogError.value = true } }
+}
+async function loadMarketplaceBalance() {
+  const generation = ++balanceGeneration
+  marketplaceBalanceLoading.value = true; marketplaceBalanceError.value = ''
+  try { const balance = await getMarketplaceBalance(); if (generation === balanceGeneration) marketplaceBalance.value = balance }
+  catch { if (generation === balanceGeneration) { marketplaceBalance.value = null; marketplaceBalanceError.value = t('marketplace.balanceLoadFailed') } }
+  finally { if (generation === balanceGeneration) marketplaceBalanceLoading.value = false }
+}
+watch(() => workMode.capabilities?.marketplace_enabled, (enabled) => {
+  if (enabled) { void loadCatalog(); void loadMarketplaceBalance() }
+  else { catalogGeneration++; balanceGeneration++; catalogGroups.value = []; catalogError.value = false; marketplaceBalance.value = null; marketplaceBalanceError.value = ''; marketplaceBalanceLoading.value = false }
+}, { immediate: true })
+
 const groupOptions = computed(() =>
   groups.value.map((group) => ({
     value: group.id,

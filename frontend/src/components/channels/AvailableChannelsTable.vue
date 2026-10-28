@@ -103,6 +103,7 @@
                     :user-rate-multiplier="userGroupRates[g.id] ?? null"
                     always-show-rate
                   />
+                  <span v-if="sharedGroupIds?.includes(g.id)" class="text-xs text-teal-700">{{ t('marketplace.sharedGroup') }}</span>
                   <span
                     v-if="hasPeakRate(g)"
                     class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
@@ -137,6 +138,7 @@
                     :user-rate-multiplier="userGroupRates[g.id] ?? null"
                     always-show-rate
                   />
+                  <span v-if="sharedGroupIds?.includes(g.id)" class="text-xs text-teal-700">{{ t('marketplace.sharedGroup') }}</span>
                   <span
                     v-if="hasPeakRate(g)"
                     class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
@@ -242,6 +244,7 @@
                         :user-rate-multiplier="userGroupRates[g.id] ?? null"
                         always-show-rate
                       />
+                      <span v-if="sharedGroupIds?.includes(g.id)" class="text-xs text-teal-700">{{ t('marketplace.sharedGroup') }}</span>
                       <span
                         v-if="hasPeakRate(g)"
                         class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
@@ -277,6 +280,7 @@
                         :user-rate-multiplier="userGroupRates[g.id] ?? null"
                         always-show-rate
                       />
+                      <span v-if="sharedGroupIds?.includes(g.id)" class="text-xs text-teal-700">{{ t('marketplace.sharedGroup') }}</span>
                       <span
                         v-if="hasPeakRate(g)"
                         class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
@@ -347,6 +351,7 @@ const props = defineProps<{
   emptyLabel: string
   /** 用户专属倍率（group_id → multiplier）；无专属时由 GroupBadge 仅显示默认倍率。 */
   userGroupRates: Record<number, number>
+  sharedGroupIds?: number[]
 }>()
 
 // Suppress unused warning — props is accessed via template automatically but

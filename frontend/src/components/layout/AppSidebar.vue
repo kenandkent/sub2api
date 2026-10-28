@@ -768,6 +768,13 @@ const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(tru
 // separate admin entry, since the page is purely a user-facing view.
 const workspaceNavItems = computed((): NavItem[] => workMode.mode === 'supplier' ? [
   { path: workMode.canUseSupplier() ? '/supplier/overview' : '/supplier/onboarding', label: t(workMode.canUseSupplier() ? 'marketplace.overview' : 'marketplace.onboarding'), icon: DashboardIcon },
+  ...(workMode.canUseSupplier() ? [
+    { path: '/supplier/accounts', label: t('marketplace.accounts'), icon: UsersIcon },
+    { path: '/supplier/earnings', label: t('marketplace.earnings'), icon: ChartIcon },
+    { path: '/supplier/statements', label: t('marketplace.statements'), icon: FolderIcon },
+    { path: '/supplier/payouts', label: t('marketplace.payouts'), icon: CreditCardIcon },
+    { path: '/supplier/payout-destinations', label: t('marketplace.destinations'), icon: CreditCardIcon },
+  ] : []),
   { path: '/profile', label: t('nav.profile'), icon: UserIcon }
 ] : userNavItems.value)
 
@@ -807,6 +814,13 @@ const adminNavItems = computed((): NavItem[] => {
     },
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
+    { path: '/admin/marketplace', label: t('adminMarketplace.title'), icon: CreditCardIcon, hideInSimpleMode: true, expandOnly: true, children: [
+      { path: '/admin/marketplace/suppliers', label: t('adminMarketplace.suppliers'), icon: UsersIcon },
+      { path: '/admin/marketplace/offers', label: t('adminMarketplace.offers'), icon: FolderIcon },
+      { path: '/admin/marketplace/policies', label: t('adminMarketplace.policies'), icon: PriceTagIcon },
+      { path: '/admin/marketplace/payouts', label: t('adminMarketplace.payouts'), icon: CreditCardIcon },
+      { path: '/admin/marketplace/reconciliation', label: t('adminMarketplace.reconciliation'), icon: ChartIcon },
+    ] },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },

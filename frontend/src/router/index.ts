@@ -217,6 +217,10 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/supplier/AccountDetailView.vue'),
     meta: { requiresAuth: true, titleKey: 'marketplace.accounts' }
   },
+  { path: '/supplier/earnings', name: 'SupplierEarnings', component: () => import('@/views/supplier/EarningsView.vue'), meta: { requiresAuth: true, titleKey: 'marketplace.earnings' } },
+  { path: '/supplier/statements', name: 'SupplierStatements', component: () => import('@/views/supplier/StatementsView.vue'), meta: { requiresAuth: true, titleKey: 'marketplace.statements' } },
+  { path: '/supplier/payouts', name: 'SupplierPayouts', component: () => import('@/views/supplier/PayoutsView.vue'), meta: { requiresAuth: true, titleKey: 'marketplace.payouts' } },
+  { path: '/supplier/payout-destinations', name: 'SupplierPayoutDestinations', component: () => import('@/views/supplier/PayoutDestinationsView.vue'), meta: { requiresAuth: true, titleKey: 'marketplace.destinations' } },
   {
     path: '/dashboard',
     name: 'Dashboard',
@@ -428,6 +432,11 @@ const routes: RouteRecordRaw[] = [
     path: '/admin',
     redirect: '/admin/dashboard'
   },
+  { path: '/admin/marketplace/suppliers', name: 'AdminMarketplaceSuppliers', component: () => import('@/views/admin/marketplace/SuppliersView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'adminMarketplace.suppliers' } },
+  { path: '/admin/marketplace/offers', name: 'AdminMarketplaceOffers', component: () => import('@/views/admin/marketplace/OffersView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'adminMarketplace.offers' } },
+  { path: '/admin/marketplace/policies', name: 'AdminMarketplacePolicies', component: () => import('@/views/admin/marketplace/PoliciesView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'adminMarketplace.policies' } },
+  { path: '/admin/marketplace/payouts', name: 'AdminMarketplacePayouts', component: () => import('@/views/admin/marketplace/PayoutsView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'adminMarketplace.payouts' } },
+  { path: '/admin/marketplace/reconciliation', name: 'AdminMarketplaceReconciliation', component: () => import('@/views/admin/marketplace/ReconciliationView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'adminMarketplace.reconciliation' } },
   {
     path: '/admin/dashboard',
     name: 'AdminDashboard',

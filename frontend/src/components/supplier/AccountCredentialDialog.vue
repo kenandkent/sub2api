@@ -5,9 +5,9 @@
       <label v-if="account.type === 'api_key' && !unknown" class="block text-sm">{{ t('marketplace.apiKey') }}<input v-model="key" data-test="credential-key" type="password" autocomplete="off" class="input mt-1 w-full" /></label>
       <template v-if="account.type === 'oauth' && session && !unknown"><a :href="authUrl" target="_blank" rel="noopener noreferrer" class="text-primary-600 underline">{{ t('marketplace.openAuthorization') }}</a><label class="block text-sm">{{ t('marketplace.callbackUrl') }}<input v-model="callback" data-test="credential-callback" autocomplete="off" class="input mt-1 w-full" /></label></template>
       <p v-if="unknown" role="alert" class="text-sm text-amber-600">{{ t(unknown === 'authorization' ? 'marketplace.authorizationUnknown' : 'marketplace.operationUnknown') }}</p>
-      <button v-if="unknown" type="button" data-test="check-credential" class="btn-secondary" :disabled="busy" @click="check">{{ t('marketplace.checkStatus') }}</button>
+      <button v-if="unknown" type="button" data-test="check-credential" class="btn btn-secondary" :disabled="busy" @click="check">{{ t('marketplace.checkStatus') }}</button>
       <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
-      <div class="flex justify-end gap-2"><button type="button" class="btn-secondary" :disabled="locked" @click="close">{{ t('common.cancel') }}</button><button class="btn-primary" :disabled="locked || (account.type === 'api_key' && !key)">{{ account.type === 'api_key' ? t('marketplace.replaceCredentials') : session ? t('marketplace.completeAuthorization') : t('marketplace.startAuthorization') }}</button></div>
+      <div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary" :disabled="locked" @click="close">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="locked || (account.type === 'api_key' && !key)">{{ account.type === 'api_key' ? t('marketplace.replaceCredentials') : session ? t('marketplace.completeAuthorization') : t('marketplace.startAuthorization') }}</button></div>
     </form>
   </BaseDialog>
 </template>

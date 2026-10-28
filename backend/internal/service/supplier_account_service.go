@@ -162,34 +162,51 @@ func (s *SupplierAccountService) provider(platform string) (config.MarketplacePr
 }
 
 func supplierProviderAllowsType(p config.MarketplaceProviderConfig, accountType string) bool {
-	for _, allowed := range p.AccountTypes {if allowed == accountType {return true}}
+	for _, allowed := range p.AccountTypes {
+		if allowed == accountType {
+			return true
+		}
+	}
 	return false
 }
 
 // AuthorizeSupplierAuthorization is checked both before creating the PKCE
 // session and before consuming its callback. Targets are resolved by owner.
 func (s *SupplierAccountService) AuthorizeSupplierAuthorization(ctx context.Context, user int64, purpose string, target int64) error {
-	if err := s.authorize(ctx,user,true); err!=nil {return err}
-	provider,ok:=s.provider(PlatformOpenAI)
-	if !ok || !supplierProviderAllowsType(provider,AccountTypeOAuth) {return ErrSupplierAuthorizationInvalid}
+	if err := s.authorize(ctx, user, true); err != nil {
+		return err
+	}
+	provider, ok := s.provider(PlatformOpenAI)
+	if !ok || !supplierProviderAllowsType(provider, AccountTypeOAuth) {
+		return ErrSupplierAuthorizationInvalid
+	}
 	switch purpose {
 	case "create":
-		if target!=0 {return ErrSupplierAuthorizationInvalid}
+		if target != 0 {
+			return ErrSupplierAuthorizationInvalid
+		}
 	case "reauthorize":
-		if target<=0 {return ErrSupplierAuthorizationInvalid}
-		account,err:=s.store.Get(ctx,user,target)
-		if err!=nil || account==nil || account.Platform!=PlatformOpenAI || account.Type!=AccountTypeOAuth {return ErrSupplierAuthorizationInvalid}
-	default:return ErrSupplierAuthorizationInvalid
+		if target <= 0 {
+			return ErrSupplierAuthorizationInvalid
+		}
+		account, err := s.store.Get(ctx, user, target)
+		if err != nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
+			return ErrSupplierAuthorizationInvalid
+		}
+	default:
+		return ErrSupplierAuthorizationInvalid
 	}
 	return nil
 }
 func (s *SupplierAccountService) Create(ctx context.Context, user int64, key string, in SupplierAccountCreate) (*SupplierOperation, error) {
-	if in.Type=="api_key" {in.Type="apikey"}
+	if in.Type == "api_key" {
+		in.Type = "apikey"
+	}
 	if err := s.authorize(ctx, user, true); err != nil {
 		return nil, err
 	}
 	p, ok := s.provider(in.Platform)
-	if !ok || in.Type != "apikey" || !supplierProviderAllowsType(p,in.Type) || (in.APIKey != "" && !validSupplierAPIKey(in.APIKey)) || strings.TrimSpace(in.Name) != in.Name || in.Name == "" || len(in.Name) > 100 || !validSupplierModels(p, in.AllowedModels) || s.cfg.Marketplace.MaxSupplierConcurrency == nil || in.Concurrency <= 0 || in.Concurrency > *s.cfg.Marketplace.MaxSupplierConcurrency || strings.TrimSpace(key) != key || len(key) == 0 || len(key) > 200 {
+	if !ok || in.Type != "apikey" || !supplierProviderAllowsType(p, in.Type) || (in.APIKey != "" && !validSupplierAPIKey(in.APIKey)) || strings.TrimSpace(in.Name) != in.Name || in.Name == "" || len(in.Name) > 100 || !validSupplierModels(p, in.AllowedModels) || s.cfg.Marketplace.MaxSupplierConcurrency == nil || in.Concurrency <= 0 || in.Concurrency > *s.cfg.Marketplace.MaxSupplierConcurrency || strings.TrimSpace(key) != key || len(key) == 0 || len(key) > 200 {
 		return nil, apperrors.BadRequest("invalid_account", "Invalid account or idempotency key")
 	}
 	// Only a digest of the key enters durable operation metadata.
@@ -494,9 +511,15 @@ type SupplierDailyUsage struct {
 	SupplierAccountUsage
 }
 type SupplierOverview struct {
-	Stats      SupplierAccountUsage `json:"stats"`
-	DailyUsage []SupplierDailyUsage `json:"daily_usage"`
-	UpdatedAt  time.Time            `json:"updated_at"`
+	OnlineAccounts  int64                `json:"online_accounts"`
+	CurrentRequests int                  `json:"current_requests"`
+	Pending         string               `json:"pending"`
+	Available       string               `json:"available"`
+	PayoutReserved  string               `json:"payout_reserved"`
+	AccountIDs      []int64              `json:"-"`
+	Stats           SupplierAccountUsage `json:"stats"`
+	DailyUsage      []SupplierDailyUsage `json:"daily_usage"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 type SupplierOverviewStore interface {
 	Overview(context.Context, int64) (*SupplierOverview, error)
@@ -510,42 +533,77 @@ func (s *SupplierAccountService) Overview(ctx context.Context, user int64) (*Sup
 	if !ok {
 		return nil, apperrors.Conflict("overview_unavailable", "Overview unavailable")
 	}
-	return store.Overview(ctx, user)
+	view, err := store.Overview(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	if len(view.AccountIDs) > 0 {
+		if s.concurrency == nil {
+			return nil, apperrors.ServiceUnavailable("concurrency_unavailable", "Account concurrency unavailable")
+		}
+		loads, err := s.concurrency.GetAccountConcurrencyBatch(ctx, view.AccountIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range view.AccountIDs {
+			view.CurrentRequests += loads[id]
+		}
+	}
+	return view, nil
 }
 
 // AdminSupplierOffer contains only metadata suitable for an administrator review queue.
 type AdminSupplierOffer struct {
-	ID int64 `json:"id"`
-	OfferID int64 `json:"offer_id"`
-	AccountID int64 `json:"account_id"`
-	OwnerUserID int64 `json:"owner_user_id"`
-	AccountName string `json:"account_name"`
-	Platform string `json:"platform"`
-	Type string `json:"type"`
-	AccountStatus string `json:"account_status"`
-	SupplierStatus string `json:"supplier_status"`
-	IdentityVerified bool `json:"identity_verified"`
-	Concurrency int `json:"concurrency"`
-	ReviewStatus string `json:"review_status"`
-	Enabled bool `json:"enabled"`
-	AllowedModels []string `json:"allowed_models"`
-	Version int64 `json:"version"`
+	ID               int64    `json:"id"`
+	OfferID          int64    `json:"offer_id"`
+	AccountID        int64    `json:"account_id"`
+	OwnerUserID      int64    `json:"owner_user_id"`
+	AccountName      string   `json:"account_name"`
+	Platform         string   `json:"platform"`
+	Type             string   `json:"type"`
+	AccountStatus    string   `json:"account_status"`
+	SupplierStatus   string   `json:"supplier_status"`
+	IdentityVerified bool     `json:"identity_verified"`
+	Concurrency      int      `json:"concurrency"`
+	ReviewStatus     string   `json:"review_status"`
+	Enabled          bool     `json:"enabled"`
+	AllowedModels    []string `json:"allowed_models"`
+	Version          int64    `json:"version"`
 }
 type AdminSupplierOfferPage struct {
-	Items []AdminSupplierOffer `json:"items"`
-	Total int64 `json:"total"`
-	Page int `json:"page"`
-	PageSize int `json:"page_size"`
-	Pages int `json:"pages"`
+	Items    []AdminSupplierOffer `json:"items"`
+	Total    int64                `json:"total"`
+	Page     int                  `json:"page"`
+	PageSize int                  `json:"page_size"`
+	Pages    int                  `json:"pages"`
 }
 type supplierAdminOfferListStore interface {
 	ListAdminOffers(context.Context, SupplierAccountFilter) ([]AdminSupplierOffer, int64, error)
 }
+
 func (s *SupplierAccountService) AdminListOffers(ctx context.Context, admin int64, f SupplierAccountFilter) (*AdminSupplierOfferPage, error) {
-	if admin <= 0 { return nil, apperrors.Forbidden("administrator_required", "Administrator required") }
-	if f.Page < 1 { f.Page = 1 }; if f.PageSize < 1 { f.PageSize = 20 }; if f.PageSize > 100 { f.PageSize = 100 }
-	if f.Page > 1000000 || len(f.Query) > 100 || len(f.Platform) > 50 || len(f.Status) > 20 { return nil, apperrors.BadRequest("invalid_filter", "Invalid filter") }
-	store, ok := s.store.(supplierAdminOfferListStore); if !ok { return nil, apperrors.Conflict("offers_unavailable", "Offers unavailable") }
-	items, total, err := store.ListAdminOffers(ctx, f); if err != nil { return nil, err }
-	return &AdminSupplierOfferPage{Items: items, Total: total, Page: f.Page, PageSize: f.PageSize, Pages: int((total+int64(f.PageSize)-1)/int64(f.PageSize))}, nil
+	if admin <= 0 {
+		return nil, apperrors.Forbidden("administrator_required", "Administrator required")
+	}
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 {
+		f.PageSize = 20
+	}
+	if f.PageSize > 100 {
+		f.PageSize = 100
+	}
+	if f.Page > 1000000 || len(f.Query) > 100 || len(f.Platform) > 50 || len(f.Status) > 20 {
+		return nil, apperrors.BadRequest("invalid_filter", "Invalid filter")
+	}
+	store, ok := s.store.(supplierAdminOfferListStore)
+	if !ok {
+		return nil, apperrors.Conflict("offers_unavailable", "Offers unavailable")
+	}
+	items, total, err := store.ListAdminOffers(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return &AdminSupplierOfferPage{Items: items, Total: total, Page: f.Page, PageSize: f.PageSize, Pages: int((total + int64(f.PageSize) - 1) / int64(f.PageSize))}, nil
 }

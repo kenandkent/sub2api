@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -316,9 +318,40 @@ func (r *SupplierAccountRepository) List(ctx context.Context, user int64, f serv
 		if e != nil {
 			return nil, 0, e
 		}
+		a.Usage.ConsumerCharge = "0"
+		a.Usage.SupplierNet = "0"
+		a.Reviews = []service.SupplierAccountReview{}
 		out = append(out, *a)
 	}
-	return out, total, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	if len(out) == 0 {
+		return out, total, nil
+	}
+	usageArgs := []any{user}
+	holders := make([]string, 0, len(out))
+	byID := make(map[int64]int, len(out))
+	for i, a := range out {
+		usageArgs = append(usageArgs, a.ID)
+		holders = append(holders, fmt.Sprintf("$%d", len(usageArgs)))
+		byID[a.ID] = i
+	}
+	usageRows, err := r.db.QueryContext(ctx, `SELECT a.account_id,`+strings.TrimPrefix(usageQuery, "SELECT ")+` WHERE c.owner_user_id=$1 AND a.account_id IN (`+strings.Join(holders, ",")+`) GROUP BY a.account_id`, usageArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer usageRows.Close()
+	for usageRows.Next() {
+		var id int64
+		var usage service.SupplierAccountUsage
+		if err = usageRows.Scan(&id, &usage.Requests, &usage.InputTokens, &usage.OutputTokens, &usage.ConsumerCharge, &usage.SupplierNet); err != nil {
+			return nil, 0, err
+		}
+		out[byID[id]].Usage = usage
+	}
+	return out, total, usageRows.Err()
 }
 
 func (r *SupplierAccountRepository) GetForReview(ctx context.Context, id int64) (*service.SupplierAccountDetail, error) {
@@ -490,7 +523,32 @@ const usageQuery = `SELECT COUNT(*),COALESCE(SUM(COALESCE((a.usage->>'input_toke
 
 func (r *SupplierAccountRepository) Overview(ctx context.Context, user int64) (*service.SupplierOverview, error) {
 	result := &service.SupplierOverview{DailyUsage: []service.SupplierDailyUsage{}, UpdatedAt: time.Now().UTC()}
-	err := r.db.QueryRowContext(ctx, usageQuery+` WHERE c.owner_user_id=$1`, user).Scan(&result.Stats.Requests, &result.Stats.InputTokens, &result.Stats.OutputTokens, &result.Stats.ConsumerCharge, &result.Stats.SupplierNet)
+	accounts, err := r.db.QueryContext(ctx, `SELECT a.id,(a.status='active' AND a.schedulable AND o.review_status='approved' AND o.enabled AND o.revoked_at IS NULL AND p.status='active' AND u.status='active' AND u.deleted_at IS NULL AND (NOT a.auto_pause_on_expired OR a.expires_at IS NULL OR a.expires_at>now()) AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=now()) AND (a.overload_until IS NULL OR a.overload_until<=now()) AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until<=now())) FROM accounts a JOIN sharing_offers o ON o.account_id=a.id AND o.owner_user_id=a.owner_user_id JOIN supplier_profiles p ON p.user_id=a.owner_user_id JOIN users u ON u.id=p.user_id WHERE a.owner_user_id=$1 AND a.deleted_at IS NULL AND a.parent_account_id IS NULL ORDER BY a.id`, user)
+	if err != nil {
+		return nil, err
+	}
+	for accounts.Next() {
+		var id int64
+		var online bool
+		if err = accounts.Scan(&id, &online); err != nil {
+			accounts.Close()
+			return nil, err
+		}
+		result.AccountIDs = append(result.AccountIDs, id)
+		if online {
+			result.OnlineAccounts++
+		}
+	}
+	err = accounts.Err()
+	accounts.Close()
+	if err != nil {
+		return nil, err
+	}
+	err = r.db.QueryRowContext(ctx, `SELECT coalesce((SELECT pending::text FROM supplier_wallets WHERE user_id=$1 AND currency='USD'),'0'),coalesce((SELECT available::text FROM supplier_wallets WHERE user_id=$1 AND currency='USD'),'0'),coalesce((SELECT payout_reserved::text FROM supplier_wallets WHERE user_id=$1 AND currency='USD'),'0')`, user).Scan(&result.Pending, &result.Available, &result.PayoutReserved)
+	if err != nil {
+		return nil, err
+	}
+	err = r.db.QueryRowContext(ctx, usageQuery+` WHERE c.owner_user_id=$1`, user).Scan(&result.Stats.Requests, &result.Stats.InputTokens, &result.Stats.OutputTokens, &result.Stats.ConsumerCharge, &result.Stats.SupplierNet)
 	if err != nil {
 		return nil, err
 	}
@@ -567,16 +625,26 @@ func (r *SupplierAccountRepository) ListAdminOffers(ctx context.Context, f servi
 	const from = ` FROM sharing_offers o JOIN accounts a ON a.id=o.account_id AND a.owner_user_id=o.owner_user_id JOIN supplier_profiles p ON p.user_id=o.owner_user_id WHERE a.deleted_at IS NULL AND a.parent_account_id IS NULL AND ($1='' OR a.name ILIKE '%' || $1 || '%') AND ($2='' OR a.platform=$2) AND ($3='' OR o.review_status=$3)`
 	args := []any{f.Query, f.Platform, f.Status}
 	var total int64
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*)`+from, args...).Scan(&total); err != nil { return nil, 0, err }
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
 	rows, err := r.db.QueryContext(ctx, `SELECT o.id,a.id,o.owner_user_id,a.name,a.platform,a.type,a.status,p.status,EXISTS(SELECT 1 FROM marketplace_credential_fingerprints f WHERE f.account_id=a.id),a.concurrency,o.review_status,o.enabled,o.allowed_models,o.version`+from+` ORDER BY o.id DESC LIMIT $4 OFFSET $5`, args...)
-	if err != nil { return nil, 0, err }; defer rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
 	items := []service.AdminSupplierOffer{}
 	for rows.Next() {
-		var a service.AdminSupplierOffer; var models []byte
-		if err := rows.Scan(&a.ID,&a.AccountID,&a.OwnerUserID,&a.AccountName,&a.Platform,&a.Type,&a.AccountStatus,&a.SupplierStatus,&a.IdentityVerified,&a.Concurrency,&a.ReviewStatus,&a.Enabled,&models,&a.Version); err != nil { return nil, 0, err }
+		var a service.AdminSupplierOffer
+		var models []byte
+		if err := rows.Scan(&a.ID, &a.AccountID, &a.OwnerUserID, &a.AccountName, &a.Platform, &a.Type, &a.AccountStatus, &a.SupplierStatus, &a.IdentityVerified, &a.Concurrency, &a.ReviewStatus, &a.Enabled, &models, &a.Version); err != nil {
+			return nil, 0, err
+		}
 		a.OfferID = a.ID
-		if err := json.Unmarshal(models, &a.AllowedModels); err != nil { return nil, 0, err }
+		if err := json.Unmarshal(models, &a.AllowedModels); err != nil {
+			return nil, 0, err
+		}
 		items = append(items, a)
 	}
 	return items, total, rows.Err()

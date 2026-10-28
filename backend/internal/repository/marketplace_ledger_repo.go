@@ -26,7 +26,19 @@ func NewMarketplaceLedgerRepository() *MarketplaceLedgerRepository {
 }
 
 // Post uses the caller's transaction. The caller must roll it back after any error.
-func (*MarketplaceLedgerRepository) Post(ctx context.Context, tx *sql.Tx, operationID, actor, currency string, entries []LedgerPosting) error {
+func (r *MarketplaceLedgerRepository) Post(ctx context.Context, tx *sql.Tx, operationID, actor, currency string, entries []LedgerPosting) error {
+	return r.post(ctx, tx, operationID, actor, currency, nil, entries)
+}
+
+// PostWithOriginal appends a transaction referencing its immutable original.
+func (r *MarketplaceLedgerRepository) PostWithOriginal(ctx context.Context, tx *sql.Tx, operationID, actor, currency string, original int64, entries []LedgerPosting) error {
+	if original <= 0 {
+		return errors.New("invalid original transaction")
+	}
+	return r.post(ctx, tx, operationID, actor, currency, &original, entries)
+}
+
+func (r *MarketplaceLedgerRepository) post(ctx context.Context, tx *sql.Tx, operationID, actor, currency string, original *int64, entries []LedgerPosting) error {
 	if tx == nil || operationID == "" || actor == "" || currency != "USD" || len(entries) < 2 {
 		return errors.New("invalid ledger transaction")
 	}
@@ -54,15 +66,16 @@ func (*MarketplaceLedgerRepository) Post(ctx context.Context, tx *sql.Tx, operat
 	digest := sha256.Sum256(payload)
 	fingerprint := hex.EncodeToString(digest[:])
 	var id int64
-	err = tx.QueryRowContext(ctx, `INSERT INTO ledger_transactions(operation_id,actor,currency,fingerprint) VALUES ($1,$2,$3,$4) ON CONFLICT(operation_id) DO NOTHING RETURNING id`, operationID, actor, currency, fingerprint).Scan(&id)
+	err = tx.QueryRowContext(ctx, `INSERT INTO ledger_transactions(operation_id,actor,currency,fingerprint,original_transaction_id) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(operation_id) DO NOTHING RETURNING id`, operationID, actor, currency, fingerprint, original).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		var existingActor, existingCurrency, existingFingerprint string
 		var sealed bool
-		err = tx.QueryRowContext(ctx, `SELECT actor,currency,fingerprint,sealed FROM ledger_transactions WHERE operation_id=$1`, operationID).Scan(&existingActor, &existingCurrency, &existingFingerprint, &sealed)
+		var existingOriginal sql.NullInt64
+		err = tx.QueryRowContext(ctx, `SELECT actor,currency,fingerprint,sealed,original_transaction_id FROM ledger_transactions WHERE operation_id=$1`, operationID).Scan(&existingActor, &existingCurrency, &existingFingerprint, &sealed, &existingOriginal)
 		if err != nil {
 			return err
 		}
-		if existingActor != actor || existingCurrency != currency || existingFingerprint != fingerprint || !sealed {
+		if existingActor != actor || existingCurrency != currency || existingFingerprint != fingerprint || !sealed || (original == nil && existingOriginal.Valid) || (original != nil && (!existingOriginal.Valid || existingOriginal.Int64 != *original)) {
 			return ErrFundingOperationConflict
 		}
 		return nil

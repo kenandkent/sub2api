@@ -10,7 +10,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type SupplierHandler struct{ svc *service.SupplierService }
+type SupplierHandler struct {
+	svc      *service.SupplierService
+	accounts *service.SupplierAccountService
+}
+
+func (h *SupplierHandler) SetAccountService(accounts *service.SupplierAccountService) {
+	h.accounts = accounts
+}
 
 func NewSupplierHandler(svc *service.SupplierService) *SupplierHandler {
 	return &SupplierHandler{svc: svc}
@@ -144,5 +151,13 @@ func (h *SupplierHandler) Options(c *gin.Context) {
 	if _, ok := supplierSubject(c); !ok {
 		return
 	}
-	response.Success(c, h.svc.Options())
+	options := h.svc.Options()
+	if h.accounts != nil {
+		providers, err := h.accounts.Providers(c.Request.Context())
+		if response.ErrorFrom(c, err) {
+			return
+		}
+		options.Providers = providers
+	}
+	response.Success(c, options)
 }

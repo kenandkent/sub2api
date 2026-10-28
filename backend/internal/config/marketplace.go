@@ -9,19 +9,29 @@ import (
 
 // MarketplaceConfig contains opt-in switches and explicit commercial terms.
 // Pointer terms distinguish an omitted setting from a deliberate zero.
+type MarketplaceProviderConfig struct {
+	Platform     string   `mapstructure:"platform" yaml:"platform"`
+	Label        string   `mapstructure:"label" yaml:"label"`
+	BaseURL      string   `mapstructure:"base_url" yaml:"base_url"`
+	AccountTypes []string `mapstructure:"account_types" yaml:"account_types"`
+	Models       []string `mapstructure:"models" yaml:"models"`
+	ProxyID      *int64   `mapstructure:"proxy_id" yaml:"proxy_id"`
+}
+
 type MarketplaceConfig struct {
-	AgreementText          string   `mapstructure:"agreement_text" yaml:"agreement_text"`
-	AgreementURL           string   `mapstructure:"agreement_url" yaml:"agreement_url"`
-	AgreementVersion       int64    `mapstructure:"agreement_version" yaml:"agreement_version"`
-	ApplicationFields      []string `mapstructure:"application_fields" yaml:"application_fields"`
-	Enabled                bool     `mapstructure:"enabled" yaml:"enabled"`
-	OnboardingEnabled      bool     `mapstructure:"onboarding_enabled" yaml:"onboarding_enabled"`
-	DispatchEnabled        bool     `mapstructure:"dispatch_enabled" yaml:"dispatch_enabled"`
-	PayoutsEnabled         bool     `mapstructure:"payouts_enabled" yaml:"payouts_enabled"`
-	FeeBPS                 *int     `mapstructure:"fee_bps" yaml:"fee_bps"`
-	HoldHours              *int     `mapstructure:"hold_hours" yaml:"hold_hours"`
-	MaxSupplierConcurrency *int     `mapstructure:"max_supplier_concurrency" yaml:"max_supplier_concurrency"`
-	MinimumPayoutUSD       *string  `mapstructure:"minimum_payout_usd" yaml:"minimum_payout_usd"`
+	Providers              []MarketplaceProviderConfig `mapstructure:"providers" yaml:"providers"`
+	AgreementText          string                      `mapstructure:"agreement_text" yaml:"agreement_text"`
+	AgreementURL           string                      `mapstructure:"agreement_url" yaml:"agreement_url"`
+	AgreementVersion       int64                       `mapstructure:"agreement_version" yaml:"agreement_version"`
+	ApplicationFields      []string                    `mapstructure:"application_fields" yaml:"application_fields"`
+	Enabled                bool                        `mapstructure:"enabled" yaml:"enabled"`
+	OnboardingEnabled      bool                        `mapstructure:"onboarding_enabled" yaml:"onboarding_enabled"`
+	DispatchEnabled        bool                        `mapstructure:"dispatch_enabled" yaml:"dispatch_enabled"`
+	PayoutsEnabled         bool                        `mapstructure:"payouts_enabled" yaml:"payouts_enabled"`
+	FeeBPS                 *int                        `mapstructure:"fee_bps" yaml:"fee_bps"`
+	HoldHours              *int                        `mapstructure:"hold_hours" yaml:"hold_hours"`
+	MaxSupplierConcurrency *int                        `mapstructure:"max_supplier_concurrency" yaml:"max_supplier_concurrency"`
+	MinimumPayoutUSD       *string                     `mapstructure:"minimum_payout_usd" yaml:"minimum_payout_usd"`
 }
 
 var marketplaceMinimumPattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]{1,2})?$`)

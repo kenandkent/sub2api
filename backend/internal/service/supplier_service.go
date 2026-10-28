@@ -184,17 +184,18 @@ func validSupplierAgreement(text, raw string) bool {
 }
 
 type SupplierOptions struct {
-	AgreementText          string   `json:"agreement_text"`
-	AgreementURL           string   `json:"agreement_url"`
-	AgreementVersion       int64    `json:"agreement_version"`
-	ApplicationFields      []string `json:"application_fields"`
-	MaxSupplierConcurrency *int     `json:"max_supplier_concurrency"`
-	FeeBPS                 *int     `json:"fee_bps"`
-	HoldHours              *int     `json:"hold_hours"`
+	Providers              []SupplierProviderOption `json:"providers"`
+	AgreementText          string                   `json:"agreement_text"`
+	AgreementURL           string                   `json:"agreement_url"`
+	AgreementVersion       int64                    `json:"agreement_version"`
+	ApplicationFields      []string                 `json:"application_fields"`
+	MaxSupplierConcurrency *int                     `json:"max_supplier_concurrency"`
+	FeeBPS                 *int                     `json:"fee_bps"`
+	HoldHours              *int                     `json:"hold_hours"`
 }
 
 func (s *SupplierService) Options() SupplierOptions {
-	o := SupplierOptions{ApplicationFields: []string{}}
+	o := SupplierOptions{ApplicationFields: []string{}, Providers: []SupplierProviderOption{}}
 	if s.cfg != nil {
 		c := s.cfg.Marketplace
 		o.AgreementVersion = c.AgreementVersion

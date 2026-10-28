@@ -164,12 +164,15 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 	fp := hex.EncodeToString(sum[:])
 	var existingFP string
 	var ledgerID sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT fingerprint,ledger_transaction_id FROM marketplace_captures WHERE receipt_id=$1`, c.ReceiptID).Scan(&existingFP, &ledgerID)
+	var quotaExhausted, rateChanged bool
+	var balance decimal.Decimal
+	err = tx.QueryRowContext(ctx, `SELECT fingerprint,ledger_transaction_id,api_key_quota_exhausted,api_key_rate_limit_changed,buyer_balance_after FROM marketplace_captures WHERE receipt_id=$1`, c.ReceiptID).Scan(&existingFP, &ledgerID, &quotaExhausted, &rateChanged, &balance)
 	if err == nil {
 		if existingFP != fp {
 			return nil, service.ErrUsageBillingRequestConflict
 		}
-		return &service.MarketplaceBillingResult{LedgerTransactionID: ledgerID.Int64}, nil
+		balanceFloat, _ := balance.Float64()
+		return &service.MarketplaceBillingResult{LedgerTransactionID: ledgerID.Int64, APIKeyQuotaExhausted: quotaExhausted, APIKeyRateLimitChanged: rateChanged, NewBalance: &balanceFloat}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -229,11 +232,15 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 		return nil, service.ErrUsageBillingRequestConflict
 	}
 	if charge.IsPositive() {
-		if _, err = incrementUsageBillingAPIKeyQuota(ctx, tx, receipt.APIKeyID, charge.String()); err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
+		if quotaExhausted, err = incrementUsageBillingAPIKeyQuota(ctx, tx, receipt.APIKeyID, charge.String()); err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
 			return nil, err
 		}
-		if err = incrementUsageBillingAPIKeyRateLimit(ctx, tx, receipt.APIKeyID, charge.String()); err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
-			return nil, err
+		if err = incrementUsageBillingAPIKeyRateLimit(ctx, tx, receipt.APIKeyID, charge.String()); err != nil {
+			if !errors.Is(err, service.ErrAPIKeyNotFound) {
+				return nil, err
+			}
+		} else {
+			rateChanged = true
 		}
 	}
 	if accountCharge.IsPositive() && service.AccountTypeSupportsQuota(accountType) {
@@ -245,6 +252,9 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 		if err = NewWalletFundingRepository().SettleHold(ctx, tx, buyer, "marketplace:settle:"+c.ReceiptID, marketplaceActor, marketplaceHoldID(c.ReceiptID), charge.Decimal); err != nil {
 			return nil, err
 		}
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT balance FROM users WHERE id=$1`, buyer).Scan(&balance); err != nil {
+		return nil, err
 	}
 	paid := decimal.Min(supplierDebt, supplier.Decimal)
 	pending := supplier.Sub(paid)
@@ -276,7 +286,7 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 		return nil, err
 	}
 	var captureID int64
-	err = tx.QueryRowContext(ctx, `INSERT INTO marketplace_captures(receipt_id,attempt_id,owner_user_id,consumer_charge,supplier_net,platform_fee,supplier_debt_offset,matures_at,ledger_transaction_id,fingerprint) VALUES($1,$2,$3,$4,$5,$6,$7,now()+($8 * interval '1 hour'),$9,$10) RETURNING id`, c.ReceiptID, c.BillableAttemptID, owner, charge.String(), supplier.String(), fee.String(), paid.String(), q.HoldHours, ledgerID, fp).Scan(&captureID)
+	err = tx.QueryRowContext(ctx, `INSERT INTO marketplace_captures(receipt_id,attempt_id,owner_user_id,consumer_charge,supplier_net,platform_fee,supplier_debt_offset,matures_at,ledger_transaction_id,fingerprint,api_key_quota_exhausted,api_key_rate_limit_changed,buyer_balance_after) VALUES($1,$2,$3,$4,$5,$6,$7,now()+($8 * interval '1 hour'),$9,$10,$11,$12,$13) RETURNING id`, c.ReceiptID, c.BillableAttemptID, owner, charge.String(), supplier.String(), fee.String(), paid.String(), q.HoldHours, ledgerID, fp, quotaExhausted, rateChanged, balance.String()).Scan(&captureID)
 	if err != nil {
 		return nil, err
 	}
@@ -286,5 +296,6 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &service.MarketplaceBillingResult{FirstApplied: true, LedgerTransactionID: ledgerID.Int64}, nil
+	balanceFloat, _ := balance.Float64()
+	return &service.MarketplaceBillingResult{FirstApplied: true, LedgerTransactionID: ledgerID.Int64, APIKeyQuotaExhausted: quotaExhausted, APIKeyRateLimitChanged: rateChanged, NewBalance: &balanceFloat}, nil
 }

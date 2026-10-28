@@ -77,6 +77,10 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	net, fee, err := service.SplitMarketplaceCharge(charge, 2000)
 	require.NoError(t, err)
 	command := service.MarketplaceCaptureCommand{ReceiptID: receipt.ID, BillableAttemptID: attempt.ID, QuoteDigest: digest, Usage: usage, ConsumerCharge: charge, SupplierNet: net, PlatformFee: fee}
+	firstCommand := command
+	// Crossing quota must be returned again on a replay after an unknown commit result.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE api_keys SET quota=1 WHERE id=$1`, key)
+	require.NoError(t, err)
 	// An overflow in a quota update fails the transaction after the dedup claim.
 	_, err = integrationDB.ExecContext(ctx, `UPDATE api_keys SET quota_used=999999999999.99999999 WHERE id=$1`, key)
 	require.NoError(t, err)
@@ -95,10 +99,23 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	result, err := billing.Capture(ctx, command, service.UsageBillingCommand{BalanceCost: 999})
 	require.NoError(t, err)
 	require.True(t, result.FirstApplied)
+	require.True(t, result.APIKeyQuotaExhausted)
+	require.True(t, result.APIKeyRateLimitChanged)
+	require.NotNil(t, result.NewBalance)
+	require.Equal(t, 3.765433, *result.NewBalance)
 	replay, err := billing.Capture(ctx, command, service.UsageBillingCommand{})
 	require.NoError(t, err)
 	require.False(t, replay.FirstApplied)
 	require.Equal(t, result.LedgerTransactionID, replay.LedgerTransactionID)
+	require.True(t, replay.APIKeyQuotaExhausted)
+	require.True(t, replay.APIKeyRateLimitChanged)
+	require.Equal(t, result.NewBalance, replay.NewBalance)
+	var persistedExhausted, persistedRate bool
+	var persistedBalance string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT api_key_quota_exhausted,api_key_rate_limit_changed,buyer_balance_after::text FROM marketplace_captures WHERE receipt_id=$1`, receipt.ID).Scan(&persistedExhausted, &persistedRate, &persistedBalance))
+	require.True(t, persistedExhausted)
+	require.True(t, persistedRate)
+	require.Equal(t, "3.76543300", persistedBalance)
 	command.Usage.InputTokens++
 	_, err = billing.Capture(ctx, command, service.UsageBillingCommand{})
 	require.Error(t, err)
@@ -124,6 +141,12 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 
 	// A failed projection rolls back its writes and remains retryable without recapturing.
 	worker := &MarketplaceOutboxWorker{DB: integrationDB, Project: func(ctx context.Context, tx *sql.Tx, event MarketplaceOutboxEvent) error {
+		require.Equal(t, buyer, event.BuyerUserID)
+		require.Equal(t, key, event.APIKeyID)
+		require.Equal(t, account, event.AccountID)
+		require.True(t, event.APIKeyQuotaExhausted)
+		require.True(t, event.APIKeyRateLimitChanged)
+		require.Equal(t, "3.76543300", event.BuyerBalanceAfter.StringFixed(8))
 		if _, err := tx.ExecContext(ctx, `UPDATE api_keys SET quota_used=quota_used+100 WHERE id=$1`, key); err != nil {
 			return err
 		}
@@ -208,4 +231,15 @@ func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
 	require.Zero(t, holds)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT pending::text FROM supplier_wallets WHERE user_id=$1`, owner).Scan(&pending))
 	require.Equal(t, "7.98765360", pending)
+	// A retry after later wallet activity returns the capture-time outcome.
+	tx, err = integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, NewWalletFundingRepository().Credit(ctx, tx, buyer, "later-credit:"+suffix, "test", decimal.NewFromInt(1), service.FundingCashPaid, "later-test-credit", suffix))
+	require.NoError(t, tx.Commit())
+	replay, err = billing.Capture(ctx, firstCommand, service.UsageBillingCommand{})
+	require.NoError(t, err)
+	require.False(t, replay.FirstApplied)
+	require.True(t, replay.APIKeyQuotaExhausted)
+	require.True(t, replay.APIKeyRateLimitChanged)
+	require.Equal(t, 3.765433, *replay.NewBalance)
 }

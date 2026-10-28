@@ -24,7 +24,7 @@ func fundingLock(ctx context.Context, tx *sql.Tx, user int64) (decimal.Decimal, 
 	if tx == nil {
 		return b, h, debt, nil, errors.New("funding transaction required")
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT balance,frozen_balance FROM users WHERE id=$1 FOR UPDATE`, user).Scan(&b, &h); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT balance,frozen_balance FROM users WHERE id=$1 FOR NO KEY UPDATE`, user).Scan(&b, &h); err != nil {
 		return b, h, debt, nil, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT debt FROM wallet_funding_states WHERE user_id=$1 FOR UPDATE`, user).Scan(&debt); err != nil {

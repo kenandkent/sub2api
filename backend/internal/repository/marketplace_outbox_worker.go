@@ -5,15 +5,25 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
-// MarketplaceOutboxEvent contains references only, never prompts or credentials.
+// MarketplaceOutboxEvent joins reference-only outbox rows to capture metadata;
+// it never contains prompts or credentials.
 type MarketplaceOutboxEvent struct {
-	ID        int64
-	EventID   string
-	EventType string
-	ReceiptID string
-	CaptureID int64
+	ID                     int64
+	EventID                string
+	EventType              string
+	ReceiptID              string
+	CaptureID              int64
+	BuyerUserID            int64
+	APIKeyID               int64
+	AccountID              int64
+	APIKeyQuotaExhausted   bool
+	APIKeyRateLimitChanged bool
+	// Capture-time balance is historical and must not overwrite newer cache state.
+	BuyerBalanceAfter decimal.Decimal
 }
 
 // MarketplaceOutboxProjector writes a projection in the supplied transaction.
@@ -35,7 +45,7 @@ func (w *MarketplaceOutboxWorker) ProcessOne(ctx context.Context) (bool, error) 
 	}
 	defer tx.Rollback()
 	var e MarketplaceOutboxEvent
-	err = tx.QueryRowContext(ctx, `SELECT id,event_id,event_type,receipt_id::text,capture_id FROM marketplace_outbox WHERE processed_at IS NULL AND next_attempt_at<=now() ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&e.ID, &e.EventID, &e.EventType, &e.ReceiptID, &e.CaptureID)
+	err = tx.QueryRowContext(ctx, `SELECT o.id,o.event_id,o.event_type,o.receipt_id::text,o.capture_id,r.buyer_user_id,r.api_key_id,a.account_id,c.api_key_quota_exhausted,c.api_key_rate_limit_changed,c.buyer_balance_after FROM marketplace_outbox o JOIN marketplace_captures c ON c.id=o.capture_id JOIN marketplace_requests r ON r.id=o.receipt_id JOIN marketplace_attempts a ON a.id=c.attempt_id WHERE o.processed_at IS NULL AND o.next_attempt_at<=now() ORDER BY o.id FOR UPDATE OF o SKIP LOCKED LIMIT 1`).Scan(&e.ID, &e.EventID, &e.EventType, &e.ReceiptID, &e.CaptureID, &e.BuyerUserID, &e.APIKeyID, &e.AccountID, &e.APIKeyQuotaExhausted, &e.APIKeyRateLimitChanged, &e.BuyerBalanceAfter)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

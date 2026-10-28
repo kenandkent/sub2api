@@ -9,9 +9,13 @@ type MarketplaceBillingRepository interface {
 }
 
 type MarketplaceBillingResult struct {
-	FirstApplied        bool
-	NeedsReview         bool
-	LedgerTransactionID int64
+	FirstApplied           bool
+	NeedsReview            bool
+	LedgerTransactionID    int64
+	APIKeyQuotaExhausted   bool
+	APIKeyRateLimitChanged bool
+	// NewBalance is the balance at capture commit, and can be stale on replay.
+	NewBalance *float64
 }
 
 type MarketplaceBillingService struct{ repository MarketplaceBillingRepository }

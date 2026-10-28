@@ -160,13 +160,36 @@ func (s *SupplierAccountService) provider(platform string) (config.MarketplacePr
 	}
 	return config.MarketplaceProviderConfig{}, false
 }
+
+func supplierProviderAllowsType(p config.MarketplaceProviderConfig, accountType string) bool {
+	for _, allowed := range p.AccountTypes {if allowed == accountType {return true}}
+	return false
+}
+
+// AuthorizeSupplierAuthorization is checked both before creating the PKCE
+// session and before consuming its callback. Targets are resolved by owner.
+func (s *SupplierAccountService) AuthorizeSupplierAuthorization(ctx context.Context, user int64, purpose string, target int64) error {
+	if err := s.authorize(ctx,user,true); err!=nil {return err}
+	provider,ok:=s.provider(PlatformOpenAI)
+	if !ok || !supplierProviderAllowsType(provider,AccountTypeOAuth) {return ErrSupplierAuthorizationInvalid}
+	switch purpose {
+	case "create":
+		if target!=0 {return ErrSupplierAuthorizationInvalid}
+	case "reauthorize":
+		if target<=0 {return ErrSupplierAuthorizationInvalid}
+		account,err:=s.store.Get(ctx,user,target)
+		if err!=nil || account==nil || account.Platform!=PlatformOpenAI || account.Type!=AccountTypeOAuth {return ErrSupplierAuthorizationInvalid}
+	default:return ErrSupplierAuthorizationInvalid
+	}
+	return nil
+}
 func (s *SupplierAccountService) Create(ctx context.Context, user int64, key string, in SupplierAccountCreate) (*SupplierOperation, error) {
 	if in.Type=="api_key" {in.Type="apikey"}
 	if err := s.authorize(ctx, user, true); err != nil {
 		return nil, err
 	}
 	p, ok := s.provider(in.Platform)
-	if !ok || in.Type != "apikey" || (in.APIKey != "" && !validSupplierAPIKey(in.APIKey)) || strings.TrimSpace(in.Name) != in.Name || in.Name == "" || len(in.Name) > 100 || !validSupplierModels(p, in.AllowedModels) || s.cfg.Marketplace.MaxSupplierConcurrency == nil || in.Concurrency <= 0 || in.Concurrency > *s.cfg.Marketplace.MaxSupplierConcurrency || strings.TrimSpace(key) != key || len(key) == 0 || len(key) > 200 {
+	if !ok || in.Type != "apikey" || !supplierProviderAllowsType(p,in.Type) || (in.APIKey != "" && !validSupplierAPIKey(in.APIKey)) || strings.TrimSpace(in.Name) != in.Name || in.Name == "" || len(in.Name) > 100 || !validSupplierModels(p, in.AllowedModels) || s.cfg.Marketplace.MaxSupplierConcurrency == nil || in.Concurrency <= 0 || in.Concurrency > *s.cfg.Marketplace.MaxSupplierConcurrency || strings.TrimSpace(key) != key || len(key) == 0 || len(key) > 200 {
 		return nil, apperrors.BadRequest("invalid_account", "Invalid account or idempotency key")
 	}
 	// Only a digest of the key enters durable operation metadata.

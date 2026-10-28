@@ -17,6 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Legacy test buyers intentionally have no migrated funding projection. The
+// real user repository implements this port transactionally for both states.
+func (*mockUserRepo) ReservePaymentRefund(context.Context,int64,int64,float64,string)(bool,error){return false,nil}
+func (*mockUserRepo) SettlePaymentRefund(context.Context,string,bool)error{return nil}
+func (*mockUserRepo) MarkRefundNeedsReview(context.Context,string)error{return nil}
+func (*mockUserRepo) BindRefundProviderReference(context.Context,string,string)error{return nil}
+
 func TestValidateRefundRequestRejectsLegacyGuessedProviderInstance(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)

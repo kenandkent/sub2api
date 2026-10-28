@@ -2665,7 +2665,7 @@ func setDefaults() {
 // unmarshal, exactly as before.
 func setEnvReachableDefaults() {
 	// Bind these without defaults so omitted commercial terms remain nil.
-	for _, key := range []string{"enabled", "onboarding_enabled", "dispatch_enabled", "payouts_enabled", "fee_bps", "hold_hours", "max_supplier_concurrency", "minimum_payout_usd", "agreement_version", "agreement_text", "agreement_url", "application_fields"} {
+	for _, key := range []string{"enabled", "onboarding_enabled", "dispatch_enabled", "payouts_enabled", "fee_bps", "hold_hours", "max_supplier_concurrency", "minimum_payout_usd", "agreement_version", "agreement_text", "agreement_url", "application_fields", "credential_key_id", "credential_keys_json", "oauth_proxy_url"} {
 		_ = viper.BindEnv("marketplace." + key)
 	}
 

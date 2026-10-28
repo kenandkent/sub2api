@@ -19,6 +19,9 @@ type MarketplaceProviderConfig struct {
 }
 
 type MarketplaceConfig struct {
+	CredentialKeyID        string                      `mapstructure:"credential_key_id" yaml:"credential_key_id"`
+	CredentialKeysJSON     string                      `mapstructure:"credential_keys_json" yaml:"credential_keys_json"`
+	OAuthProxyURL          string                      `mapstructure:"oauth_proxy_url" yaml:"oauth_proxy_url"`
 	Providers              []MarketplaceProviderConfig `mapstructure:"providers" yaml:"providers"`
 	AgreementText          string                      `mapstructure:"agreement_text" yaml:"agreement_text"`
 	AgreementURL           string                      `mapstructure:"agreement_url" yaml:"agreement_url"`

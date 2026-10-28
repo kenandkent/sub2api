@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func quoteMoney(s string) Money { return Money{Decimal: decimal.RequireFromString(s)} }
-func quotePrice(s string) *Money { m := quoteMoney(s); return &m }
+func quoteMoney(s string) Money           { return Money{Decimal: decimal.RequireFromString(s)} }
+func quotePrice(s string) *Money          { m := quoteMoney(s); return &m }
 func quoteRate(s string) *decimal.Decimal { d := decimal.RequireFromString(s); return &d }
 
 func validMarketplaceQuote() QuoteSnapshot {
@@ -128,4 +128,19 @@ func TestMarketplaceQuoteRoundsOnlyOnceAndRoundsBudgetUp(t *testing.T) {
 	budget, err := NewMarketplaceQuoteService().ComputeUpperBound(q, 1, 1)
 	require.NoError(t, err)
 	require.Equal(t, "0.00000001", budget.String())
+}
+
+func TestMarketplaceQuoteRejectsUnprojectableAmountsAndRate(t *testing.T) {
+	s := NewMarketplaceQuoteService()
+	q := validMarketplaceQuote()
+	q.RateMultiplier = quoteRate("1000000")
+	_, err := s.ComputeUpperBound(q, 1, 1)
+	require.Error(t, err)
+	q = validMarketplaceQuote()
+	q.RateMultiplier = quoteRate("0")
+	q.Tiers[0].InputPerMillion = quotePrice("10000000000")
+	_, err = s.ComputeUpperBound(q, 1000000, 1)
+	require.Error(t, err)
+	_, err = s.CalculateActual(q, UsageSnapshot{InputTokens: 1000000, Source: "upstream"})
+	require.Error(t, err)
 }

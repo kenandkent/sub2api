@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -151,10 +153,23 @@ func (r *MarketplaceGatewayRepository) Qualify(ctx context.Context, account, buy
 }
 
 // validateMarketplaceDispatchQuote binds every commercial term to an immutable published version.
-func validateMarketplaceDispatchQuote(ctx context.Context, tx *sql.Tx, group int64, q service.QuoteSnapshot) error {
+func validateMarketplaceDispatchQuote(ctx context.Context, tx *sql.Tx, buyer, group int64, q service.QuoteSnapshot) error {
+	if q.PublishedRateMultiplier == nil || q.ConsumerRateMultiplier == nil {
+		return service.ErrMarketplacePriceUnavailable
+	}
+	var g service.Group
+	var base float64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT rate_multiplier FROM user_group_rate_multipliers WHERE user_id=$1 AND group_id=g.id),g.rate_multiplier),g.subscription_type,g.peak_rate_enabled,g.peak_start,g.peak_end,g.peak_rate_multiplier FROM groups g WHERE g.id=$2 AND g.deleted_at IS NULL`, buyer, group).Scan(&base, &g.SubscriptionType, &g.PeakRateEnabled, &g.PeakStart, &g.PeakEnd, &g.PeakRateMultiplier)
+	if err != nil {
+		return err
+	}
+	consumer := base * g.PeakMultiplierAt(time.Now())
+	if math.IsNaN(consumer) || math.IsInf(consumer, 0) || consumer < 0 || !q.ConsumerRateMultiplier.Equal(decimal.NewFromFloat(consumer)) {
+		return service.ErrMarketplacePriceUnavailable
+	}
 	var body []byte
 	var fee, hold int
-	err := tx.QueryRowContext(ctx, `SELECT p.rules,s.fee_bps,s.hold_hours FROM marketplace_price_versions p JOIN marketplace_policies s ON s.version=p.version WHERE p.version=$1 AND s.version=$2 AND p.published_at IS NOT NULL AND s.published_at IS NOT NULL FOR SHARE OF p,s`, q.PriceVersion, q.PolicyVersion).Scan(&body, &fee, &hold)
+	err = tx.QueryRowContext(ctx, `SELECT p.rules,s.fee_bps,s.hold_hours FROM marketplace_price_versions p JOIN marketplace_policies s ON s.version=p.version WHERE p.version=$1 AND s.version=$2 AND p.published_at IS NOT NULL AND s.published_at IS NOT NULL AND p.version=(SELECT max(p2.version) FROM marketplace_price_versions p2 JOIN marketplace_policies s2 ON s2.version=p2.version WHERE p2.published_at IS NOT NULL AND s2.published_at IS NOT NULL) FOR SHARE OF p,s`, q.PriceVersion, q.PolicyVersion).Scan(&body, &fee, &hold)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrMarketplacePriceUnavailable
 	}
@@ -175,7 +190,14 @@ func validateMarketplaceDispatchQuote(ctx context.Context, tx *sql.Tx, group int
 			}
 			expected := q
 			expected.Currency = "USD"
-			expected.RateMultiplier = m.RateMultiplier
+			if m.RateMultiplier == nil || !q.PublishedRateMultiplier.Equal(*m.RateMultiplier) {
+				return service.ErrMarketplacePriceUnavailable
+			}
+			effective := m.RateMultiplier.Mul(decimal.NewFromFloat(consumer))
+			expected.RateMultiplier = &effective
+			expected.PublishedRateMultiplier = m.RateMultiplier
+			consumerDecimal := decimal.NewFromFloat(consumer)
+			expected.ConsumerRateMultiplier = &consumerDecimal
 			expected.Tiers = m.Tiers
 			expected.FeeBPS = fee
 			expected.HoldHours = hold
@@ -202,6 +224,10 @@ func (r *MarketplaceGatewayRepository) Dispatch(ctx context.Context, id string, 
 		return nil, err
 	}
 	defer tx.Rollback()
+	// Serialize with publication, which takes this lock before touching groups.
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(738241016260)`); err != nil {
+		return nil, err
+	}
 	receipt, err := scanMarketplaceReceipt(tx.QueryRowContext(ctx, `SELECT `+receiptColumns+` FROM marketplace_requests WHERE id=$1`, id))
 	if err != nil {
 		return nil, err
@@ -216,7 +242,7 @@ func (r *MarketplaceGatewayRepository) Dispatch(ctx context.Context, id string, 
 	if receipt.Status != "budget_reserved" || receipt.BillableAttemptID != nil {
 		return nil, service.ErrMarketplaceRequestState
 	}
-	if err = validateMarketplaceDispatchQuote(ctx, tx, receipt.GroupID, q); err != nil {
+	if err = validateMarketplaceDispatchQuote(ctx, tx, receipt.BuyerUserID, receipt.GroupID, q); err != nil {
 		return nil, err
 	}
 	offer, owner, rate, err := r.qualify(ctx, tx, q.AccountID, receipt.BuyerUserID, receipt.GroupID, q.ActualModel)

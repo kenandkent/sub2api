@@ -27,7 +27,7 @@ func validateMarketplaceQuote(q QuoteSnapshot) error {
 		(q.Protocol != "chat_completions" && q.Protocol != "responses") ||
 		q.PriceVersion <= 0 || q.PolicyVersion <= 0 || q.AccountID <= 0 ||
 		q.OfferID <= 0 || q.OwnerUserID <= 0 || q.SnapshotAt.IsZero() ||
-		q.RateMultiplier == nil || q.RateMultiplier.IsNegative() || q.FeeBPS < 0 || q.FeeBPS > 10000 ||
+		q.RateMultiplier == nil || q.RateMultiplier.IsNegative() || q.RateMultiplier.GreaterThan(decimal.RequireFromString("999999.9999")) || q.FeeBPS < 0 || q.FeeBPS > 10000 ||
 		q.HoldHours < 0 || len(q.Tiers) == 0 {
 		return ErrMarketplacePriceUnavailable
 	}
@@ -59,13 +59,16 @@ func (s *MarketplaceQuoteService) CalculateActual(q QuoteSnapshot, usage UsageSn
 		tier = next
 	}
 	regularInput := usage.InputTokens - usage.CacheReadTokens - usage.CacheWriteTokens
-	cost := tier.InputPerMillion.Mul(decimal.NewFromInt(regularInput)).
+	raw := tier.InputPerMillion.Mul(decimal.NewFromInt(regularInput)).
 		Add(tier.CacheReadPerMillion.Mul(decimal.NewFromInt(usage.CacheReadTokens))).
 		Add(tier.CacheWritePerMillion.Mul(decimal.NewFromInt(usage.CacheWriteTokens))).
-		Add(tier.OutputPerMillion.Mul(decimal.NewFromInt(usage.OutputTokens))).
-		Mul(*q.RateMultiplier).Shift(-6).Round(8)
-	if cost.GreaterThanOrEqual(decimal.NewFromInt(1000000000000)) {
-		return Money{}, fmt.Errorf("%w: amount exceeds numeric(20,8)", ErrMarketplaceUsageInvalid)
+		Add(tier.OutputPerMillion.Mul(decimal.NewFromInt(usage.OutputTokens))).Shift(-6)
+	if raw.Round(10).GreaterThanOrEqual(decimal.NewFromInt(10000000000)) {
+		return Money{}, fmt.Errorf("%w: raw cost exceeds legacy projection", ErrMarketplaceUsageInvalid)
+	}
+	cost := raw.Mul(*q.RateMultiplier).Round(8)
+	if cost.GreaterThanOrEqual(decimal.NewFromInt(10000000000)) {
+		return Money{}, fmt.Errorf("%w: amount exceeds legacy projection", ErrMarketplaceUsageInvalid)
 	}
 	return Money{Decimal: cost}, nil
 }
@@ -84,10 +87,13 @@ func (s *MarketplaceQuoteService) ComputeUpperBound(q QuoteSnapshot, maxInputTok
 		inputMax = decimal.Max(inputMax, tier.InputPerMillion.Decimal, tier.CacheReadPerMillion.Decimal, tier.CacheWritePerMillion.Decimal)
 		outputMax = decimal.Max(outputMax, tier.OutputPerMillion.Decimal)
 	}
-	budget := inputMax.Mul(decimal.NewFromInt(maxInputTokens)).
-		Add(outputMax.Mul(decimal.NewFromInt(maxOutputTokens))).Mul(*q.RateMultiplier).
-		Shift(-6).RoundCeil(8)
-	if budget.GreaterThanOrEqual(decimal.NewFromInt(1000000000000)) {
+	rawBudget := inputMax.Mul(decimal.NewFromInt(maxInputTokens)).
+		Add(outputMax.Mul(decimal.NewFromInt(maxOutputTokens))).Shift(-6)
+	if rawBudget.Round(10).GreaterThanOrEqual(decimal.NewFromInt(10000000000)) {
+		return Money{}, ErrMarketplaceBudgetInvalid
+	}
+	budget := rawBudget.Mul(*q.RateMultiplier).RoundCeil(8)
+	if budget.GreaterThanOrEqual(decimal.NewFromInt(10000000000)) {
 		return Money{}, ErrMarketplaceBudgetInvalid
 	}
 	return Money{Decimal: budget}, nil

@@ -74,21 +74,23 @@ type MarketplacePriceTier struct {
 	CacheWritePerMillion *Money `json:"cache_write_per_million"`
 }
 type QuoteSnapshot struct {
-	Currency              string                 `json:"currency"`
-	PublicModel           string                 `json:"public_model"`
-	ActualModel           string                 `json:"actual_model"`
-	Protocol              string                 `json:"protocol"`
-	PriceVersion          int64                  `json:"price_version"`
-	PolicyVersion         int64                  `json:"policy_version"`
-	RateMultiplier        *decimal.Decimal       `json:"rate_multiplier"`
-	AccountRateMultiplier *decimal.Decimal       `json:"account_rate_multiplier,omitempty"`
-	Tiers                 []MarketplacePriceTier `json:"tiers"`
-	FeeBPS                int                    `json:"fee_bps"`
-	HoldHours             int                    `json:"hold_hours"`
-	AccountID             int64                  `json:"account_id"`
-	OfferID               int64                  `json:"offer_id"`
-	OwnerUserID           int64                  `json:"owner_user_id"`
-	SnapshotAt            time.Time              `json:"snapshot_at"`
+	Currency                string                 `json:"currency"`
+	PublicModel             string                 `json:"public_model"`
+	ActualModel             string                 `json:"actual_model"`
+	Protocol                string                 `json:"protocol"`
+	PriceVersion            int64                  `json:"price_version"`
+	PolicyVersion           int64                  `json:"policy_version"`
+	RateMultiplier          *decimal.Decimal       `json:"rate_multiplier"`
+	PublishedRateMultiplier *decimal.Decimal       `json:"published_rate_multiplier,omitempty"`
+	ConsumerRateMultiplier  *decimal.Decimal       `json:"consumer_rate_multiplier,omitempty"`
+	AccountRateMultiplier   *decimal.Decimal       `json:"account_rate_multiplier,omitempty"`
+	Tiers                   []MarketplacePriceTier `json:"tiers"`
+	FeeBPS                  int                    `json:"fee_bps"`
+	HoldHours               int                    `json:"hold_hours"`
+	AccountID               int64                  `json:"account_id"`
+	OfferID                 int64                  `json:"offer_id"`
+	OwnerUserID             int64                  `json:"owner_user_id"`
+	SnapshotAt              time.Time              `json:"snapshot_at"`
 }
 type UsageSnapshot struct {
 	InputTokens      int64  `json:"input_tokens"`

@@ -68,13 +68,19 @@ func (h *OpenAIGatewayHandler) marketplaceRequest(c *gin.Context, key *service.A
 		h.errorResponse(c, http.StatusBadRequest, "unsupported_shared_protocol", "Unsupported shared request or output limit")
 		return nil, nil, false
 	}
-	rate := h.gatewayService.ResolveUserGroupRateMultiplier(c.Request.Context(), key.UserID, *key.GroupID, key.Group.RateMultiplier) * key.Group.PeakMultiplierAt(time.Now())
+	now := time.Now()
+	rate := h.gatewayService.ResolveUserGroupRateMultiplier(c.Request.Context(), key.UserID, *key.GroupID, key.Group.RateMultiplier) * key.Group.PeakMultiplierAt(now)
 	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
 		h.errorResponse(c, http.StatusBadRequest, "price_unavailable", "Shared model price is unavailable")
 		return nil, nil, false
 	}
-	effective := quote.RateMultiplier.Mul(decimal.NewFromFloat(rate))
+	published := *quote.RateMultiplier
+	consumer := decimal.NewFromFloat(rate)
+	effective := published.Mul(consumer)
+	quote.PublishedRateMultiplier = &published
+	quote.ConsumerRateMultiplier = &consumer
 	quote.RateMultiplier = &effective
+	quote.SnapshotAt = now.UTC()
 	// Dummy IDs are used only by the pure budget calculation, never persisted.
 	budgetQuote := quote
 	budgetQuote.AccountID = 1

@@ -165,7 +165,7 @@ func (f *realGatewayFixture) router(t *testing.T, up *realGatewayUpstream) *gin.
 	billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, f.cfg, nil)
 	t.Cleanup(billing.Stop)
 	concurrency := service.NewConcurrencyService(repository.NewConcurrencyCache(f.redis, 15, 900))
-	gateway := service.NewOpenAIGatewayService(f.repo, nil, nil, nil, nil, nil, nil, f.cfg, nil, concurrency, service.NewBillingService(f.cfg, nil), nil, billing, up, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
+	gateway := service.NewOpenAIGatewayService(f.repo, nil, nil, nil, nil, repository.NewUserGroupRateRepository(f.db), nil, f.cfg, nil, concurrency, service.NewBillingService(f.cfg, nil), nil, billing, up, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
 	h := NewOpenAIGatewayHandler(gateway, concurrency, billing, &service.APIKeyService{}, nil, nil, nil, nil, f.cfg)
 	runtime := service.NewSupplierRuntimeAccountService(f.env, repository.NewSupplierRuntimeCredentialRepository(f.db), nil, nil, service.SupplierRuntimeProviderConfig{})
 	store := f.store
@@ -173,7 +173,10 @@ func (f *realGatewayFixture) router(t *testing.T, up *realGatewayUpstream) *gin.
 		store = repository.NewMarketplaceGatewayRepository(f.db, f.cfg)
 	}
 	h.SetMarketplaceGateway(service.NewMarketplaceGateway(realGatewayCatalog{f.quote}, store, runtime))
-	key := &service.APIKey{ID: f.key, UserID: f.buyer, GroupID: &f.group, User: &service.User{ID: f.buyer, Status: service.StatusActive}, Group: &service.Group{ID: f.group, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1}}
+	var group service.Group
+	require.NoError(t, f.db.QueryRow(`SELECT rate_multiplier,subscription_type,peak_rate_enabled,peak_start,peak_end,peak_rate_multiplier FROM groups WHERE id=$1`, f.group).Scan(&group.RateMultiplier, &group.SubscriptionType, &group.PeakRateEnabled, &group.PeakStart, &group.PeakEnd, &group.PeakRateMultiplier))
+	group.ID, group.Platform, group.Status = f.group, service.PlatformOpenAI, service.StatusActive
+	key := &service.APIKey{ID: f.key, UserID: f.buyer, GroupID: &f.group, User: &service.User{ID: f.buyer, Status: service.StatusActive}, Group: &group}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), key)
@@ -215,6 +218,29 @@ func TestMarketplaceGatewayRealInfrastructure(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: addr})
 	t.Cleanup(func() { _ = rdb.Close() })
 	require.NoError(t, rdb.Ping(ctx).Err())
+	t.Run("consumer override is frozen and settled", func(t *testing.T) {
+		f := newRealGatewayFixture(t, db, rdb)
+		_, err := db.Exec(`UPDATE groups SET rate_multiplier=2 WHERE id=$1`, f.group)
+		require.NoError(t, err)
+		_, err = db.Exec(`INSERT INTO user_group_rate_multipliers(user_id,group_id,rate_multiplier) VALUES($1,$2,0.75)`, f.buyer, f.group)
+		require.NoError(t, err)
+		up := &realGatewayUpstream{status: 200, body: `{"id":"resp_test","object":"response","model":"gpt-5.4","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":4,"input_tokens_details":{"cached_tokens":3}}}`}
+		up.before = func() {
+			_, updateErr := db.Exec(`UPDATE user_group_rate_multipliers SET rate_multiplier=0.5 WHERE user_id=$1 AND group_id=$2`, f.buyer, f.group)
+			require.NoError(t, updateErr)
+		}
+		rec := sendReal(f.router(t, up), "/v1/responses", `{"model":"public","input":"hello"}`, "")
+		require.Equal(t, 200, rec.Code, rec.Body.String())
+		var charge decimal.Decimal
+		var quote []byte
+		require.NoError(t, db.QueryRow(`SELECT r.actual_charge,a.quote FROM marketplace_requests r JOIN marketplace_attempts a ON a.id=r.billable_attempt_id WHERE r.buyer_user_id=$1`, f.buyer).Scan(&charge, &quote))
+		require.True(t, charge.Equal(decimal.RequireFromString("0.00002475")), charge)
+		var q service.QuoteSnapshot
+		require.NoError(t, json.Unmarshal(quote, &q))
+		require.Equal(t, "1", q.PublishedRateMultiplier.String())
+		require.Equal(t, "0.75", q.ConsumerRateMultiplier.String())
+		require.Equal(t, "0.75", q.RateMultiplier.String())
+	})
 	t.Run("responses settlement and duplicate", func(t *testing.T) {
 		f := newRealGatewayFixture(t, db, rdb)
 		up := &realGatewayUpstream{status: 200, body: `{"id":"resp_test","object":"response","model":"gpt-5.4","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":4,"input_tokens_details":{"cached_tokens":3}}}`}

@@ -85,7 +85,27 @@ func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_price_versions(version,rules,published_by,published_at) VALUES($1,$2,$3,now())`, version, string(data), owner)
 	require.NoError(t, err)
-	q := service.QuoteSnapshot{Currency: "USD", PublicModel: "m", ActualModel: "m", Protocol: "responses", PriceVersion: version, PolicyVersion: version, RateMultiplier: &rate, AccountRateMultiplier: &rate, Tiers: []service.MarketplacePriceTier{{InputPerMillion: &price, OutputPerMillion: &price, CacheReadPerMillion: &price, CacheWritePerMillion: &price}}, AccountID: account, OfferID: offer, OwnerUserID: owner, SnapshotAt: time.Now().UTC()}
+	_, err = integrationDB.ExecContext(ctx, `UPDATE groups SET rate_multiplier=2, subscription_type='subscription', peak_rate_enabled=true, peak_start='00:00', peak_end='23:59', peak_rate_multiplier=2 WHERE id=$1`, group)
+	require.NoError(t, err)
+	if time.Now().UTC().Hour() == 23 && time.Now().UTC().Minute() == 59 {
+		t.Skip("peak window excludes final minute")
+	}
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO user_group_rate_multipliers(user_id,group_id,rate_multiplier) VALUES($1,$2,0.75)`, buyer, group)
+	require.NoError(t, err)
+	effective := decimal.RequireFromString("1.5")
+	q := service.QuoteSnapshot{Currency: "USD", PublicModel: "m", ActualModel: "m", Protocol: "responses", PriceVersion: version, PolicyVersion: version, RateMultiplier: &effective, PublishedRateMultiplier: &rate, ConsumerRateMultiplier: &effective, AccountRateMultiplier: &rate, Tiers: []service.MarketplacePriceTier{{InputPerMillion: &price, OutputPerMillion: &price, CacheReadPerMillion: &price, CacheWritePerMillion: &price}}, AccountID: account, OfferID: offer, OwnerUserID: owner, SnapshotAt: time.Now().UTC()}
+	zero := decimal.Zero
+	forged := q
+	forged.ConsumerRateMultiplier = &zero
+	forged.RateMultiplier = &zero
+	_, err = repo.Dispatch(ctx, receipt.ID, forged)
+	require.ErrorIs(t, err, service.ErrMarketplacePriceUnavailable)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE user_group_rate_multipliers SET rate_multiplier=0.5 WHERE user_id=$1 AND group_id=$2`, buyer, group)
+	require.NoError(t, err)
+	_, err = repo.Dispatch(ctx, receipt.ID, q)
+	require.ErrorIs(t, err, service.ErrMarketplacePriceUnavailable)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE user_group_rate_multipliers SET rate_multiplier=0.75 WHERE user_id=$1 AND group_id=$2`, buyer, group)
+	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE supplier_profiles SET status='suspended' WHERE user_id=$1`, owner)
 	require.NoError(t, err)
 	_, err = repo.Dispatch(ctx, receipt.ID, q)
@@ -145,4 +165,15 @@ func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
 	result, err = repo.Complete(ctx, receipt.ID, attempt.ID, q, service.UsageSnapshot{InputTokens: 1000000, Source: "upstream"}, service.UsageBillingCommand{})
 	require.NoError(t, err)
 	require.False(t, result.FirstApplied)
+
+	receipt, _, err = repo.PrepareAndReserve(ctx, service.MarketplacePrepareCommand{BuyerUserID: buyer, APIKeyID: key, GroupID: group, RequestDigest: "stale-price"}, service.Money{Decimal: decimal.NewFromInt(2)})
+	require.NoError(t, err)
+	next := version + 1
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_policies(version,fee_bps,hold_hours,max_supplier_concurrency,minimum_payout_usd,published_by,published_at) VALUES($1,0,0,1,0,$2,now())`, next, owner)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_price_versions(version,rules,published_by,published_at) VALUES($1,$2,$3,now())`, next, string(data), owner)
+	require.NoError(t, err)
+	_, err = repo.Dispatch(ctx, receipt.ID, q)
+	require.ErrorIs(t, err, service.ErrMarketplacePriceUnavailable)
+	require.NoError(t, repo.VoidUndispatched(ctx, receipt.ID))
 }

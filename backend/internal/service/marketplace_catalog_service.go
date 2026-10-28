@@ -11,12 +11,14 @@ import (
 var ErrMarketplaceCatalogUnavailable = errors.New("published marketplace catalog unavailable")
 
 type MarketplaceCatalogModel struct {
-	PublicModel     string                 `json:"public_model"`
-	ActualModel     string                 `json:"actual_model"`
-	ContextLimit    int64                  `json:"context_limit"`
-	MaxOutputTokens int64                  `json:"max_output_tokens"`
-	RateMultiplier *decimal.Decimal       `json:"rate_multiplier"`
-	Tiers          []MarketplacePriceTier `json:"tiers"`
+	PublicModel             string                 `json:"public_model"`
+	ActualModel             string                 `json:"actual_model"`
+	ContextLimit            int64                  `json:"context_limit"`
+	MaxOutputTokens         int64                  `json:"max_output_tokens"`
+	RateMultiplier          *decimal.Decimal       `json:"rate_multiplier"`
+	PublishedRateMultiplier *decimal.Decimal       `json:"published_rate_multiplier,omitempty"`
+	ConsumerRateMultiplier  *decimal.Decimal       `json:"consumer_rate_multiplier,omitempty"`
+	Tiers                   []MarketplacePriceTier `json:"tiers"`
 }
 
 type MarketplaceCatalogGroup struct {
@@ -46,8 +48,12 @@ type MarketplaceCatalogRepository interface {
 
 type MarketplaceCatalogService struct{ repo MarketplaceCatalogRepository }
 
-func (s *MarketplaceCatalogService) CurrentPolicy(ctx context.Context) (MarketplacePolicyVersion,error) {
-	c,err:=s.Current(ctx);if err!=nil{return MarketplacePolicyVersion{},err};return c.Policy,nil
+func (s *MarketplaceCatalogService) CurrentPolicy(ctx context.Context) (MarketplacePolicyVersion, error) {
+	c, err := s.Current(ctx)
+	if err != nil {
+		return MarketplacePolicyVersion{}, err
+	}
+	return c.Policy, nil
 }
 
 func NewMarketplaceCatalogService(repo MarketplaceCatalogRepository) *MarketplaceCatalogService {
@@ -56,7 +62,9 @@ func NewMarketplaceCatalogService(repo MarketplaceCatalogRepository) *Marketplac
 
 func cloneMarketplaceTiers(tiers []MarketplacePriceTier) []MarketplacePriceTier {
 	copyPrice := func(price *Money) *Money {
-		if price == nil { return nil }
+		if price == nil {
+			return nil
+		}
 		return &Money{Decimal: price.Decimal}
 	}
 	result := make([]MarketplacePriceTier, len(tiers))
@@ -69,7 +77,10 @@ func cloneMarketplaceTiers(tiers []MarketplacePriceTier) []MarketplacePriceTier 
 
 func catalogTemplate(c *MarketplacePublishedCatalog, group MarketplaceCatalogGroup, model MarketplaceCatalogModel) QuoteSnapshot {
 	var rate *decimal.Decimal
-	if model.RateMultiplier != nil { d := *model.RateMultiplier; rate = &d }
+	if model.RateMultiplier != nil {
+		d := *model.RateMultiplier
+		rate = &d
+	}
 	return QuoteSnapshot{Currency: "USD", PublicModel: model.PublicModel, ActualModel: model.ActualModel,
 		Protocol: group.Protocol, PriceVersion: c.Version, PolicyVersion: c.Policy.Version, RateMultiplier: rate,
 		Tiers: cloneMarketplaceTiers(model.Tiers), FeeBPS: c.Policy.FeeBPS, HoldHours: c.Policy.HoldHours,
@@ -99,23 +110,38 @@ func ValidateMarketplacePriceBook(book MarketplacePriceBook, policy MarketplaceP
 			// pure quote validator. No attempt or supplier ledger is created here.
 			q := catalogTemplate(&MarketplacePublishedCatalog{Version: 1, Policy: MarketplacePolicyVersion{Version: 1, FeeBPS: policy.FeeBPS, HoldHours: policy.HoldHours}}, g, m)
 			q.AccountID, q.OfferID, q.OwnerUserID = 1, 1, 1
-			if err := validateMarketplaceQuote(q); err != nil { return err }
+			if err := validateMarketplaceQuote(q); err != nil {
+				return err
+			}
+			if _, err := NewMarketplaceQuoteService().ComputeUpperBound(q, m.ContextLimit, m.MaxOutputTokens); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 func (s *MarketplaceCatalogService) Current(ctx context.Context) (*MarketplacePublishedCatalog, error) {
-	if s == nil || s.repo == nil { return nil, ErrMarketplaceCatalogUnavailable }
+	if s == nil || s.repo == nil {
+		return nil, ErrMarketplaceCatalogUnavailable
+	}
 	c, err := s.repo.Current(ctx)
-	if err != nil { return nil, err }
-	if c == nil || c.Version <= 0 || c.Policy.Version <= 0 || c.PublishedAt.IsZero() { return nil, ErrMarketplaceCatalogUnavailable }
-	if err := ValidateMarketplacePriceBook(c.Book, c.Policy); err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
+	if c == nil || c.Version <= 0 || c.Policy.Version <= 0 || c.PublishedAt.IsZero() {
+		return nil, ErrMarketplaceCatalogUnavailable
+	}
+	if err := ValidateMarketplacePriceBook(c.Book, c.Policy); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
 func (s *MarketplaceCatalogService) IsSharedGroup(ctx context.Context, groupID int64) (bool, error) {
-	if s == nil || s.repo == nil { return false, ErrMarketplaceCatalogUnavailable }
+	if s == nil || s.repo == nil {
+		return false, ErrMarketplaceCatalogUnavailable
+	}
 	return s.repo.IsSharedGroup(ctx, groupID)
 }
 
@@ -123,11 +149,17 @@ func (s *MarketplaceCatalogService) IsSharedGroup(ctx context.Context, groupID i
 // actual selected account and snapshot consumer/account multipliers before dispatch.
 func (s *MarketplaceCatalogService) QuoteTemplate(ctx context.Context, groupID int64, model, protocol string) (QuoteSnapshot, int64, int64, error) {
 	c, err := s.Current(ctx)
-	if err != nil { return QuoteSnapshot{}, 0, 0, err }
+	if err != nil {
+		return QuoteSnapshot{}, 0, 0, err
+	}
 	for _, g := range c.Book.Groups {
-		if g.GroupID != groupID || g.Protocol != protocol { continue }
+		if g.GroupID != groupID || g.Protocol != protocol {
+			continue
+		}
 		for _, m := range g.Models {
-			if m.PublicModel == model { return catalogTemplate(c,g,m), m.ContextLimit, m.MaxOutputTokens, nil }
+			if m.PublicModel == model {
+				return catalogTemplate(c, g, m), m.ContextLimit, m.MaxOutputTokens, nil
+			}
 		}
 	}
 	return QuoteSnapshot{}, 0, 0, ErrMarketplacePriceUnavailable
@@ -135,25 +167,41 @@ func (s *MarketplaceCatalogService) QuoteTemplate(ctx context.Context, groupID i
 
 func (s *MarketplaceCatalogService) Prices(ctx context.Context, platform string, selected []string) ([]SupplierModelPrice, error) {
 	c, err := s.Current(ctx)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	wanted := map[string]bool{}
-	for _, m := range selected { wanted[m] = false }
+	for _, m := range selected {
+		wanted[m] = false
+	}
 	prices := []SupplierModelPrice{}
 	for _, g := range c.Book.Groups {
-		if g.Platform != platform { continue }
+		if g.Platform != platform {
+			continue
+		}
 		for _, m := range g.Models {
-			if _, ok := wanted[m.ActualModel]; !ok { continue }
+			if _, ok := wanted[m.ActualModel]; !ok {
+				continue
+			}
 			wanted[m.ActualModel] = true
-			prices = append(prices, SupplierModelPrice{GroupID:g.GroupID, Model:m.ActualModel,PublicModel:m.PublicModel,
-				GroupName:g.Name,PriceVersion:c.Version,RateMultiplier:m.RateMultiplier.String(),Tiers:cloneMarketplaceTiers(m.Tiers)})
+			prices = append(prices, SupplierModelPrice{GroupID: g.GroupID, Model: m.ActualModel, PublicModel: m.PublicModel,
+				GroupName: g.Name, PriceVersion: c.Version, RateMultiplier: m.RateMultiplier.String(), Tiers: cloneMarketplaceTiers(m.Tiers)})
 		}
 	}
-	for _, found := range wanted { if !found { return nil, ErrMarketplacePriceUnavailable } }
+	for _, found := range wanted {
+		if !found {
+			return nil, ErrMarketplacePriceUnavailable
+		}
+	}
 	return prices, nil
 }
 
 func (s *MarketplaceCatalogService) Publish(ctx context.Context, actor int64, policy MarketplacePolicyVersion, book MarketplacePriceBook) (*MarketplacePublishedCatalog, error) {
-	if actor <= 0 { return nil, ErrMarketplaceCatalogUnavailable }
-	if err := ValidateMarketplacePriceBook(book, policy); err != nil { return nil, err }
+	if actor <= 0 {
+		return nil, ErrMarketplaceCatalogUnavailable
+	}
+	if err := ValidateMarketplacePriceBook(book, policy); err != nil {
+		return nil, err
+	}
 	return s.repo.Publish(ctx, actor, policy, book)
 }

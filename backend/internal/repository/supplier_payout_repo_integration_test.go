@@ -381,3 +381,56 @@ func TestPayoutDestinationRejectsUnmaskedCredentialLabel(t *testing.T) {
 	_, err = repo.CreateDestination(ctx, owner, "payout-canary-raw", []byte("payout-canary-raw"), fmt.Sprintf("unsafe-label-%d", owner), env)
 	require.Error(t, err)
 }
+
+func TestPayoutFreezeAuditVersionDebtAndReplay(t *testing.T) {
+	ctx := context.Background()
+	repo, owner, admin, _ := payoutFixture(t)
+	cmd := service.PayoutFreezeCommand{SupplierID: owner, ActorID: admin, ExpectedVersion: 1, Frozen: true, Reason: "risk review", OperationID: fmt.Sprintf("freeze-%d", owner)}
+	first, err := repo.SetPayoutFrozen(ctx, cmd)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), first.Version)
+	replay, err := repo.SetPayoutFrozen(ctx, cmd)
+	require.NoError(t, err)
+	require.Equal(t, first, replay)
+	altered := cmd
+	altered.Reason = "different"
+	_, err = repo.SetPayoutFrozen(ctx, altered)
+	require.Error(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE supplier_payout_operations SET reason='tamper' WHERE operation_id=$1`, cmd.OperationID)
+	require.Error(t, err)
+	var reason string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT reason FROM supplier_payout_operations WHERE operation_id=$1`, cmd.OperationID).Scan(&reason))
+	require.Equal(t, cmd.Reason, reason)
+	unfreeze := cmd
+	unfreeze.OperationID += "-unfreeze"
+	unfreeze.Frozen = false
+	_, err = repo.SetPayoutFrozen(ctx, unfreeze)
+	require.Error(t, err)
+	unfreeze.ExpectedVersion = 2
+	_, err = integrationDB.ExecContext(ctx, `UPDATE supplier_wallets SET debt=1 WHERE user_id=$1`, owner)
+	require.NoError(t, err)
+	_, err = repo.SetPayoutFrozen(ctx, unfreeze)
+	require.Error(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE supplier_wallets SET debt=0 WHERE user_id=$1`, owner)
+	require.NoError(t, err)
+	result, err := repo.SetPayoutFrozen(ctx, unfreeze)
+	require.NoError(t, err)
+	require.False(t, result.Frozen)
+	require.Equal(t, int64(3), result.Version)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE users SET role='user' WHERE id=$1`, admin)
+	require.NoError(t, err)
+	_, err = repo.SetPayoutFrozen(ctx, cmd)
+	require.Error(t, err)
+}
+
+func TestPayoutFreezeBeforeFirstEarningsCreatesWallet(t *testing.T) {
+	ctx := context.Background()
+	repo, _, admin, _ := payoutFixture(t)
+	var owner int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, fmt.Sprintf("new-supplier-%d@test.invalid", time.Now().UnixNano())).Scan(&owner))
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO supplier_profiles(user_id) VALUES($1)`, owner)
+	require.NoError(t, err)
+	result, err := repo.SetPayoutFrozen(ctx, service.PayoutFreezeCommand{SupplierID: owner, ActorID: admin, ExpectedVersion: 1, Frozen: true, Reason: "risk review", OperationID: fmt.Sprintf("new-freeze-%d", owner)})
+	require.NoError(t, err)
+	require.True(t, result.Frozen)
+}

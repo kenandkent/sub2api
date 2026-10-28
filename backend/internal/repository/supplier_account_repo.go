@@ -562,3 +562,22 @@ func (r *SupplierAccountRepository) ReserveProbe(ctx context.Context, user, id i
 	}
 	return credentials.APIKey, nil
 }
+
+func (r *SupplierAccountRepository) ListAdminOffers(ctx context.Context, f service.SupplierAccountFilter) ([]service.AdminSupplierOffer, int64, error) {
+	const from = ` FROM sharing_offers o JOIN accounts a ON a.id=o.account_id AND a.owner_user_id=o.owner_user_id JOIN supplier_profiles p ON p.user_id=o.owner_user_id WHERE a.deleted_at IS NULL AND a.parent_account_id IS NULL AND ($1='' OR a.name ILIKE '%' || $1 || '%') AND ($2='' OR a.platform=$2) AND ($3='' OR o.review_status=$3)`
+	args := []any{f.Query, f.Platform, f.Status}
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*)`+from, args...).Scan(&total); err != nil { return nil, 0, err }
+	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
+	rows, err := r.db.QueryContext(ctx, `SELECT o.id,a.id,o.owner_user_id,a.name,a.platform,a.type,a.status,p.status,EXISTS(SELECT 1 FROM marketplace_credential_fingerprints f WHERE f.account_id=a.id),a.concurrency,o.review_status,o.enabled,o.allowed_models,o.version`+from+` ORDER BY o.id DESC LIMIT $4 OFFSET $5`, args...)
+	if err != nil { return nil, 0, err }; defer rows.Close()
+	items := []service.AdminSupplierOffer{}
+	for rows.Next() {
+		var a service.AdminSupplierOffer; var models []byte
+		if err := rows.Scan(&a.ID,&a.AccountID,&a.OwnerUserID,&a.AccountName,&a.Platform,&a.Type,&a.AccountStatus,&a.SupplierStatus,&a.IdentityVerified,&a.Concurrency,&a.ReviewStatus,&a.Enabled,&models,&a.Version); err != nil { return nil, 0, err }
+		a.OfferID = a.ID
+		if err := json.Unmarshal(models, &a.AllowedModels); err != nil { return nil, 0, err }
+		items = append(items, a)
+	}
+	return items, total, rows.Err()
+}

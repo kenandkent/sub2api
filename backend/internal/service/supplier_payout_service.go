@@ -140,3 +140,56 @@ func (s *SupplierPayoutService) RevealDestination(ctx context.Context, id, actor
 	}
 	return s.store.RevealDestination(ctx, id, actor, reason, operation, s.envelope)
 }
+
+// PayoutOperationStatus is a credential-free, owner-scoped operation lookup.
+type PayoutOperationStatus struct {
+	OperationStatus string `json:"operation_status"`
+	PayoutID        *int64 `json:"payout_id,omitempty"`
+	PayoutStatus    string `json:"payout_status,omitempty"`
+	DestinationID   *int64 `json:"destination_id,omitempty"`
+}
+type supplierPayoutOperationLookup interface {
+	LookupOperation(context.Context, int64, string, string) (*PayoutOperationStatus, error)
+}
+
+func (s *SupplierPayoutService) Operation(ctx context.Context, owner int64, kind, key string) (*PayoutOperationStatus, error) {
+	if owner <= 0 || (kind != "request" && kind != "destination") || strings.TrimSpace(key) == "" || len(key) > 255 {
+		return nil, ErrPayoutInvalid
+	}
+	store, ok := s.store.(supplierPayoutOperationLookup)
+	if !ok {
+		return nil, ErrPayoutInvalid
+	}
+	return store.LookupOperation(ctx, owner, kind, key)
+}
+
+// PayoutFreezeCommand binds an administrative decision to its operation key.
+type PayoutFreezeCommand struct {
+	SupplierID      int64
+	ActorID         int64
+	ExpectedVersion int64
+	Frozen          bool
+	Reason          string
+	OperationID     string
+}
+type PayoutFreezeResult struct {
+	SupplierID int64 `json:"supplier_id"`
+	Frozen     bool  `json:"frozen"`
+	Version    int64 `json:"version"`
+}
+type payoutFreezeStore interface {
+	SetPayoutFrozen(context.Context, PayoutFreezeCommand) (*PayoutFreezeResult, error)
+}
+
+func (s *SupplierPayoutService) SetFrozen(ctx context.Context, cmd PayoutFreezeCommand) (*PayoutFreezeResult, error) {
+	cmd.Reason = strings.TrimSpace(cmd.Reason)
+	cmd.OperationID = strings.TrimSpace(cmd.OperationID)
+	if s == nil || cmd.SupplierID <= 0 || cmd.ActorID <= 0 || cmd.ExpectedVersion <= 0 || cmd.Reason == "" || len(cmd.Reason) > 4096 || cmd.OperationID == "" || len(cmd.OperationID) > 255 {
+		return nil, ErrPayoutInvalid
+	}
+	store, ok := s.store.(payoutFreezeStore)
+	if !ok {
+		return nil, ErrPayoutInvalid
+	}
+	return store.SetPayoutFrozen(ctx, cmd)
+}

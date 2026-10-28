@@ -20,6 +20,19 @@ func NewMarketplaceRefundRepository(db *sql.DB) *MarketplaceRefundRepository {
 // Refund atomically restores the original captured lots and reverses supplier
 // earnings. The wallet lock serializes this transaction with payout start.
 func (r *MarketplaceRefundRepository) Refund(ctx context.Context, receipt string, actor int64, amount decimal.Decimal, operation string) error {
+	return r.refund(ctx, receipt, actor, amount, operation, "")
+}
+
+// RefundWithReason persists the administrative reason and binds it to replay.
+func (r *MarketplaceRefundRepository) RefundWithReason(ctx context.Context, receipt string, actor int64, amount decimal.Decimal, operation, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 4096 {
+		return service.ErrMarketplaceRefundInvalid
+	}
+	return r.refund(ctx, receipt, actor, amount, operation, reason)
+}
+
+func (r *MarketplaceRefundRepository) refund(ctx context.Context, receipt string, actor int64, amount decimal.Decimal, operation, reason string) error {
 	if strings.TrimSpace(receipt) == "" || actor <= 0 || !amount.IsPositive() || !amount.Equal(amount.Round(8)) || strings.TrimSpace(operation) == "" || len(operation) > 255 {
 		return service.ErrMarketplaceRefundInvalid
 	}
@@ -28,18 +41,18 @@ func (r *MarketplaceRefundRepository) Refund(ctx context.Context, receipt string
 		return err
 	}
 	defer tx.Rollback()
-	if !isPayoutAdmin(ctx, tx, actor) {
+	if !lockPayoutAdmin(ctx, tx, actor) {
 		return service.ErrMarketplaceRefundInvalid
 	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "marketplace:refund:"+operation); err != nil {
 		return err
 	}
-	var oldReceipt string
+	var oldReceipt, oldReason string
 	var oldActor int64
 	var oldAmount decimal.Decimal
-	err = tx.QueryRowContext(ctx, `SELECT receipt_id,actor_user_id,amount FROM marketplace_refunds WHERE operation_id=$1`, operation).Scan(&oldReceipt, &oldActor, &oldAmount)
+	err = tx.QueryRowContext(ctx, `SELECT receipt_id,actor_user_id,amount,reason FROM marketplace_refunds WHERE operation_id=$1`, operation).Scan(&oldReceipt, &oldActor, &oldAmount, &oldReason)
 	if err == nil {
-		if oldReceipt != receipt || oldActor != actor || !oldAmount.Equal(amount) {
+		if oldReceipt != receipt || oldActor != actor || !oldAmount.Equal(amount) || oldReason != reason {
 			return ErrFundingOperationConflict
 		}
 		return tx.Commit()
@@ -177,7 +190,7 @@ func (r *MarketplaceRefundRepository) Refund(ctx context.Context, receipt string
 	if _, err = tx.ExecContext(ctx, `UPDATE marketplace_captures SET refunded_charge=$2,refunded_net=$3,refunded_fee=$4 WHERE receipt_id=$1`, receipt, newCharge, newNet, newFee); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO marketplace_refunds(operation_id,receipt_id,actor_user_id,amount,supplier_amount,platform_amount,ledger_transaction_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, operation, receipt, actor, amount, deltaNet, deltaFee, ledgerID); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO marketplace_refunds(operation_id,receipt_id,actor_user_id,amount,supplier_amount,platform_amount,ledger_transaction_id,reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, operation, receipt, actor, amount, deltaNet, deltaFee, ledgerID, reason); err != nil {
 		return err
 	}
 	return tx.Commit()

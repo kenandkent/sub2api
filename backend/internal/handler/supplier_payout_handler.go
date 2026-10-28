@@ -20,6 +20,10 @@ func NewSupplierPayoutHandler(payouts *service.SupplierPayoutService, totp *serv
 	return &SupplierPayoutHandler{payouts: payouts, totp: totp, users: users}
 }
 func (h *SupplierPayoutHandler) actor(c *gin.Context, stepUp bool) (int64, bool) {
+	if stepUp && (h.totp == nil || h.users == nil) {
+		response.Forbidden(c, "Step-up unavailable")
+		return 0, false
+	}
 	if stepUp && !middleware.EnforceStepUpAlways(c, h.totp, h.users) {
 		return 0, false
 	}
@@ -230,5 +234,39 @@ func (h *SupplierPayoutHandler) AdminGet(c *gin.Context) {
 		return
 	}
 	v, err := h.payouts.Get(c.Request.Context(), id, actor, true)
+	payoutResponse(c, v, err)
+}
+
+func (h *SupplierPayoutHandler) operation(c *gin.Context, kind string) {
+	actor, ok := h.actor(c, false)
+	if !ok {
+		return
+	}
+	v, err := h.payouts.Operation(c.Request.Context(), actor, kind, c.Param("key"))
+	payoutResponse(c, v, err)
+}
+func (h *SupplierPayoutHandler) PayoutOperation(c *gin.Context)      { h.operation(c, "request") }
+func (h *SupplierPayoutHandler) DestinationOperation(c *gin.Context) { h.operation(c, "destination") }
+
+// Freeze requires an administrator JWT and a fresh step-up grant.
+func (h *SupplierPayoutHandler) Freeze(c *gin.Context) {
+	actor, ok := h.adminActor(c, true)
+	if !ok {
+		return
+	}
+	id, ok := payoutID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		ExpectedVersion *int64 `json:"expected_version"`
+		Frozen          *bool  `json:"frozen"`
+		Reason          string `json:"reason"`
+	}
+	if c.ShouldBindJSON(&req) != nil || req.ExpectedVersion == nil || req.Frozen == nil {
+		response.BadRequest(c, "Invalid freeze request")
+		return
+	}
+	v, err := h.payouts.SetFrozen(c.Request.Context(), service.PayoutFreezeCommand{SupplierID: id, ActorID: actor, ExpectedVersion: *req.ExpectedVersion, Frozen: *req.Frozen, Reason: req.Reason, OperationID: c.GetHeader("Idempotency-Key")})
 	payoutResponse(c, v, err)
 }

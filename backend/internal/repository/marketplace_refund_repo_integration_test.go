@@ -47,7 +47,7 @@ func marketplaceRefundFixture(t *testing.T) (string, string, int64, int64, int64
 	require.NoError(t, NewMarketplaceLedgerRepository().Post(ctx, tx, "capture:"+receipt, "test", "USD", entries))
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT id FROM ledger_transactions WHERE operation_id=$1`, "capture:"+receipt).Scan(&original))
 	require.NoError(t, tx.Commit())
-	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_captures(receipt_id,attempt_id,owner_user_id,consumer_charge,supplier_net,platform_fee,matures_at,ledger_transaction_id,fingerprint) VALUES($1,$2,$3,3,2,1,now()+interval '1 day',$4,'test')`, receipt, attempt, owner, original)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_captures(receipt_id,attempt_id,owner_user_id,consumer_charge,supplier_net,platform_fee,matures_at,ledger_transaction_id,fingerprint,buyer_balance_after) VALUES($1,$2,$3,3,2,1,now()+interval '1 day',$4,'test',7)`, receipt, attempt, owner, original)
 	require.NoError(t, err)
 	return s, receipt, buyer, owner, admin, lot, original
 }
@@ -266,4 +266,19 @@ func TestMarketplaceRefundCancelsApprovedPayoutBeforeStart(t *testing.T) {
 	require.True(t, debt.IsZero())
 	require.True(t, reserved.IsZero())
 	require.True(t, frozen)
+}
+
+func TestMarketplaceRefundReasonIsImmutableAndBoundToReplay(t *testing.T) {
+	ctx := context.Background()
+	s, receipt, _, _, admin, _, _ := marketplaceRefundFixture(t)
+	repo := NewMarketplaceRefundRepository(integrationDB)
+	op := s + ":reason"
+	require.NoError(t, repo.RefundWithReason(ctx, receipt, admin, decimal.NewFromInt(1), op, "correction"))
+	require.NoError(t, repo.RefundWithReason(ctx, receipt, admin, decimal.NewFromInt(1), op, "correction"))
+	require.ErrorIs(t, repo.RefundWithReason(ctx, receipt, admin, decimal.NewFromInt(1), op, "different"), ErrFundingOperationConflict)
+	var reason string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT reason FROM marketplace_refunds WHERE operation_id=$1`, op).Scan(&reason))
+	require.Equal(t, "correction", reason)
+	_, err := integrationDB.ExecContext(ctx, `UPDATE marketplace_refunds SET reason='tamper' WHERE operation_id=$1`, op)
+	require.Error(t, err)
 }

@@ -37,3 +37,23 @@ func (s *MarketplaceRefundService) Refund(ctx context.Context, receipt string, a
 	}
 	return s.store.Refund(ctx, receipt, actor, amount, operation)
 }
+
+// marketplaceRefundReasonStore is an optional extension to preserve compatibility
+// with existing MarketplaceRefundStore implementations. Administrative refunds
+// fail closed when the store cannot persist the reason.
+type marketplaceRefundReasonStore interface {
+	RefundWithReason(context.Context, string, int64, decimal.Decimal, string, string) error
+}
+
+func (s *MarketplaceRefundService) RefundWithReason(ctx context.Context, receipt string, actor int64, amount decimal.Decimal, operation, reason string) error {
+	reason = strings.TrimSpace(reason)
+	operation = strings.TrimSpace(operation)
+	if s == nil || s.store == nil || strings.TrimSpace(receipt) == "" || actor <= 0 || !amount.IsPositive() || !amount.Equal(amount.Round(8)) || operation == "" || len(operation) > 255 || reason == "" || len(reason) > 4096 {
+		return ErrMarketplaceRefundInvalid
+	}
+	store, ok := s.store.(marketplaceRefundReasonStore)
+	if !ok {
+		return ErrMarketplaceRefundInvalid
+	}
+	return store.RefundWithReason(ctx, receipt, actor, amount, operation, reason)
+}

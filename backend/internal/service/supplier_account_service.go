@@ -512,3 +512,40 @@ func (s *SupplierAccountService) Overview(ctx context.Context, user int64) (*Sup
 	}
 	return store.Overview(ctx, user)
 }
+
+// AdminSupplierOffer contains only metadata suitable for an administrator review queue.
+type AdminSupplierOffer struct {
+	ID int64 `json:"id"`
+	OfferID int64 `json:"offer_id"`
+	AccountID int64 `json:"account_id"`
+	OwnerUserID int64 `json:"owner_user_id"`
+	AccountName string `json:"account_name"`
+	Platform string `json:"platform"`
+	Type string `json:"type"`
+	AccountStatus string `json:"account_status"`
+	SupplierStatus string `json:"supplier_status"`
+	IdentityVerified bool `json:"identity_verified"`
+	Concurrency int `json:"concurrency"`
+	ReviewStatus string `json:"review_status"`
+	Enabled bool `json:"enabled"`
+	AllowedModels []string `json:"allowed_models"`
+	Version int64 `json:"version"`
+}
+type AdminSupplierOfferPage struct {
+	Items []AdminSupplierOffer `json:"items"`
+	Total int64 `json:"total"`
+	Page int `json:"page"`
+	PageSize int `json:"page_size"`
+	Pages int `json:"pages"`
+}
+type supplierAdminOfferListStore interface {
+	ListAdminOffers(context.Context, SupplierAccountFilter) ([]AdminSupplierOffer, int64, error)
+}
+func (s *SupplierAccountService) AdminListOffers(ctx context.Context, admin int64, f SupplierAccountFilter) (*AdminSupplierOfferPage, error) {
+	if admin <= 0 { return nil, apperrors.Forbidden("administrator_required", "Administrator required") }
+	if f.Page < 1 { f.Page = 1 }; if f.PageSize < 1 { f.PageSize = 20 }; if f.PageSize > 100 { f.PageSize = 100 }
+	if f.Page > 1000000 || len(f.Query) > 100 || len(f.Platform) > 50 || len(f.Status) > 20 { return nil, apperrors.BadRequest("invalid_filter", "Invalid filter") }
+	store, ok := s.store.(supplierAdminOfferListStore); if !ok { return nil, apperrors.Conflict("offers_unavailable", "Offers unavailable") }
+	items, total, err := store.ListAdminOffers(ctx, f); if err != nil { return nil, err }
+	return &AdminSupplierOfferPage{Items: items, Total: total, Page: f.Page, PageSize: f.PageSize, Pages: int((total+int64(f.PageSize)-1)/int64(f.PageSize))}, nil
+}

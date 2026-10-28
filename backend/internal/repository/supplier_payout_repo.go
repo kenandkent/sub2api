@@ -562,3 +562,80 @@ func (r *SupplierPayoutRepository) RevealDestination(ctx context.Context, id, ac
 	}
 	return plain, nil
 }
+
+// LookupOperation never exposes an operation owned by another user or of another kind.
+func (r *SupplierPayoutRepository) LookupOperation(ctx context.Context, owner int64, kind, key string) (*service.PayoutOperationStatus, error) {
+	result := &service.PayoutOperationStatus{OperationStatus: "not_found"}
+	var id int64
+	var status sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT op.result_id,p.status FROM supplier_payout_operations op LEFT JOIN supplier_payouts p ON op.kind='request' AND p.id=op.result_id AND p.supplier_id=op.actor_id WHERE op.actor_id=$1 AND op.kind=$2 AND op.operation_id=$3`, owner, kind, key).Scan(&id, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if kind == "request" {
+		if !status.Valid {
+			return nil, service.ErrPayoutInvalid
+		}
+		result.PayoutID, result.PayoutStatus = &id, status.String
+	} else {
+		result.DestinationID = &id
+	}
+	result.OperationStatus = "completed"
+	return result, nil
+}
+
+// SetPayoutFrozen serializes with refunds and payout transitions through the
+// wallet/profile locks. The operation row is the immutable decision audit.
+func (r *SupplierPayoutRepository) SetPayoutFrozen(ctx context.Context, cmd service.PayoutFreezeCommand) (*service.PayoutFreezeResult, error) {
+	cmd.Reason = strings.TrimSpace(cmd.Reason)
+	cmd.OperationID = strings.TrimSpace(cmd.OperationID)
+	if cmd.SupplierID <= 0 || cmd.ActorID <= 0 || cmd.ExpectedVersion <= 0 || cmd.Reason == "" || len(cmd.Reason) > 4096 || cmd.OperationID == "" || len(cmd.OperationID) > 255 {
+		return nil, service.ErrPayoutInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	fp := payoutFingerprint([]any{"freeze", cmd.SupplierID, cmd.ActorID, cmd.ExpectedVersion, cmd.Frozen, cmd.Reason})
+	var result service.PayoutFreezeResult
+	found, err := payoutOp(ctx, tx, cmd.OperationID, fp, &result)
+	if err != nil {
+		return nil, err
+	}
+	if !lockPayoutAdmin(ctx, tx, cmd.ActorID) {
+		return nil, service.ErrPayoutInvalid
+	}
+	if found {
+		return &result, tx.Commit()
+	}
+	if _,err=tx.ExecContext(ctx,`INSERT INTO supplier_wallets(user_id) VALUES($1) ON CONFLICT(user_id,currency) DO NOTHING`,cmd.SupplierID);err!=nil{return nil,err}
+	w, err := lockPayoutWallet(ctx, tx, cmd.SupplierID)
+	if err != nil {
+		return nil, err
+	}
+	if !cmd.Frozen && w.debt.IsPositive() {
+		return nil, service.ErrPayoutInvalid
+	}
+	result.SupplierID = cmd.SupplierID
+	result.Frozen = cmd.Frozen
+	err = tx.QueryRowContext(ctx, `UPDATE supplier_profiles SET payout_frozen=$2, risk_reason=$3, version=version+1, updated_at=now() WHERE user_id=$1 AND version=$4 RETURNING version`, cmd.SupplierID, cmd.Frozen, cmd.Reason, cmd.ExpectedVersion).Scan(&result.Version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrPayoutInvalid
+	}
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO supplier_payout_operations(operation_id,fingerprint,kind,result_id,actor_id,result,reason) VALUES($1,$2,'freeze',$3,$4,$5,$6)`, cmd.OperationID, fp, cmd.SupplierID, cmd.ActorID, raw, cmd.Reason)
+	if err != nil {
+		return nil, err
+	}
+	return &result, tx.Commit()
+}

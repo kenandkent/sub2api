@@ -225,3 +225,10 @@ func (h *SupplierAccountHandler) Probe(c *gin.Context) {
 	}
 	response.Success(c, v)
 }
+
+func (h *SupplierAccountHandler) AdminListOffers(c *gin.Context) {
+	admin, ok := supplierAdmin(c); if !ok { return }
+	page, size := response.ParsePagination(c)
+	v, err := h.svc.AdminListOffers(c.Request.Context(), admin, service.SupplierAccountFilter{Query:c.Query("q"), Platform:c.Query("platform"), Status:c.Query("status"), Page:page, PageSize:size})
+	if response.ErrorFrom(c, err) { return }; response.Success(c, v)
+}

@@ -3,6 +3,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -11,14 +12,16 @@ import (
 )
 
 func quoteMoney(s string) Money { return Money{Decimal: decimal.RequireFromString(s)} }
+func quotePrice(s string) *Money { m := quoteMoney(s); return &m }
+func quoteRate(s string) *decimal.Decimal { d := decimal.RequireFromString(s); return &d }
 
 func validMarketplaceQuote() QuoteSnapshot {
 	return QuoteSnapshot{Currency: "USD", PublicModel: "shared-text", ActualModel: "upstream-text",
 		Protocol: "chat_completions", PriceVersion: 1, PolicyVersion: 1,
-		RateMultiplier: decimal.NewFromInt(1), FeeBPS: 2000, HoldHours: 24,
+		RateMultiplier: quoteRate("1"), FeeBPS: 2000, HoldHours: 24,
 		AccountID: 11, OfferID: 12, OwnerUserID: 13, SnapshotAt: time.Unix(100, 0).UTC(),
-		Tiers: []MarketplacePriceTier{{FromTokens: 0, InputPerMillion: quoteMoney("2"),
-			OutputPerMillion: quoteMoney("8"), CacheReadPerMillion: quoteMoney("0.2"), CacheWritePerMillion: quoteMoney("3")}}}
+		Tiers: []MarketplacePriceTier{{FromTokens: 0, InputPerMillion: quotePrice("2"),
+			OutputPerMillion: quotePrice("8"), CacheReadPerMillion: quotePrice("0.2"), CacheWritePerMillion: quotePrice("3")}}}
 }
 
 func TestMarketplaceQuoteCacheTokensAreNotDoubleCharged(t *testing.T) {
@@ -37,7 +40,7 @@ func TestMarketplaceQuoteExplicitZeroAndMissingPrice(t *testing.T) {
 	_, err := s.CalculateActual(q, UsageSnapshot{Source: "upstream"})
 	require.ErrorIs(t, err, ErrMarketplacePriceUnavailable)
 	q = validMarketplaceQuote()
-	q.Tiers[0] = MarketplacePriceTier{}
+	q.Tiers[0] = MarketplacePriceTier{InputPerMillion: quotePrice("0"), OutputPerMillion: quotePrice("0"), CacheReadPerMillion: quotePrice("0"), CacheWritePerMillion: quotePrice("0")}
 	cost, err := s.CalculateActual(q, UsageSnapshot{InputTokens: 1000, Source: "upstream"})
 	require.NoError(t, err)
 	require.True(t, cost.IsZero())
@@ -57,9 +60,9 @@ func TestMarketplaceQuoteRejectsInvalidUsage(t *testing.T) {
 
 func TestMarketplaceQuoteTierAndMultiplierSnapshot(t *testing.T) {
 	q := validMarketplaceQuote()
-	q.RateMultiplier = decimal.RequireFromString("1.25")
-	q.Tiers = append(q.Tiers, MarketplacePriceTier{FromTokens: 1000, InputPerMillion: quoteMoney("4"),
-		OutputPerMillion: quoteMoney("16"), CacheReadPerMillion: quoteMoney("0.4"), CacheWritePerMillion: quoteMoney("6")})
+	q.RateMultiplier = quoteRate("1.25")
+	q.Tiers = append(q.Tiers, MarketplacePriceTier{FromTokens: 1000, InputPerMillion: quotePrice("4"),
+		OutputPerMillion: quotePrice("16"), CacheReadPerMillion: quotePrice("0.4"), CacheWritePerMillion: quotePrice("6")})
 	cost, err := NewMarketplaceQuoteService().CalculateActual(q, UsageSnapshot{InputTokens: 1000, OutputTokens: 10, Source: "upstream"})
 	require.NoError(t, err)
 	require.Equal(t, "0.0052", cost.String())
@@ -73,8 +76,8 @@ func TestMarketplaceQuoteTierAndMultiplierSnapshot(t *testing.T) {
 
 func TestMarketplaceQuoteUpperBoundCoversExpensiveCacheAndAllTiers(t *testing.T) {
 	q := validMarketplaceQuote()
-	q.Tiers = append(q.Tiers, MarketplacePriceTier{FromTokens: 1000, InputPerMillion: quoteMoney("4"),
-		OutputPerMillion: quoteMoney("16"), CacheReadPerMillion: quoteMoney("10"), CacheWritePerMillion: quoteMoney("20")})
+	q.Tiers = append(q.Tiers, MarketplacePriceTier{FromTokens: 1000, InputPerMillion: quotePrice("4"),
+		OutputPerMillion: quotePrice("16"), CacheReadPerMillion: quotePrice("10"), CacheWritePerMillion: quotePrice("20")})
 	budget, err := NewMarketplaceQuoteService().ComputeUpperBound(q, 1000, 100)
 	require.NoError(t, err)
 	require.Equal(t, "0.0216", budget.String())
@@ -96,4 +99,33 @@ func TestMarketplaceQuoteSplitConservesRoundedCharge(t *testing.T) {
 	require.Equal(t, "0.00246913", fee.String())
 	_, _, err = SplitMarketplaceCharge(quoteMoney("1"), 10001)
 	require.Error(t, err)
+}
+
+func TestMarketplaceQuoteMissingIndividualPriceIsNotFree(t *testing.T) {
+	for _, field := range []string{"input_per_million", "output_per_million", "cache_read_per_million", "cache_write_per_million"} {
+		q := validMarketplaceQuote()
+		encoded, err := json.Marshal(q)
+		require.NoError(t, err)
+		var object map[string]any
+		require.NoError(t, json.Unmarshal(encoded, &object))
+		delete(object["tiers"].([]any)[0].(map[string]any), field)
+		encoded, err = json.Marshal(object)
+		require.NoError(t, err)
+		var incomplete QuoteSnapshot
+		require.NoError(t, json.Unmarshal(encoded, &incomplete))
+		_, err = NewMarketplaceQuoteService().CalculateActual(incomplete, UsageSnapshot{InputTokens: 1, Source: "upstream"})
+		require.ErrorIs(t, err, ErrMarketplacePriceUnavailable, field)
+	}
+}
+
+func TestMarketplaceQuoteRoundsOnlyOnceAndRoundsBudgetUp(t *testing.T) {
+	q := validMarketplaceQuote()
+	q.Tiers[0].InputPerMillion = quotePrice("0.00499999996")
+	cost, err := NewMarketplaceQuoteService().CalculateActual(q, UsageSnapshot{InputTokens: 1, Source: "upstream"})
+	require.NoError(t, err)
+	require.True(t, cost.IsZero(), cost.String())
+	q.Tiers[0] = MarketplacePriceTier{InputPerMillion: quotePrice("0.00000000000000000001"), OutputPerMillion: quotePrice("0"), CacheReadPerMillion: quotePrice("0"), CacheWritePerMillion: quotePrice("0")}
+	budget, err := NewMarketplaceQuoteService().ComputeUpperBound(q, 1, 1)
+	require.NoError(t, err)
+	require.Equal(t, "0.00000001", budget.String())
 }

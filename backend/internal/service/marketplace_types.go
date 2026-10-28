@@ -67,11 +67,11 @@ type SupplierCapability struct {
 // MarketplacePriceTier snapshots the resolved prices per million tokens and the
 // inclusive token threshold above which the tier applies.
 type MarketplacePriceTier struct {
-	FromTokens           int64 `json:"from_tokens"`
-	InputPerMillion      Money `json:"input_per_million"`
-	OutputPerMillion     Money `json:"output_per_million"`
-	CacheReadPerMillion  Money `json:"cache_read_per_million"`
-	CacheWritePerMillion Money `json:"cache_write_per_million"`
+	FromTokens           int64  `json:"from_tokens"`
+	InputPerMillion      *Money `json:"input_per_million"`
+	OutputPerMillion     *Money `json:"output_per_million"`
+	CacheReadPerMillion  *Money `json:"cache_read_per_million"`
+	CacheWritePerMillion *Money `json:"cache_write_per_million"`
 }
 type QuoteSnapshot struct {
 	Currency       string                 `json:"currency"`
@@ -80,7 +80,7 @@ type QuoteSnapshot struct {
 	Protocol       string                 `json:"protocol"`
 	PriceVersion   int64                  `json:"price_version"`
 	PolicyVersion  int64                  `json:"policy_version"`
-	RateMultiplier decimal.Decimal        `json:"rate_multiplier"`
+	RateMultiplier *decimal.Decimal       `json:"rate_multiplier"`
 	Tiers          []MarketplacePriceTier `json:"tiers"`
 	FeeBPS         int                    `json:"fee_bps"`
 	HoldHours      int                    `json:"hold_hours"`

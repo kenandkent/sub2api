@@ -80,7 +80,7 @@ func TestMarketplaceRequestIdempotency(t *testing.T) {
 	repo := NewMarketplaceRequestRepository(integrationDB)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type) VALUES($1,'openai','apikey') RETURNING id`, suffix).Scan(&account))
 	price := service.Money{Decimal: decimal.NewFromInt(1)}
-	q := service.QuoteSnapshot{Currency: "USD", PublicModel: "model", ActualModel: "model", Protocol: "responses", PriceVersion: 1, PolicyVersion: 1, RateMultiplier: decimal.NewFromInt(1), Tiers: []service.MarketplacePriceTier{{InputPerMillion: price, OutputPerMillion: price, CacheReadPerMillion: price, CacheWritePerMillion: price}}, AccountID: account, OfferID: 1, OwnerUserID: user, SnapshotAt: time.Now().UTC()}
+	q := service.QuoteSnapshot{Currency: "USD", PublicModel: "model", ActualModel: "model", Protocol: "responses", PriceVersion: 1, PolicyVersion: 1, RateMultiplier: marketplaceRequestRate(), Tiers: []service.MarketplacePriceTier{{InputPerMillion: &price, OutputPerMillion: &price, CacheReadPerMillion: &price, CacheWritePerMillion: &price}}, AccountID: account, OfferID: 1, OwnerUserID: user, SnapshotAt: time.Now().UTC()}
 	transact := func(fn func(*sql.Tx)) {
 		tx, e := integrationDB.BeginTx(ctx, nil)
 		require.NoError(t, e)
@@ -157,3 +157,5 @@ func TestMarketplaceRequestIdempotency(t *testing.T) {
 		require.NoError(t, repo.MarkSettled(ctx, tx, first.ID, a.ID, charge))
 	})
 }
+
+func marketplaceRequestRate() *decimal.Decimal { d := decimal.NewFromInt(1); return &d }

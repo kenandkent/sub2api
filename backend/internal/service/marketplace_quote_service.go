@@ -27,12 +27,13 @@ func validateMarketplaceQuote(q QuoteSnapshot) error {
 		(q.Protocol != "chat_completions" && q.Protocol != "responses") ||
 		q.PriceVersion <= 0 || q.PolicyVersion <= 0 || q.AccountID <= 0 ||
 		q.OfferID <= 0 || q.OwnerUserID <= 0 || q.SnapshotAt.IsZero() ||
-		q.RateMultiplier.IsNegative() || q.FeeBPS < 0 || q.FeeBPS > 10000 ||
+		q.RateMultiplier == nil || q.RateMultiplier.IsNegative() || q.FeeBPS < 0 || q.FeeBPS > 10000 ||
 		q.HoldHours < 0 || len(q.Tiers) == 0 {
 		return ErrMarketplacePriceUnavailable
 	}
 	for i, tier := range q.Tiers {
-		if (i == 0 && tier.FromTokens != 0) || (i > 0 && tier.FromTokens <= q.Tiers[i-1].FromTokens) ||
+		if tier.InputPerMillion == nil || tier.OutputPerMillion == nil || tier.CacheReadPerMillion == nil || tier.CacheWritePerMillion == nil ||
+			(i == 0 && tier.FromTokens != 0) || (i > 0 && tier.FromTokens <= q.Tiers[i-1].FromTokens) ||
 			tier.InputPerMillion.IsNegative() || tier.OutputPerMillion.IsNegative() ||
 			tier.CacheReadPerMillion.IsNegative() || tier.CacheWritePerMillion.IsNegative() {
 			return ErrMarketplacePriceUnavailable
@@ -62,7 +63,7 @@ func (s *MarketplaceQuoteService) CalculateActual(q QuoteSnapshot, usage UsageSn
 		Add(tier.CacheReadPerMillion.Mul(decimal.NewFromInt(usage.CacheReadTokens))).
 		Add(tier.CacheWritePerMillion.Mul(decimal.NewFromInt(usage.CacheWriteTokens))).
 		Add(tier.OutputPerMillion.Mul(decimal.NewFromInt(usage.OutputTokens))).
-		Mul(q.RateMultiplier).Div(decimal.NewFromInt(1000000)).Round(8)
+		Mul(*q.RateMultiplier).Shift(-6).Round(8)
 	if cost.GreaterThanOrEqual(decimal.NewFromInt(1000000000000)) {
 		return Money{}, fmt.Errorf("%w: amount exceeds numeric(20,8)", ErrMarketplaceUsageInvalid)
 	}
@@ -84,8 +85,8 @@ func (s *MarketplaceQuoteService) ComputeUpperBound(q QuoteSnapshot, maxInputTok
 		outputMax = decimal.Max(outputMax, tier.OutputPerMillion.Decimal)
 	}
 	budget := inputMax.Mul(decimal.NewFromInt(maxInputTokens)).
-		Add(outputMax.Mul(decimal.NewFromInt(maxOutputTokens))).Mul(q.RateMultiplier).
-		Div(decimal.NewFromInt(1000000)).RoundCeil(8)
+		Add(outputMax.Mul(decimal.NewFromInt(maxOutputTokens))).Mul(*q.RateMultiplier).
+		Shift(-6).RoundCeil(8)
 	if budget.GreaterThanOrEqual(decimal.NewFromInt(1000000000000)) {
 		return Money{}, ErrMarketplaceBudgetInvalid
 	}
@@ -96,7 +97,7 @@ func SplitMarketplaceCharge(charge Money, feeBPS int) (supplier Money, fee Money
 	if charge.IsNegative() || !charge.Equal(charge.Round(8)) || feeBPS < 0 || feeBPS > 10000 {
 		return Money{}, Money{}, ErrMarketplaceUsageInvalid
 	}
-	net := charge.Mul(decimal.NewFromInt(int64(10000 - feeBPS))).Div(decimal.NewFromInt(10000)).Round(8)
+	net := charge.Mul(decimal.NewFromInt(int64(10000 - feeBPS))).Shift(-4).Round(8)
 	return Money{Decimal: net}, Money{Decimal: charge.Sub(net)}, nil
 }
 

@@ -1111,6 +1111,39 @@ var (
 			},
 		},
 	}
+	// LedgerEntriesColumns holds the columns for the "ledger_entries" table.
+	LedgerEntriesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "transaction_id", Type: field.TypeInt64},
+		{Name: "account", Type: field.TypeString},
+		{Name: "subject_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "side", Type: field.TypeString},
+		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// LedgerEntriesTable holds the schema information for the "ledger_entries" table.
+	LedgerEntriesTable = &schema.Table{
+		Name:       "ledger_entries",
+		Columns:    LedgerEntriesColumns,
+		PrimaryKey: []*schema.Column{LedgerEntriesColumns[0]},
+	}
+	// LedgerTransactionsColumns holds the columns for the "ledger_transactions" table.
+	LedgerTransactionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "operation_id", Type: field.TypeString, Unique: true},
+		{Name: "actor", Type: field.TypeString},
+		{Name: "fingerprint", Type: field.TypeString},
+		{Name: "currency", Type: field.TypeString},
+		{Name: "original_transaction_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "sealed", Type: field.TypeBool, Default: false},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// LedgerTransactionsTable holds the schema information for the "ledger_transactions" table.
+	LedgerTransactionsTable = &schema.Table{
+		Name:       "ledger_transactions",
+		Columns:    LedgerTransactionsColumns,
+		PrimaryKey: []*schema.Column{LedgerTransactionsColumns[0]},
+	}
 	// MarketplacePoliciesColumns holds the columns for the "marketplace_policies" table.
 	MarketplacePoliciesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1668,6 +1701,31 @@ var (
 		Columns:    SupplierProfilesColumns,
 		PrimaryKey: []*schema.Column{SupplierProfilesColumns[0]},
 	}
+	// SupplierWalletsColumns holds the columns for the "supplier_wallets" table.
+	SupplierWalletsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "currency", Type: field.TypeString, Default: "USD"},
+		{Name: "pending", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "available", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "payout_reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "debt", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "version", Type: field.TypeInt64, Default: 1},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// SupplierWalletsTable holds the schema information for the "supplier_wallets" table.
+	SupplierWalletsTable = &schema.Table{
+		Name:       "supplier_wallets",
+		Columns:    SupplierWalletsColumns,
+		PrimaryKey: []*schema.Column{SupplierWalletsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "supplierwallet_user_id_currency",
+				Unique:  true,
+				Columns: []*schema.Column{SupplierWalletsColumns[1], SupplierWalletsColumns[2]},
+			},
+		},
+	}
 	// TLSFingerprintProfilesColumns holds the columns for the "tls_fingerprint_profiles" table.
 	TLSFingerprintProfilesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2183,6 +2241,76 @@ var (
 			},
 		},
 	}
+	// WalletFundingAllocationsColumns holds the columns for the "wallet_funding_allocations" table.
+	WalletFundingAllocationsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "lot_id", Type: field.TypeInt64},
+		{Name: "hold_operation_id", Type: field.TypeString},
+		{Name: "reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "captured", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "released", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "refunded", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// WalletFundingAllocationsTable holds the schema information for the "wallet_funding_allocations" table.
+	WalletFundingAllocationsTable = &schema.Table{
+		Name:       "wallet_funding_allocations",
+		Columns:    WalletFundingAllocationsColumns,
+		PrimaryKey: []*schema.Column{WalletFundingAllocationsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "walletfundingallocation_hold_operation_id_lot_id",
+				Unique:  true,
+				Columns: []*schema.Column{WalletFundingAllocationsColumns[2], WalletFundingAllocationsColumns[1]},
+			},
+		},
+	}
+	// WalletFundingLotsColumns holds the columns for the "wallet_funding_lots" table.
+	WalletFundingLotsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "kind", Type: field.TypeString},
+		{Name: "origin_type", Type: field.TypeString},
+		{Name: "origin_id", Type: field.TypeString},
+		{Name: "currency", Type: field.TypeString, Default: "USD"},
+		{Name: "original", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "remaining", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// WalletFundingLotsTable holds the schema information for the "wallet_funding_lots" table.
+	WalletFundingLotsTable = &schema.Table{
+		Name:       "wallet_funding_lots",
+		Columns:    WalletFundingLotsColumns,
+		PrimaryKey: []*schema.Column{WalletFundingLotsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "walletfundinglot_origin_type_origin_id",
+				Unique:  true,
+				Columns: []*schema.Column{WalletFundingLotsColumns[3], WalletFundingLotsColumns[4]},
+			},
+			{
+				Name:    "walletfundinglot_user_id_id",
+				Unique:  false,
+				Columns: []*schema.Column{WalletFundingLotsColumns[1], WalletFundingLotsColumns[0]},
+			},
+		},
+	}
+	// WalletFundingStatesColumns holds the columns for the "wallet_funding_states" table.
+	WalletFundingStatesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "user_id", Type: field.TypeInt64, Unique: true},
+		{Name: "debt", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "migration_version", Type: field.TypeInt, Default: 0},
+		{Name: "reconciled_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// WalletFundingStatesTable holds the schema information for the "wallet_funding_states" table.
+	WalletFundingStatesTable = &schema.Table{
+		Name:       "wallet_funding_states",
+		Columns:    WalletFundingStatesColumns,
+		PrimaryKey: []*schema.Column{WalletFundingStatesColumns[0]},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APIKeysTable,
@@ -2204,6 +2332,8 @@ var (
 		GroupsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
+		LedgerEntriesTable,
+		LedgerTransactionsTable,
 		MarketplacePoliciesTable,
 		MarketplacePriceVersionsTable,
 		PaymentAuditLogsTable,
@@ -2219,6 +2349,7 @@ var (
 		SharingOffersTable,
 		SubscriptionPlansTable,
 		SupplierProfilesTable,
+		SupplierWalletsTable,
 		TLSFingerprintProfilesTable,
 		UsageCleanupTasksTable,
 		UsageLogsTable,
@@ -2228,6 +2359,9 @@ var (
 		UserAttributeValuesTable,
 		UserPlatformQuotasTable,
 		UserSubscriptionsTable,
+		WalletFundingAllocationsTable,
+		WalletFundingLotsTable,
+		WalletFundingStatesTable,
 	}
 )
 
@@ -2306,6 +2440,12 @@ func init() {
 	IdentityAdoptionDecisionsTable.Annotation = &entsql.Annotation{
 		Table: "identity_adoption_decisions",
 	}
+	LedgerEntriesTable.Annotation = &entsql.Annotation{
+		Table: "ledger_entries",
+	}
+	LedgerTransactionsTable.Annotation = &entsql.Annotation{
+		Table: "ledger_transactions",
+	}
 	MarketplacePoliciesTable.Annotation = &entsql.Annotation{
 		Table: "marketplace_policies",
 	}
@@ -2358,6 +2498,9 @@ func init() {
 	SupplierProfilesTable.Annotation = &entsql.Annotation{
 		Table: "supplier_profiles",
 	}
+	SupplierWalletsTable.Annotation = &entsql.Annotation{
+		Table: "supplier_wallets",
+	}
 	TLSFingerprintProfilesTable.Annotation = &entsql.Annotation{
 		Table: "tls_fingerprint_profiles",
 	}
@@ -2397,5 +2540,14 @@ func init() {
 	UserSubscriptionsTable.ForeignKeys[2].RefTable = UsersTable
 	UserSubscriptionsTable.Annotation = &entsql.Annotation{
 		Table: "user_subscriptions",
+	}
+	WalletFundingAllocationsTable.Annotation = &entsql.Annotation{
+		Table: "wallet_funding_allocations",
+	}
+	WalletFundingLotsTable.Annotation = &entsql.Annotation{
+		Table: "wallet_funding_lots",
+	}
+	WalletFundingStatesTable.Annotation = &entsql.Annotation{
+		Table: "wallet_funding_states",
 	}
 }

@@ -31,6 +31,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/ledgerentry"
+	"github.com/Wei-Shaw/sub2api/ent/ledgertransaction"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
@@ -46,6 +48,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
+	"github.com/Wei-Shaw/sub2api/ent/supplierwallet"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -55,6 +58,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundingallocation"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundinglot"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundingstate"
 )
 
 // ent aliases to avoid import conflicts in user's code.
@@ -134,6 +140,8 @@ func checkColumn(t, c string) error {
 			group.Table:                         group.ValidColumn,
 			idempotencyrecord.Table:             idempotencyrecord.ValidColumn,
 			identityadoptiondecision.Table:      identityadoptiondecision.ValidColumn,
+			ledgerentry.Table:                   ledgerentry.ValidColumn,
+			ledgertransaction.Table:             ledgertransaction.ValidColumn,
 			marketplacepolicy.Table:             marketplacepolicy.ValidColumn,
 			marketplacepriceversion.Table:       marketplacepriceversion.ValidColumn,
 			paymentauditlog.Table:               paymentauditlog.ValidColumn,
@@ -149,6 +157,7 @@ func checkColumn(t, c string) error {
 			sharingoffer.Table:                  sharingoffer.ValidColumn,
 			subscriptionplan.Table:              subscriptionplan.ValidColumn,
 			supplierprofile.Table:               supplierprofile.ValidColumn,
+			supplierwallet.Table:                supplierwallet.ValidColumn,
 			tlsfingerprintprofile.Table:         tlsfingerprintprofile.ValidColumn,
 			usagecleanuptask.Table:              usagecleanuptask.ValidColumn,
 			usagelog.Table:                      usagelog.ValidColumn,
@@ -158,6 +167,9 @@ func checkColumn(t, c string) error {
 			userattributevalue.Table:            userattributevalue.ValidColumn,
 			userplatformquota.Table:             userplatformquota.ValidColumn,
 			usersubscription.Table:              usersubscription.ValidColumn,
+			walletfundingallocation.Table:       walletfundingallocation.ValidColumn,
+			walletfundinglot.Table:              walletfundinglot.ValidColumn,
+			walletfundingstate.Table:            walletfundingstate.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

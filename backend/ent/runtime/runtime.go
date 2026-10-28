@@ -24,6 +24,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/ledgerentry"
+	"github.com/Wei-Shaw/sub2api/ent/ledgertransaction"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
@@ -40,6 +42,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
+	"github.com/Wei-Shaw/sub2api/ent/supplierwallet"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -49,6 +52,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundingallocation"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundinglot"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundingstate"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
@@ -1311,6 +1317,22 @@ func init() {
 	identityadoptiondecisionDescDecidedAt := identityadoptiondecisionFields[4].Descriptor()
 	// identityadoptiondecision.DefaultDecidedAt holds the default value on creation for the decided_at field.
 	identityadoptiondecision.DefaultDecidedAt = identityadoptiondecisionDescDecidedAt.Default.(func() time.Time)
+	ledgerentryFields := schema.LedgerEntry{}.Fields()
+	_ = ledgerentryFields
+	// ledgerentryDescCreatedAt is the schema descriptor for created_at field.
+	ledgerentryDescCreatedAt := ledgerentryFields[5].Descriptor()
+	// ledgerentry.DefaultCreatedAt holds the default value on creation for the created_at field.
+	ledgerentry.DefaultCreatedAt = ledgerentryDescCreatedAt.Default.(func() time.Time)
+	ledgertransactionFields := schema.LedgerTransaction{}.Fields()
+	_ = ledgertransactionFields
+	// ledgertransactionDescSealed is the schema descriptor for sealed field.
+	ledgertransactionDescSealed := ledgertransactionFields[5].Descriptor()
+	// ledgertransaction.DefaultSealed holds the default value on creation for the sealed field.
+	ledgertransaction.DefaultSealed = ledgertransactionDescSealed.Default.(bool)
+	// ledgertransactionDescCreatedAt is the schema descriptor for created_at field.
+	ledgertransactionDescCreatedAt := ledgertransactionFields[6].Descriptor()
+	// ledgertransaction.DefaultCreatedAt holds the default value on creation for the created_at field.
+	ledgertransaction.DefaultCreatedAt = ledgertransactionDescCreatedAt.Default.(func() time.Time)
 	marketplacepolicyMixin := schema.MarketplacePolicy{}.Mixin()
 	marketplacepolicyMixinFields0 := marketplacepolicyMixin[0].Fields()
 	_ = marketplacepolicyMixinFields0
@@ -2038,6 +2060,20 @@ func init() {
 	supplierprofileDescVersion := supplierprofileFields[7].Descriptor()
 	// supplierprofile.DefaultVersion holds the default value on creation for the version field.
 	supplierprofile.DefaultVersion = supplierprofileDescVersion.Default.(int64)
+	supplierwalletFields := schema.SupplierWallet{}.Fields()
+	_ = supplierwalletFields
+	// supplierwalletDescCurrency is the schema descriptor for currency field.
+	supplierwalletDescCurrency := supplierwalletFields[1].Descriptor()
+	// supplierwallet.DefaultCurrency holds the default value on creation for the currency field.
+	supplierwallet.DefaultCurrency = supplierwalletDescCurrency.Default.(string)
+	// supplierwalletDescVersion is the schema descriptor for version field.
+	supplierwalletDescVersion := supplierwalletFields[6].Descriptor()
+	// supplierwallet.DefaultVersion holds the default value on creation for the version field.
+	supplierwallet.DefaultVersion = supplierwalletDescVersion.Default.(int64)
+	// supplierwalletDescCreatedAt is the schema descriptor for created_at field.
+	supplierwalletDescCreatedAt := supplierwalletFields[7].Descriptor()
+	// supplierwallet.DefaultCreatedAt holds the default value on creation for the created_at field.
+	supplierwallet.DefaultCreatedAt = supplierwalletDescCreatedAt.Default.(func() time.Time)
 	tlsfingerprintprofileMixin := schema.TLSFingerprintProfile{}.Mixin()
 	tlsfingerprintprofileMixinFields0 := tlsfingerprintprofileMixin[0].Fields()
 	_ = tlsfingerprintprofileMixinFields0
@@ -2624,6 +2660,32 @@ func init() {
 	usersubscriptionDescAssignedAt := usersubscriptionFields[12].Descriptor()
 	// usersubscription.DefaultAssignedAt holds the default value on creation for the assigned_at field.
 	usersubscription.DefaultAssignedAt = usersubscriptionDescAssignedAt.Default.(func() time.Time)
+	walletfundingallocationFields := schema.WalletFundingAllocation{}.Fields()
+	_ = walletfundingallocationFields
+	// walletfundingallocationDescCreatedAt is the schema descriptor for created_at field.
+	walletfundingallocationDescCreatedAt := walletfundingallocationFields[6].Descriptor()
+	// walletfundingallocation.DefaultCreatedAt holds the default value on creation for the created_at field.
+	walletfundingallocation.DefaultCreatedAt = walletfundingallocationDescCreatedAt.Default.(func() time.Time)
+	walletfundinglotFields := schema.WalletFundingLot{}.Fields()
+	_ = walletfundinglotFields
+	// walletfundinglotDescCurrency is the schema descriptor for currency field.
+	walletfundinglotDescCurrency := walletfundinglotFields[4].Descriptor()
+	// walletfundinglot.DefaultCurrency holds the default value on creation for the currency field.
+	walletfundinglot.DefaultCurrency = walletfundinglotDescCurrency.Default.(string)
+	// walletfundinglotDescCreatedAt is the schema descriptor for created_at field.
+	walletfundinglotDescCreatedAt := walletfundinglotFields[8].Descriptor()
+	// walletfundinglot.DefaultCreatedAt holds the default value on creation for the created_at field.
+	walletfundinglot.DefaultCreatedAt = walletfundinglotDescCreatedAt.Default.(func() time.Time)
+	walletfundingstateFields := schema.WalletFundingState{}.Fields()
+	_ = walletfundingstateFields
+	// walletfundingstateDescMigrationVersion is the schema descriptor for migration_version field.
+	walletfundingstateDescMigrationVersion := walletfundingstateFields[2].Descriptor()
+	// walletfundingstate.DefaultMigrationVersion holds the default value on creation for the migration_version field.
+	walletfundingstate.DefaultMigrationVersion = walletfundingstateDescMigrationVersion.Default.(int)
+	// walletfundingstateDescCreatedAt is the schema descriptor for created_at field.
+	walletfundingstateDescCreatedAt := walletfundingstateFields[4].Descriptor()
+	// walletfundingstate.DefaultCreatedAt holds the default value on creation for the created_at field.
+	walletfundingstate.DefaultCreatedAt = walletfundingstateDescCreatedAt.Default.(func() time.Time)
 }
 
 const (

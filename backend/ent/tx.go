@@ -52,6 +52,10 @@ type Tx struct {
 	IdempotencyRecord *IdempotencyRecordClient
 	// IdentityAdoptionDecision is the client for interacting with the IdentityAdoptionDecision builders.
 	IdentityAdoptionDecision *IdentityAdoptionDecisionClient
+	// LedgerEntry is the client for interacting with the LedgerEntry builders.
+	LedgerEntry *LedgerEntryClient
+	// LedgerTransaction is the client for interacting with the LedgerTransaction builders.
+	LedgerTransaction *LedgerTransactionClient
 	// MarketplacePolicy is the client for interacting with the MarketplacePolicy builders.
 	MarketplacePolicy *MarketplacePolicyClient
 	// MarketplacePriceVersion is the client for interacting with the MarketplacePriceVersion builders.
@@ -82,6 +86,8 @@ type Tx struct {
 	SubscriptionPlan *SubscriptionPlanClient
 	// SupplierProfile is the client for interacting with the SupplierProfile builders.
 	SupplierProfile *SupplierProfileClient
+	// SupplierWallet is the client for interacting with the SupplierWallet builders.
+	SupplierWallet *SupplierWalletClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
 	TLSFingerprintProfile *TLSFingerprintProfileClient
 	// UsageCleanupTask is the client for interacting with the UsageCleanupTask builders.
@@ -100,6 +106,12 @@ type Tx struct {
 	UserPlatformQuota *UserPlatformQuotaClient
 	// UserSubscription is the client for interacting with the UserSubscription builders.
 	UserSubscription *UserSubscriptionClient
+	// WalletFundingAllocation is the client for interacting with the WalletFundingAllocation builders.
+	WalletFundingAllocation *WalletFundingAllocationClient
+	// WalletFundingLot is the client for interacting with the WalletFundingLot builders.
+	WalletFundingLot *WalletFundingLotClient
+	// WalletFundingState is the client for interacting with the WalletFundingState builders.
+	WalletFundingState *WalletFundingStateClient
 
 	// lazily loaded.
 	client     *Client
@@ -250,6 +262,8 @@ func (tx *Tx) init() {
 	tx.Group = NewGroupClient(tx.config)
 	tx.IdempotencyRecord = NewIdempotencyRecordClient(tx.config)
 	tx.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(tx.config)
+	tx.LedgerEntry = NewLedgerEntryClient(tx.config)
+	tx.LedgerTransaction = NewLedgerTransactionClient(tx.config)
 	tx.MarketplacePolicy = NewMarketplacePolicyClient(tx.config)
 	tx.MarketplacePriceVersion = NewMarketplacePriceVersionClient(tx.config)
 	tx.PaymentAuditLog = NewPaymentAuditLogClient(tx.config)
@@ -265,6 +279,7 @@ func (tx *Tx) init() {
 	tx.SharingOffer = NewSharingOfferClient(tx.config)
 	tx.SubscriptionPlan = NewSubscriptionPlanClient(tx.config)
 	tx.SupplierProfile = NewSupplierProfileClient(tx.config)
+	tx.SupplierWallet = NewSupplierWalletClient(tx.config)
 	tx.TLSFingerprintProfile = NewTLSFingerprintProfileClient(tx.config)
 	tx.UsageCleanupTask = NewUsageCleanupTaskClient(tx.config)
 	tx.UsageLog = NewUsageLogClient(tx.config)
@@ -274,6 +289,9 @@ func (tx *Tx) init() {
 	tx.UserAttributeValue = NewUserAttributeValueClient(tx.config)
 	tx.UserPlatformQuota = NewUserPlatformQuotaClient(tx.config)
 	tx.UserSubscription = NewUserSubscriptionClient(tx.config)
+	tx.WalletFundingAllocation = NewWalletFundingAllocationClient(tx.config)
+	tx.WalletFundingLot = NewWalletFundingLotClient(tx.config)
+	tx.WalletFundingState = NewWalletFundingStateClient(tx.config)
 }
 
 // txDriver wraps the given dialect.Tx with a nop dialect.Driver implementation.

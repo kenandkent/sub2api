@@ -63,6 +63,12 @@ type IdempotencyRecord func(*sql.Selector)
 // IdentityAdoptionDecision is the predicate function for identityadoptiondecision builders.
 type IdentityAdoptionDecision func(*sql.Selector)
 
+// LedgerEntry is the predicate function for ledgerentry builders.
+type LedgerEntry func(*sql.Selector)
+
+// LedgerTransaction is the predicate function for ledgertransaction builders.
+type LedgerTransaction func(*sql.Selector)
+
 // MarketplacePolicy is the predicate function for marketplacepolicy builders.
 type MarketplacePolicy func(*sql.Selector)
 
@@ -108,6 +114,9 @@ type SubscriptionPlan func(*sql.Selector)
 // SupplierProfile is the predicate function for supplierprofile builders.
 type SupplierProfile func(*sql.Selector)
 
+// SupplierWallet is the predicate function for supplierwallet builders.
+type SupplierWallet func(*sql.Selector)
+
 // TLSFingerprintProfile is the predicate function for tlsfingerprintprofile builders.
 type TLSFingerprintProfile func(*sql.Selector)
 
@@ -134,3 +143,12 @@ type UserPlatformQuota func(*sql.Selector)
 
 // UserSubscription is the predicate function for usersubscription builders.
 type UserSubscription func(*sql.Selector)
+
+// WalletFundingAllocation is the predicate function for walletfundingallocation builders.
+type WalletFundingAllocation func(*sql.Selector)
+
+// WalletFundingLot is the predicate function for walletfundinglot builders.
+type WalletFundingLot func(*sql.Selector)
+
+// WalletFundingState is the predicate function for walletfundingstate builders.
+type WalletFundingState func(*sql.Selector)

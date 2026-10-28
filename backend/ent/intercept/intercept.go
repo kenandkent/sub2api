@@ -27,6 +27,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/ledgerentry"
+	"github.com/Wei-Shaw/sub2api/ent/ledgertransaction"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
@@ -43,6 +45,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
+	"github.com/Wei-Shaw/sub2api/ent/supplierwallet"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -52,6 +55,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundingallocation"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundinglot"
+	"github.com/Wei-Shaw/sub2api/ent/walletfundingstate"
 )
 
 // The Query interface represents an operation that queries a graph.
@@ -623,6 +629,60 @@ func (f TraverseIdentityAdoptionDecision) Traverse(ctx context.Context, q ent.Qu
 	return fmt.Errorf("unexpected query type %T. expect *ent.IdentityAdoptionDecisionQuery", q)
 }
 
+// The LedgerEntryFunc type is an adapter to allow the use of ordinary function as a Querier.
+type LedgerEntryFunc func(context.Context, *ent.LedgerEntryQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f LedgerEntryFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.LedgerEntryQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.LedgerEntryQuery", q)
+}
+
+// The TraverseLedgerEntry type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseLedgerEntry func(context.Context, *ent.LedgerEntryQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseLedgerEntry) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseLedgerEntry) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.LedgerEntryQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.LedgerEntryQuery", q)
+}
+
+// The LedgerTransactionFunc type is an adapter to allow the use of ordinary function as a Querier.
+type LedgerTransactionFunc func(context.Context, *ent.LedgerTransactionQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f LedgerTransactionFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.LedgerTransactionQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.LedgerTransactionQuery", q)
+}
+
+// The TraverseLedgerTransaction type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseLedgerTransaction func(context.Context, *ent.LedgerTransactionQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseLedgerTransaction) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseLedgerTransaction) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.LedgerTransactionQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.LedgerTransactionQuery", q)
+}
+
 // The MarketplacePolicyFunc type is an adapter to allow the use of ordinary function as a Querier.
 type MarketplacePolicyFunc func(context.Context, *ent.MarketplacePolicyQuery) (ent.Value, error)
 
@@ -1028,6 +1088,33 @@ func (f TraverseSupplierProfile) Traverse(ctx context.Context, q ent.Query) erro
 	return fmt.Errorf("unexpected query type %T. expect *ent.SupplierProfileQuery", q)
 }
 
+// The SupplierWalletFunc type is an adapter to allow the use of ordinary function as a Querier.
+type SupplierWalletFunc func(context.Context, *ent.SupplierWalletQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f SupplierWalletFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.SupplierWalletQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.SupplierWalletQuery", q)
+}
+
+// The TraverseSupplierWallet type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseSupplierWallet func(context.Context, *ent.SupplierWalletQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseSupplierWallet) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseSupplierWallet) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.SupplierWalletQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.SupplierWalletQuery", q)
+}
+
 // The TLSFingerprintProfileFunc type is an adapter to allow the use of ordinary function as a Querier.
 type TLSFingerprintProfileFunc func(context.Context, *ent.TLSFingerprintProfileQuery) (ent.Value, error)
 
@@ -1271,6 +1358,87 @@ func (f TraverseUserSubscription) Traverse(ctx context.Context, q ent.Query) err
 	return fmt.Errorf("unexpected query type %T. expect *ent.UserSubscriptionQuery", q)
 }
 
+// The WalletFundingAllocationFunc type is an adapter to allow the use of ordinary function as a Querier.
+type WalletFundingAllocationFunc func(context.Context, *ent.WalletFundingAllocationQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f WalletFundingAllocationFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.WalletFundingAllocationQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.WalletFundingAllocationQuery", q)
+}
+
+// The TraverseWalletFundingAllocation type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseWalletFundingAllocation func(context.Context, *ent.WalletFundingAllocationQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseWalletFundingAllocation) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseWalletFundingAllocation) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.WalletFundingAllocationQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.WalletFundingAllocationQuery", q)
+}
+
+// The WalletFundingLotFunc type is an adapter to allow the use of ordinary function as a Querier.
+type WalletFundingLotFunc func(context.Context, *ent.WalletFundingLotQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f WalletFundingLotFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.WalletFundingLotQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.WalletFundingLotQuery", q)
+}
+
+// The TraverseWalletFundingLot type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseWalletFundingLot func(context.Context, *ent.WalletFundingLotQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseWalletFundingLot) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseWalletFundingLot) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.WalletFundingLotQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.WalletFundingLotQuery", q)
+}
+
+// The WalletFundingStateFunc type is an adapter to allow the use of ordinary function as a Querier.
+type WalletFundingStateFunc func(context.Context, *ent.WalletFundingStateQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f WalletFundingStateFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.WalletFundingStateQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.WalletFundingStateQuery", q)
+}
+
+// The TraverseWalletFundingState type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseWalletFundingState func(context.Context, *ent.WalletFundingStateQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseWalletFundingState) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseWalletFundingState) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.WalletFundingStateQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.WalletFundingStateQuery", q)
+}
+
 // NewQuery returns the generic Query interface for the given typed query.
 func NewQuery(q ent.Query) (Query, error) {
 	switch q := q.(type) {
@@ -1312,6 +1480,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.IdempotencyRecordQuery, predicate.IdempotencyRecord, idempotencyrecord.OrderOption]{typ: ent.TypeIdempotencyRecord, tq: q}, nil
 	case *ent.IdentityAdoptionDecisionQuery:
 		return &query[*ent.IdentityAdoptionDecisionQuery, predicate.IdentityAdoptionDecision, identityadoptiondecision.OrderOption]{typ: ent.TypeIdentityAdoptionDecision, tq: q}, nil
+	case *ent.LedgerEntryQuery:
+		return &query[*ent.LedgerEntryQuery, predicate.LedgerEntry, ledgerentry.OrderOption]{typ: ent.TypeLedgerEntry, tq: q}, nil
+	case *ent.LedgerTransactionQuery:
+		return &query[*ent.LedgerTransactionQuery, predicate.LedgerTransaction, ledgertransaction.OrderOption]{typ: ent.TypeLedgerTransaction, tq: q}, nil
 	case *ent.MarketplacePolicyQuery:
 		return &query[*ent.MarketplacePolicyQuery, predicate.MarketplacePolicy, marketplacepolicy.OrderOption]{typ: ent.TypeMarketplacePolicy, tq: q}, nil
 	case *ent.MarketplacePriceVersionQuery:
@@ -1342,6 +1514,8 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.SubscriptionPlanQuery, predicate.SubscriptionPlan, subscriptionplan.OrderOption]{typ: ent.TypeSubscriptionPlan, tq: q}, nil
 	case *ent.SupplierProfileQuery:
 		return &query[*ent.SupplierProfileQuery, predicate.SupplierProfile, supplierprofile.OrderOption]{typ: ent.TypeSupplierProfile, tq: q}, nil
+	case *ent.SupplierWalletQuery:
+		return &query[*ent.SupplierWalletQuery, predicate.SupplierWallet, supplierwallet.OrderOption]{typ: ent.TypeSupplierWallet, tq: q}, nil
 	case *ent.TLSFingerprintProfileQuery:
 		return &query[*ent.TLSFingerprintProfileQuery, predicate.TLSFingerprintProfile, tlsfingerprintprofile.OrderOption]{typ: ent.TypeTLSFingerprintProfile, tq: q}, nil
 	case *ent.UsageCleanupTaskQuery:
@@ -1360,6 +1534,12 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.UserPlatformQuotaQuery, predicate.UserPlatformQuota, userplatformquota.OrderOption]{typ: ent.TypeUserPlatformQuota, tq: q}, nil
 	case *ent.UserSubscriptionQuery:
 		return &query[*ent.UserSubscriptionQuery, predicate.UserSubscription, usersubscription.OrderOption]{typ: ent.TypeUserSubscription, tq: q}, nil
+	case *ent.WalletFundingAllocationQuery:
+		return &query[*ent.WalletFundingAllocationQuery, predicate.WalletFundingAllocation, walletfundingallocation.OrderOption]{typ: ent.TypeWalletFundingAllocation, tq: q}, nil
+	case *ent.WalletFundingLotQuery:
+		return &query[*ent.WalletFundingLotQuery, predicate.WalletFundingLot, walletfundinglot.OrderOption]{typ: ent.TypeWalletFundingLot, tq: q}, nil
+	case *ent.WalletFundingStateQuery:
+		return &query[*ent.WalletFundingStateQuery, predicate.WalletFundingState, walletfundingstate.OrderOption]{typ: ent.TypeWalletFundingState, tq: q}, nil
 	default:
 		return nil, fmt.Errorf("unknown query type %T", q)
 	}

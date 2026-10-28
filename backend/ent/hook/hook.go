@@ -237,6 +237,30 @@ func (f IdentityAdoptionDecisionFunc) Mutate(ctx context.Context, m ent.Mutation
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.IdentityAdoptionDecisionMutation", m)
 }
 
+// The LedgerEntryFunc type is an adapter to allow the use of ordinary
+// function as LedgerEntry mutator.
+type LedgerEntryFunc func(context.Context, *ent.LedgerEntryMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f LedgerEntryFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.LedgerEntryMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.LedgerEntryMutation", m)
+}
+
+// The LedgerTransactionFunc type is an adapter to allow the use of ordinary
+// function as LedgerTransaction mutator.
+type LedgerTransactionFunc func(context.Context, *ent.LedgerTransactionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f LedgerTransactionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.LedgerTransactionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.LedgerTransactionMutation", m)
+}
+
 // The MarketplacePolicyFunc type is an adapter to allow the use of ordinary
 // function as MarketplacePolicy mutator.
 type MarketplacePolicyFunc func(context.Context, *ent.MarketplacePolicyMutation) (ent.Value, error)
@@ -417,6 +441,18 @@ func (f SupplierProfileFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Va
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SupplierProfileMutation", m)
 }
 
+// The SupplierWalletFunc type is an adapter to allow the use of ordinary
+// function as SupplierWallet mutator.
+type SupplierWalletFunc func(context.Context, *ent.SupplierWalletMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SupplierWalletFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SupplierWalletMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SupplierWalletMutation", m)
+}
+
 // The TLSFingerprintProfileFunc type is an adapter to allow the use of ordinary
 // function as TLSFingerprintProfile mutator.
 type TLSFingerprintProfileFunc func(context.Context, *ent.TLSFingerprintProfileMutation) (ent.Value, error)
@@ -523,6 +559,42 @@ func (f UserSubscriptionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.V
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UserSubscriptionMutation", m)
+}
+
+// The WalletFundingAllocationFunc type is an adapter to allow the use of ordinary
+// function as WalletFundingAllocation mutator.
+type WalletFundingAllocationFunc func(context.Context, *ent.WalletFundingAllocationMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f WalletFundingAllocationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.WalletFundingAllocationMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.WalletFundingAllocationMutation", m)
+}
+
+// The WalletFundingLotFunc type is an adapter to allow the use of ordinary
+// function as WalletFundingLot mutator.
+type WalletFundingLotFunc func(context.Context, *ent.WalletFundingLotMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f WalletFundingLotFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.WalletFundingLotMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.WalletFundingLotMutation", m)
+}
+
+// The WalletFundingStateFunc type is an adapter to allow the use of ordinary
+// function as WalletFundingState mutator.
+type WalletFundingStateFunc func(context.Context, *ent.WalletFundingStateMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f WalletFundingStateFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.WalletFundingStateMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.WalletFundingStateMutation", m)
 }
 
 // Condition is a hook condition function.

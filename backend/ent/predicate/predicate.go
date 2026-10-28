@@ -69,11 +69,17 @@ type LedgerEntry func(*sql.Selector)
 // LedgerTransaction is the predicate function for ledgertransaction builders.
 type LedgerTransaction func(*sql.Selector)
 
+// MarketplaceAttempt is the predicate function for marketplaceattempt builders.
+type MarketplaceAttempt func(*sql.Selector)
+
 // MarketplacePolicy is the predicate function for marketplacepolicy builders.
 type MarketplacePolicy func(*sql.Selector)
 
 // MarketplacePriceVersion is the predicate function for marketplacepriceversion builders.
 type MarketplacePriceVersion func(*sql.Selector)
+
+// MarketplaceRequest is the predicate function for marketplacerequest builders.
+type MarketplaceRequest func(*sql.Selector)
 
 // PaymentAuditLog is the predicate function for paymentauditlog builders.
 type PaymentAuditLog func(*sql.Selector)
@@ -111,8 +117,17 @@ type SharingOffer func(*sql.Selector)
 // SubscriptionPlan is the predicate function for subscriptionplan builders.
 type SubscriptionPlan func(*sql.Selector)
 
+// SupplierPayout is the predicate function for supplierpayout builders.
+type SupplierPayout func(*sql.Selector)
+
+// SupplierPayoutDestination is the predicate function for supplierpayoutdestination builders.
+type SupplierPayoutDestination func(*sql.Selector)
+
 // SupplierProfile is the predicate function for supplierprofile builders.
 type SupplierProfile func(*sql.Selector)
+
+// SupplierStatement is the predicate function for supplierstatement builders.
+type SupplierStatement func(*sql.Selector)
 
 // SupplierWallet is the predicate function for supplierwallet builders.
 type SupplierWallet func(*sql.Selector)

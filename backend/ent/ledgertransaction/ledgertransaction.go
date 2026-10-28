@@ -27,6 +27,8 @@ const (
 	FieldSealed = "sealed"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
+	// FieldBookedAt holds the string denoting the booked_at field in the database.
+	FieldBookedAt = "booked_at"
 	// Table holds the table name of the ledgertransaction in the database.
 	Table = "ledger_transactions"
 )
@@ -41,6 +43,7 @@ var Columns = []string{
 	FieldOriginalTransactionID,
 	FieldSealed,
 	FieldCreatedAt,
+	FieldBookedAt,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -58,6 +61,8 @@ var (
 	DefaultSealed bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
+	// DefaultBookedAt holds the default value on creation for the "booked_at" field.
+	DefaultBookedAt func() time.Time
 )
 
 // OrderOption defines the ordering options for the LedgerTransaction queries.
@@ -101,4 +106,9 @@ func BySealed(opts ...sql.OrderTermOption) OrderOption {
 // ByCreatedAt orders the results by the created_at field.
 func ByCreatedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCreatedAt, opts...).ToFunc()
+}
+
+// ByBookedAt orders the results by the booked_at field.
+func ByBookedAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBookedAt, opts...).ToFunc()
 }

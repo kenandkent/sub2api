@@ -30,7 +30,9 @@ type LedgerTransaction struct {
 	// Sealed holds the value of the "sealed" field.
 	Sealed bool `json:"sealed,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
-	CreatedAt    time.Time `json:"created_at,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	// BookedAt holds the value of the "booked_at" field.
+	BookedAt     time.Time `json:"booked_at,omitempty"`
 	selectValues sql.SelectValues
 }
 
@@ -45,7 +47,7 @@ func (*LedgerTransaction) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullInt64)
 		case ledgertransaction.FieldOperationID, ledgertransaction.FieldActor, ledgertransaction.FieldFingerprint, ledgertransaction.FieldCurrency:
 			values[i] = new(sql.NullString)
-		case ledgertransaction.FieldCreatedAt:
+		case ledgertransaction.FieldCreatedAt, ledgertransaction.FieldBookedAt:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -111,6 +113,12 @@ func (_m *LedgerTransaction) assignValues(columns []string, values []any) error 
 			} else if value.Valid {
 				_m.CreatedAt = value.Time
 			}
+		case ledgertransaction.FieldBookedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field booked_at", values[i])
+			} else if value.Valid {
+				_m.BookedAt = value.Time
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -169,6 +177,9 @@ func (_m *LedgerTransaction) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	builder.WriteString("booked_at=")
+	builder.WriteString(_m.BookedAt.Format(time.ANSIC))
 	builder.WriteByte(')')
 	return builder.String()
 }

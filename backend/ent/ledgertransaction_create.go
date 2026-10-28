@@ -88,6 +88,20 @@ func (_c *LedgerTransactionCreate) SetNillableCreatedAt(v *time.Time) *LedgerTra
 	return _c
 }
 
+// SetBookedAt sets the "booked_at" field.
+func (_c *LedgerTransactionCreate) SetBookedAt(v time.Time) *LedgerTransactionCreate {
+	_c.mutation.SetBookedAt(v)
+	return _c
+}
+
+// SetNillableBookedAt sets the "booked_at" field if the given value is not nil.
+func (_c *LedgerTransactionCreate) SetNillableBookedAt(v *time.Time) *LedgerTransactionCreate {
+	if v != nil {
+		_c.SetBookedAt(*v)
+	}
+	return _c
+}
+
 // Mutation returns the LedgerTransactionMutation object of the builder.
 func (_c *LedgerTransactionCreate) Mutation() *LedgerTransactionMutation {
 	return _c.mutation
@@ -131,6 +145,10 @@ func (_c *LedgerTransactionCreate) defaults() {
 		v := ledgertransaction.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
 	}
+	if _, ok := _c.mutation.BookedAt(); !ok {
+		v := ledgertransaction.DefaultBookedAt()
+		_c.mutation.SetBookedAt(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -152,6 +170,9 @@ func (_c *LedgerTransactionCreate) check() error {
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "LedgerTransaction.created_at"`)}
+	}
+	if _, ok := _c.mutation.BookedAt(); !ok {
+		return &ValidationError{Name: "booked_at", err: errors.New(`ent: missing required field "LedgerTransaction.booked_at"`)}
 	}
 	return nil
 }
@@ -207,6 +228,10 @@ func (_c *LedgerTransactionCreate) createSpec() (*LedgerTransaction, *sqlgraph.C
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(ledgertransaction.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
+	}
+	if value, ok := _c.mutation.BookedAt(); ok {
+		_spec.SetField(ledgertransaction.FieldBookedAt, field.TypeTime, value)
+		_node.BookedAt = value
 	}
 	return _node, _spec
 }
@@ -300,6 +325,9 @@ func (u *LedgerTransactionUpsertOne) UpdateNewValues() *LedgerTransactionUpsertO
 		}
 		if _, exists := u.create.mutation.CreatedAt(); exists {
 			s.SetIgnore(ledgertransaction.FieldCreatedAt)
+		}
+		if _, exists := u.create.mutation.BookedAt(); exists {
+			s.SetIgnore(ledgertransaction.FieldBookedAt)
 		}
 	}))
 	return u
@@ -539,6 +567,9 @@ func (u *LedgerTransactionUpsertBulk) UpdateNewValues() *LedgerTransactionUpsert
 			}
 			if _, exists := b.mutation.CreatedAt(); exists {
 				s.SetIgnore(ledgertransaction.FieldCreatedAt)
+			}
+			if _, exists := b.mutation.BookedAt(); exists {
+				s.SetIgnore(ledgertransaction.FieldBookedAt)
 			}
 		}
 	}))

@@ -261,6 +261,18 @@ func (f LedgerTransactionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.LedgerTransactionMutation", m)
 }
 
+// The MarketplaceAttemptFunc type is an adapter to allow the use of ordinary
+// function as MarketplaceAttempt mutator.
+type MarketplaceAttemptFunc func(context.Context, *ent.MarketplaceAttemptMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f MarketplaceAttemptFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.MarketplaceAttemptMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.MarketplaceAttemptMutation", m)
+}
+
 // The MarketplacePolicyFunc type is an adapter to allow the use of ordinary
 // function as MarketplacePolicy mutator.
 type MarketplacePolicyFunc func(context.Context, *ent.MarketplacePolicyMutation) (ent.Value, error)
@@ -283,6 +295,18 @@ func (f MarketplacePriceVersionFunc) Mutate(ctx context.Context, m ent.Mutation)
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.MarketplacePriceVersionMutation", m)
+}
+
+// The MarketplaceRequestFunc type is an adapter to allow the use of ordinary
+// function as MarketplaceRequest mutator.
+type MarketplaceRequestFunc func(context.Context, *ent.MarketplaceRequestMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f MarketplaceRequestFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.MarketplaceRequestMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.MarketplaceRequestMutation", m)
 }
 
 // The PaymentAuditLogFunc type is an adapter to allow the use of ordinary
@@ -429,6 +453,30 @@ func (f SubscriptionPlanFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.V
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SubscriptionPlanMutation", m)
 }
 
+// The SupplierPayoutFunc type is an adapter to allow the use of ordinary
+// function as SupplierPayout mutator.
+type SupplierPayoutFunc func(context.Context, *ent.SupplierPayoutMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SupplierPayoutFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SupplierPayoutMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SupplierPayoutMutation", m)
+}
+
+// The SupplierPayoutDestinationFunc type is an adapter to allow the use of ordinary
+// function as SupplierPayoutDestination mutator.
+type SupplierPayoutDestinationFunc func(context.Context, *ent.SupplierPayoutDestinationMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SupplierPayoutDestinationFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SupplierPayoutDestinationMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SupplierPayoutDestinationMutation", m)
+}
+
 // The SupplierProfileFunc type is an adapter to allow the use of ordinary
 // function as SupplierProfile mutator.
 type SupplierProfileFunc func(context.Context, *ent.SupplierProfileMutation) (ent.Value, error)
@@ -439,6 +487,18 @@ func (f SupplierProfileFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Va
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SupplierProfileMutation", m)
+}
+
+// The SupplierStatementFunc type is an adapter to allow the use of ordinary
+// function as SupplierStatement mutator.
+type SupplierStatementFunc func(context.Context, *ent.SupplierStatementMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SupplierStatementFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SupplierStatementMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SupplierStatementMutation", m)
 }
 
 // The SupplierWalletFunc type is an adapter to allow the use of ordinary

@@ -1118,7 +1118,7 @@ var (
 		{Name: "account", Type: field.TypeString},
 		{Name: "subject_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "side", Type: field.TypeString},
-		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
 		{Name: "created_at", Type: field.TypeTime},
 	}
 	// LedgerEntriesTable holds the schema information for the "ledger_entries" table.
@@ -1137,12 +1137,41 @@ var (
 		{Name: "original_transaction_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "sealed", Type: field.TypeBool, Default: false},
 		{Name: "created_at", Type: field.TypeTime},
+		{Name: "booked_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 	}
 	// LedgerTransactionsTable holds the schema information for the "ledger_transactions" table.
 	LedgerTransactionsTable = &schema.Table{
 		Name:       "ledger_transactions",
 		Columns:    LedgerTransactionsColumns,
 		PrimaryKey: []*schema.Column{LedgerTransactionsColumns[0]},
+	}
+	// MarketplaceAttemptsColumns holds the columns for the "marketplace_attempts" table.
+	MarketplaceAttemptsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "receipt_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "ordinal", Type: field.TypeInt},
+		{Name: "account_id", Type: field.TypeInt64},
+		{Name: "offer_id", Type: field.TypeInt64},
+		{Name: "owner_user_id", Type: field.TypeInt64},
+		{Name: "quote", Type: field.TypeJSON},
+		{Name: "quote_digest", Type: field.TypeString},
+		{Name: "status", Type: field.TypeString},
+		{Name: "usage", Type: field.TypeJSON, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// MarketplaceAttemptsTable holds the schema information for the "marketplace_attempts" table.
+	MarketplaceAttemptsTable = &schema.Table{
+		Name:       "marketplace_attempts",
+		Columns:    MarketplaceAttemptsColumns,
+		PrimaryKey: []*schema.Column{MarketplaceAttemptsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "marketplaceattempt_receipt_id_ordinal",
+				Unique:  true,
+				Columns: []*schema.Column{MarketplaceAttemptsColumns[1], MarketplaceAttemptsColumns[2]},
+			},
+		},
 	}
 	// MarketplacePoliciesColumns holds the columns for the "marketplace_policies" table.
 	MarketplacePoliciesColumns = []*schema.Column{
@@ -1179,6 +1208,28 @@ var (
 		Name:       "marketplace_price_versions",
 		Columns:    MarketplacePriceVersionsColumns,
 		PrimaryKey: []*schema.Column{MarketplacePriceVersionsColumns[0]},
+	}
+	// MarketplaceRequestsColumns holds the columns for the "marketplace_requests" table.
+	MarketplaceRequestsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "buyer_user_id", Type: field.TypeInt64},
+		{Name: "api_key_id", Type: field.TypeInt64},
+		{Name: "group_id", Type: field.TypeInt64},
+		{Name: "request_digest", Type: field.TypeString},
+		{Name: "idempotency_key", Type: field.TypeString, Nullable: true},
+		{Name: "status", Type: field.TypeString, Default: "prepared"},
+		{Name: "budget", Type: field.TypeString, Default: "0", SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "actual_charge", Type: field.TypeString, Default: "0", SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "billable_attempt_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "review_reason", Type: field.TypeString, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// MarketplaceRequestsTable holds the schema information for the "marketplace_requests" table.
+	MarketplaceRequestsTable = &schema.Table{
+		Name:       "marketplace_requests",
+		Columns:    MarketplaceRequestsColumns,
+		PrimaryKey: []*schema.Column{MarketplaceRequestsColumns[0]},
 	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
@@ -1681,6 +1732,60 @@ var (
 			},
 		},
 	}
+	// SupplierPayoutsColumns holds the columns for the "supplier_payouts" table.
+	SupplierPayoutsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "supplier_id", Type: field.TypeInt64},
+		{Name: "destination_id", Type: field.TypeInt64},
+		{Name: "masked_label", Type: field.TypeString},
+		{Name: "amount", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "currency", Type: field.TypeString, Default: "USD"},
+		{Name: "status", Type: field.TypeString},
+		{Name: "external_reference", Type: field.TypeString, Unique: true, Nullable: true},
+		{Name: "evidence", Type: field.TypeString, Nullable: true},
+		{Name: "paid_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// SupplierPayoutsTable holds the schema information for the "supplier_payouts" table.
+	SupplierPayoutsTable = &schema.Table{
+		Name:       "supplier_payouts",
+		Columns:    SupplierPayoutsColumns,
+		PrimaryKey: []*schema.Column{SupplierPayoutsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "supplierpayout_supplier_id",
+				Unique:  false,
+				Columns: []*schema.Column{SupplierPayoutsColumns[1]},
+			},
+		},
+	}
+	// SupplierPayoutDestinationsColumns holds the columns for the "supplier_payout_destinations" table.
+	SupplierPayoutDestinationsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "supplier_id", Type: field.TypeInt64},
+		{Name: "masked_label", Type: field.TypeString},
+		{Name: "version", Type: field.TypeInt64},
+		{Name: "credential", Type: field.TypeJSON},
+		{Name: "verified", Type: field.TypeBool, Default: false},
+		{Name: "verified_by", Type: field.TypeInt64, Nullable: true},
+		{Name: "verified_at", Type: field.TypeTime, Nullable: true},
+		{Name: "verification_evidence", Type: field.TypeString, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// SupplierPayoutDestinationsTable holds the schema information for the "supplier_payout_destinations" table.
+	SupplierPayoutDestinationsTable = &schema.Table{
+		Name:       "supplier_payout_destinations",
+		Columns:    SupplierPayoutDestinationsColumns,
+		PrimaryKey: []*schema.Column{SupplierPayoutDestinationsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "supplierpayoutdestination_supplier_id_version",
+				Unique:  true,
+				Columns: []*schema.Column{SupplierPayoutDestinationsColumns[1], SupplierPayoutDestinationsColumns[3]},
+			},
+		},
+	}
 	// SupplierProfilesColumns holds the columns for the "supplier_profiles" table.
 	SupplierProfilesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1701,15 +1806,53 @@ var (
 		Columns:    SupplierProfilesColumns,
 		PrimaryKey: []*schema.Column{SupplierProfilesColumns[0]},
 	}
+	// SupplierStatementsColumns holds the columns for the "supplier_statements" table.
+	SupplierStatementsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "supplier_id", Type: field.TypeInt64},
+		{Name: "month", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "date"}},
+		{Name: "currency", Type: field.TypeString, Default: "USD"},
+		{Name: "version", Type: field.TypeInt},
+		{Name: "cutoff_ledger_id", Type: field.TypeInt64},
+		{Name: "opening_pending", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "opening_available", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "opening_reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "closing_pending", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "closing_available", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "closing_reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "earned_net", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "platform_fee", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "refund_net", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "payout_paid", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// SupplierStatementsTable holds the schema information for the "supplier_statements" table.
+	SupplierStatementsTable = &schema.Table{
+		Name:       "supplier_statements",
+		Columns:    SupplierStatementsColumns,
+		PrimaryKey: []*schema.Column{SupplierStatementsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "supplierstatement_supplier_id_month",
+				Unique:  true,
+				Columns: []*schema.Column{SupplierStatementsColumns[1], SupplierStatementsColumns[2]},
+			},
+			{
+				Name:    "supplierstatement_supplier_id_month_version",
+				Unique:  true,
+				Columns: []*schema.Column{SupplierStatementsColumns[1], SupplierStatementsColumns[2], SupplierStatementsColumns[4]},
+			},
+		},
+	}
 	// SupplierWalletsColumns holds the columns for the "supplier_wallets" table.
 	SupplierWalletsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "user_id", Type: field.TypeInt64},
 		{Name: "currency", Type: field.TypeString, Default: "USD"},
-		{Name: "pending", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "available", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "payout_reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "debt", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "pending", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "available", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "payout_reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "debt", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
 		{Name: "version", Type: field.TypeInt64, Default: 1},
 		{Name: "created_at", Type: field.TypeTime},
 	}
@@ -2246,10 +2389,10 @@ var (
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "lot_id", Type: field.TypeInt64},
 		{Name: "hold_operation_id", Type: field.TypeString},
-		{Name: "reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "captured", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "released", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "refunded", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "captured", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "released", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "refunded", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
 		{Name: "created_at", Type: field.TypeTime},
 	}
 	// WalletFundingAllocationsTable holds the schema information for the "wallet_funding_allocations" table.
@@ -2273,9 +2416,9 @@ var (
 		{Name: "origin_type", Type: field.TypeString},
 		{Name: "origin_id", Type: field.TypeString},
 		{Name: "currency", Type: field.TypeString, Default: "USD"},
-		{Name: "original", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "remaining", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
-		{Name: "reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "original", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "remaining", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
+		{Name: "reserved", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
 		{Name: "created_at", Type: field.TypeTime},
 	}
 	// WalletFundingLotsTable holds the schema information for the "wallet_funding_lots" table.
@@ -2300,7 +2443,7 @@ var (
 	WalletFundingStatesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "user_id", Type: field.TypeInt64, Unique: true},
-		{Name: "debt", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)"}},
+		{Name: "debt", Type: field.TypeOther, SchemaType: map[string]string{"postgres": "numeric(20,8)", "sqlite3": "text"}},
 		{Name: "migration_version", Type: field.TypeInt, Default: 0},
 		{Name: "reconciled_at", Type: field.TypeTime, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime},
@@ -2334,8 +2477,10 @@ var (
 		IdentityAdoptionDecisionsTable,
 		LedgerEntriesTable,
 		LedgerTransactionsTable,
+		MarketplaceAttemptsTable,
 		MarketplacePoliciesTable,
 		MarketplacePriceVersionsTable,
+		MarketplaceRequestsTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2348,7 +2493,10 @@ var (
 		SettingsTable,
 		SharingOffersTable,
 		SubscriptionPlansTable,
+		SupplierPayoutsTable,
+		SupplierPayoutDestinationsTable,
 		SupplierProfilesTable,
+		SupplierStatementsTable,
 		SupplierWalletsTable,
 		TLSFingerprintProfilesTable,
 		UsageCleanupTasksTable,
@@ -2446,11 +2594,17 @@ func init() {
 	LedgerTransactionsTable.Annotation = &entsql.Annotation{
 		Table: "ledger_transactions",
 	}
+	MarketplaceAttemptsTable.Annotation = &entsql.Annotation{
+		Table: "marketplace_attempts",
+	}
 	MarketplacePoliciesTable.Annotation = &entsql.Annotation{
 		Table: "marketplace_policies",
 	}
 	MarketplacePriceVersionsTable.Annotation = &entsql.Annotation{
 		Table: "marketplace_price_versions",
+	}
+	MarketplaceRequestsTable.Annotation = &entsql.Annotation{
+		Table: "marketplace_requests",
 	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",
@@ -2495,8 +2649,17 @@ func init() {
 	SubscriptionPlansTable.Annotation = &entsql.Annotation{
 		Table: "subscription_plans",
 	}
+	SupplierPayoutsTable.Annotation = &entsql.Annotation{
+		Table: "supplier_payouts",
+	}
+	SupplierPayoutDestinationsTable.Annotation = &entsql.Annotation{
+		Table: "supplier_payout_destinations",
+	}
 	SupplierProfilesTable.Annotation = &entsql.Annotation{
 		Table: "supplier_profiles",
+	}
+	SupplierStatementsTable.Annotation = &entsql.Annotation{
+		Table: "supplier_statements",
 	}
 	SupplierWalletsTable.Annotation = &entsql.Annotation{
 		Table: "supplier_wallets",

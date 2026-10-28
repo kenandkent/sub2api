@@ -56,10 +56,14 @@ type Tx struct {
 	LedgerEntry *LedgerEntryClient
 	// LedgerTransaction is the client for interacting with the LedgerTransaction builders.
 	LedgerTransaction *LedgerTransactionClient
+	// MarketplaceAttempt is the client for interacting with the MarketplaceAttempt builders.
+	MarketplaceAttempt *MarketplaceAttemptClient
 	// MarketplacePolicy is the client for interacting with the MarketplacePolicy builders.
 	MarketplacePolicy *MarketplacePolicyClient
 	// MarketplacePriceVersion is the client for interacting with the MarketplacePriceVersion builders.
 	MarketplacePriceVersion *MarketplacePriceVersionClient
+	// MarketplaceRequest is the client for interacting with the MarketplaceRequest builders.
+	MarketplaceRequest *MarketplaceRequestClient
 	// PaymentAuditLog is the client for interacting with the PaymentAuditLog builders.
 	PaymentAuditLog *PaymentAuditLogClient
 	// PaymentOrder is the client for interacting with the PaymentOrder builders.
@@ -84,8 +88,14 @@ type Tx struct {
 	SharingOffer *SharingOfferClient
 	// SubscriptionPlan is the client for interacting with the SubscriptionPlan builders.
 	SubscriptionPlan *SubscriptionPlanClient
+	// SupplierPayout is the client for interacting with the SupplierPayout builders.
+	SupplierPayout *SupplierPayoutClient
+	// SupplierPayoutDestination is the client for interacting with the SupplierPayoutDestination builders.
+	SupplierPayoutDestination *SupplierPayoutDestinationClient
 	// SupplierProfile is the client for interacting with the SupplierProfile builders.
 	SupplierProfile *SupplierProfileClient
+	// SupplierStatement is the client for interacting with the SupplierStatement builders.
+	SupplierStatement *SupplierStatementClient
 	// SupplierWallet is the client for interacting with the SupplierWallet builders.
 	SupplierWallet *SupplierWalletClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
@@ -264,8 +274,10 @@ func (tx *Tx) init() {
 	tx.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(tx.config)
 	tx.LedgerEntry = NewLedgerEntryClient(tx.config)
 	tx.LedgerTransaction = NewLedgerTransactionClient(tx.config)
+	tx.MarketplaceAttempt = NewMarketplaceAttemptClient(tx.config)
 	tx.MarketplacePolicy = NewMarketplacePolicyClient(tx.config)
 	tx.MarketplacePriceVersion = NewMarketplacePriceVersionClient(tx.config)
+	tx.MarketplaceRequest = NewMarketplaceRequestClient(tx.config)
 	tx.PaymentAuditLog = NewPaymentAuditLogClient(tx.config)
 	tx.PaymentOrder = NewPaymentOrderClient(tx.config)
 	tx.PaymentProviderInstance = NewPaymentProviderInstanceClient(tx.config)
@@ -278,7 +290,10 @@ func (tx *Tx) init() {
 	tx.Setting = NewSettingClient(tx.config)
 	tx.SharingOffer = NewSharingOfferClient(tx.config)
 	tx.SubscriptionPlan = NewSubscriptionPlanClient(tx.config)
+	tx.SupplierPayout = NewSupplierPayoutClient(tx.config)
+	tx.SupplierPayoutDestination = NewSupplierPayoutDestinationClient(tx.config)
 	tx.SupplierProfile = NewSupplierProfileClient(tx.config)
+	tx.SupplierStatement = NewSupplierStatementClient(tx.config)
 	tx.SupplierWallet = NewSupplierWalletClient(tx.config)
 	tx.TLSFingerprintProfile = NewTLSFingerprintProfileClient(tx.config)
 	tx.UsageCleanupTask = NewUsageCleanupTaskClient(tx.config)

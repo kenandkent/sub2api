@@ -27,5 +27,5 @@ func (WalletFundingLot) Indexes() []ent.Index {
 	return []ent.Index{index.Fields("origin_type", "origin_id").Unique(), index.Fields("user_id", "id")}
 }
 func marketplaceAmount(name string) ent.Field {
-	return field.Other(name, decimal.Zero).SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)"})
+	return field.Other(name, decimal.Zero).SchemaType(map[string]string{dialect.Postgres: "numeric(20,8)", dialect.SQLite: "text"})
 }

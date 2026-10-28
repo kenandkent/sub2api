@@ -33,8 +33,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/ledgerentry"
 	"github.com/Wei-Shaw/sub2api/ent/ledgertransaction"
+	"github.com/Wei-Shaw/sub2api/ent/marketplaceattempt"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
+	"github.com/Wei-Shaw/sub2api/ent/marketplacerequest"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -47,7 +49,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
+	"github.com/Wei-Shaw/sub2api/ent/supplierpayout"
+	"github.com/Wei-Shaw/sub2api/ent/supplierpayoutdestination"
 	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
+	"github.com/Wei-Shaw/sub2api/ent/supplierstatement"
 	"github.com/Wei-Shaw/sub2api/ent/supplierwallet"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -142,8 +147,10 @@ func checkColumn(t, c string) error {
 			identityadoptiondecision.Table:      identityadoptiondecision.ValidColumn,
 			ledgerentry.Table:                   ledgerentry.ValidColumn,
 			ledgertransaction.Table:             ledgertransaction.ValidColumn,
+			marketplaceattempt.Table:            marketplaceattempt.ValidColumn,
 			marketplacepolicy.Table:             marketplacepolicy.ValidColumn,
 			marketplacepriceversion.Table:       marketplacepriceversion.ValidColumn,
+			marketplacerequest.Table:            marketplacerequest.ValidColumn,
 			paymentauditlog.Table:               paymentauditlog.ValidColumn,
 			paymentorder.Table:                  paymentorder.ValidColumn,
 			paymentproviderinstance.Table:       paymentproviderinstance.ValidColumn,
@@ -156,7 +163,10 @@ func checkColumn(t, c string) error {
 			setting.Table:                       setting.ValidColumn,
 			sharingoffer.Table:                  sharingoffer.ValidColumn,
 			subscriptionplan.Table:              subscriptionplan.ValidColumn,
+			supplierpayout.Table:                supplierpayout.ValidColumn,
+			supplierpayoutdestination.Table:     supplierpayoutdestination.ValidColumn,
 			supplierprofile.Table:               supplierprofile.ValidColumn,
+			supplierstatement.Table:             supplierstatement.ValidColumn,
 			supplierwallet.Table:                supplierwallet.ValidColumn,
 			tlsfingerprintprofile.Table:         tlsfingerprintprofile.ValidColumn,
 			usagecleanuptask.Table:              usagecleanuptask.ValidColumn,

@@ -26,8 +26,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/ledgerentry"
 	"github.com/Wei-Shaw/sub2api/ent/ledgertransaction"
+	"github.com/Wei-Shaw/sub2api/ent/marketplaceattempt"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
+	"github.com/Wei-Shaw/sub2api/ent/marketplacerequest"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -41,7 +43,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
+	"github.com/Wei-Shaw/sub2api/ent/supplierpayout"
+	"github.com/Wei-Shaw/sub2api/ent/supplierpayoutdestination"
 	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
+	"github.com/Wei-Shaw/sub2api/ent/supplierstatement"
 	"github.com/Wei-Shaw/sub2api/ent/supplierwallet"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -1333,6 +1338,30 @@ func init() {
 	ledgertransactionDescCreatedAt := ledgertransactionFields[6].Descriptor()
 	// ledgertransaction.DefaultCreatedAt holds the default value on creation for the created_at field.
 	ledgertransaction.DefaultCreatedAt = ledgertransactionDescCreatedAt.Default.(func() time.Time)
+	// ledgertransactionDescBookedAt is the schema descriptor for booked_at field.
+	ledgertransactionDescBookedAt := ledgertransactionFields[7].Descriptor()
+	// ledgertransaction.DefaultBookedAt holds the default value on creation for the booked_at field.
+	ledgertransaction.DefaultBookedAt = ledgertransactionDescBookedAt.Default.(func() time.Time)
+	marketplaceattemptFields := schema.MarketplaceAttempt{}.Fields()
+	_ = marketplaceattemptFields
+	// marketplaceattemptDescOrdinal is the schema descriptor for ordinal field.
+	marketplaceattemptDescOrdinal := marketplaceattemptFields[1].Descriptor()
+	// marketplaceattempt.OrdinalValidator is a validator for the "ordinal" field. It is called by the builders before save.
+	marketplaceattempt.OrdinalValidator = marketplaceattemptDescOrdinal.Validators[0].(func(int) error)
+	// marketplaceattemptDescQuoteDigest is the schema descriptor for quote_digest field.
+	marketplaceattemptDescQuoteDigest := marketplaceattemptFields[6].Descriptor()
+	// marketplaceattempt.QuoteDigestValidator is a validator for the "quote_digest" field. It is called by the builders before save.
+	marketplaceattempt.QuoteDigestValidator = marketplaceattemptDescQuoteDigest.Validators[0].(func(string) error)
+	// marketplaceattemptDescCreatedAt is the schema descriptor for created_at field.
+	marketplaceattemptDescCreatedAt := marketplaceattemptFields[9].Descriptor()
+	// marketplaceattempt.DefaultCreatedAt holds the default value on creation for the created_at field.
+	marketplaceattempt.DefaultCreatedAt = marketplaceattemptDescCreatedAt.Default.(func() time.Time)
+	// marketplaceattemptDescUpdatedAt is the schema descriptor for updated_at field.
+	marketplaceattemptDescUpdatedAt := marketplaceattemptFields[10].Descriptor()
+	// marketplaceattempt.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	marketplaceattempt.DefaultUpdatedAt = marketplaceattemptDescUpdatedAt.Default.(func() time.Time)
+	// marketplaceattempt.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	marketplaceattempt.UpdateDefaultUpdatedAt = marketplaceattemptDescUpdatedAt.UpdateDefault.(func() time.Time)
 	marketplacepolicyMixin := schema.MarketplacePolicy{}.Mixin()
 	marketplacepolicyMixinFields0 := marketplacepolicyMixin[0].Fields()
 	_ = marketplacepolicyMixinFields0
@@ -1391,6 +1420,34 @@ func init() {
 	marketplacepriceversionDescRules := marketplacepriceversionFields[1].Descriptor()
 	// marketplacepriceversion.DefaultRules holds the default value on creation for the rules field.
 	marketplacepriceversion.DefaultRules = marketplacepriceversionDescRules.Default.(func() map[string]interface{})
+	marketplacerequestFields := schema.MarketplaceRequest{}.Fields()
+	_ = marketplacerequestFields
+	// marketplacerequestDescRequestDigest is the schema descriptor for request_digest field.
+	marketplacerequestDescRequestDigest := marketplacerequestFields[4].Descriptor()
+	// marketplacerequest.RequestDigestValidator is a validator for the "request_digest" field. It is called by the builders before save.
+	marketplacerequest.RequestDigestValidator = marketplacerequestDescRequestDigest.Validators[0].(func(string) error)
+	// marketplacerequestDescStatus is the schema descriptor for status field.
+	marketplacerequestDescStatus := marketplacerequestFields[6].Descriptor()
+	// marketplacerequest.DefaultStatus holds the default value on creation for the status field.
+	marketplacerequest.DefaultStatus = marketplacerequestDescStatus.Default.(string)
+	// marketplacerequestDescBudget is the schema descriptor for budget field.
+	marketplacerequestDescBudget := marketplacerequestFields[7].Descriptor()
+	// marketplacerequest.DefaultBudget holds the default value on creation for the budget field.
+	marketplacerequest.DefaultBudget = marketplacerequestDescBudget.Default.(string)
+	// marketplacerequestDescActualCharge is the schema descriptor for actual_charge field.
+	marketplacerequestDescActualCharge := marketplacerequestFields[8].Descriptor()
+	// marketplacerequest.DefaultActualCharge holds the default value on creation for the actual_charge field.
+	marketplacerequest.DefaultActualCharge = marketplacerequestDescActualCharge.Default.(string)
+	// marketplacerequestDescCreatedAt is the schema descriptor for created_at field.
+	marketplacerequestDescCreatedAt := marketplacerequestFields[11].Descriptor()
+	// marketplacerequest.DefaultCreatedAt holds the default value on creation for the created_at field.
+	marketplacerequest.DefaultCreatedAt = marketplacerequestDescCreatedAt.Default.(func() time.Time)
+	// marketplacerequestDescUpdatedAt is the schema descriptor for updated_at field.
+	marketplacerequestDescUpdatedAt := marketplacerequestFields[12].Descriptor()
+	// marketplacerequest.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	marketplacerequest.DefaultUpdatedAt = marketplacerequestDescUpdatedAt.Default.(func() time.Time)
+	// marketplacerequest.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	marketplacerequest.UpdateDefaultUpdatedAt = marketplacerequestDescUpdatedAt.UpdateDefault.(func() time.Time)
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.
@@ -2029,6 +2086,30 @@ func init() {
 	subscriptionplan.DefaultUpdatedAt = subscriptionplanDescUpdatedAt.Default.(func() time.Time)
 	// subscriptionplan.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	subscriptionplan.UpdateDefaultUpdatedAt = subscriptionplanDescUpdatedAt.UpdateDefault.(func() time.Time)
+	supplierpayoutFields := schema.SupplierPayout{}.Fields()
+	_ = supplierpayoutFields
+	// supplierpayoutDescCurrency is the schema descriptor for currency field.
+	supplierpayoutDescCurrency := supplierpayoutFields[4].Descriptor()
+	// supplierpayout.DefaultCurrency holds the default value on creation for the currency field.
+	supplierpayout.DefaultCurrency = supplierpayoutDescCurrency.Default.(string)
+	// supplierpayoutDescCreatedAt is the schema descriptor for created_at field.
+	supplierpayoutDescCreatedAt := supplierpayoutFields[9].Descriptor()
+	// supplierpayout.DefaultCreatedAt holds the default value on creation for the created_at field.
+	supplierpayout.DefaultCreatedAt = supplierpayoutDescCreatedAt.Default.(func() time.Time)
+	// supplierpayoutDescUpdatedAt is the schema descriptor for updated_at field.
+	supplierpayoutDescUpdatedAt := supplierpayoutFields[10].Descriptor()
+	// supplierpayout.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	supplierpayout.DefaultUpdatedAt = supplierpayoutDescUpdatedAt.Default.(func() time.Time)
+	supplierpayoutdestinationFields := schema.SupplierPayoutDestination{}.Fields()
+	_ = supplierpayoutdestinationFields
+	// supplierpayoutdestinationDescVerified is the schema descriptor for verified field.
+	supplierpayoutdestinationDescVerified := supplierpayoutdestinationFields[4].Descriptor()
+	// supplierpayoutdestination.DefaultVerified holds the default value on creation for the verified field.
+	supplierpayoutdestination.DefaultVerified = supplierpayoutdestinationDescVerified.Default.(bool)
+	// supplierpayoutdestinationDescCreatedAt is the schema descriptor for created_at field.
+	supplierpayoutdestinationDescCreatedAt := supplierpayoutdestinationFields[8].Descriptor()
+	// supplierpayoutdestination.DefaultCreatedAt holds the default value on creation for the created_at field.
+	supplierpayoutdestination.DefaultCreatedAt = supplierpayoutdestinationDescCreatedAt.Default.(func() time.Time)
 	supplierprofileMixin := schema.SupplierProfile{}.Mixin()
 	supplierprofileMixinFields0 := supplierprofileMixin[0].Fields()
 	_ = supplierprofileMixinFields0
@@ -2060,6 +2141,16 @@ func init() {
 	supplierprofileDescVersion := supplierprofileFields[7].Descriptor()
 	// supplierprofile.DefaultVersion holds the default value on creation for the version field.
 	supplierprofile.DefaultVersion = supplierprofileDescVersion.Default.(int64)
+	supplierstatementFields := schema.SupplierStatement{}.Fields()
+	_ = supplierstatementFields
+	// supplierstatementDescCurrency is the schema descriptor for currency field.
+	supplierstatementDescCurrency := supplierstatementFields[2].Descriptor()
+	// supplierstatement.DefaultCurrency holds the default value on creation for the currency field.
+	supplierstatement.DefaultCurrency = supplierstatementDescCurrency.Default.(string)
+	// supplierstatementDescCreatedAt is the schema descriptor for created_at field.
+	supplierstatementDescCreatedAt := supplierstatementFields[15].Descriptor()
+	// supplierstatement.DefaultCreatedAt holds the default value on creation for the created_at field.
+	supplierstatement.DefaultCreatedAt = supplierstatementDescCreatedAt.Default.(func() time.Time)
 	supplierwalletFields := schema.SupplierWallet{}.Fields()
 	_ = supplierwalletFields
 	// supplierwalletDescCurrency is the schema descriptor for currency field.

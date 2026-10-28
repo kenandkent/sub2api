@@ -29,8 +29,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/ledgerentry"
 	"github.com/Wei-Shaw/sub2api/ent/ledgertransaction"
+	"github.com/Wei-Shaw/sub2api/ent/marketplaceattempt"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepolicy"
 	"github.com/Wei-Shaw/sub2api/ent/marketplacepriceversion"
+	"github.com/Wei-Shaw/sub2api/ent/marketplacerequest"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -44,7 +46,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/sharingoffer"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
+	"github.com/Wei-Shaw/sub2api/ent/supplierpayout"
+	"github.com/Wei-Shaw/sub2api/ent/supplierpayoutdestination"
 	"github.com/Wei-Shaw/sub2api/ent/supplierprofile"
+	"github.com/Wei-Shaw/sub2api/ent/supplierstatement"
 	"github.com/Wei-Shaw/sub2api/ent/supplierwallet"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
@@ -683,6 +688,33 @@ func (f TraverseLedgerTransaction) Traverse(ctx context.Context, q ent.Query) er
 	return fmt.Errorf("unexpected query type %T. expect *ent.LedgerTransactionQuery", q)
 }
 
+// The MarketplaceAttemptFunc type is an adapter to allow the use of ordinary function as a Querier.
+type MarketplaceAttemptFunc func(context.Context, *ent.MarketplaceAttemptQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f MarketplaceAttemptFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.MarketplaceAttemptQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.MarketplaceAttemptQuery", q)
+}
+
+// The TraverseMarketplaceAttempt type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseMarketplaceAttempt func(context.Context, *ent.MarketplaceAttemptQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseMarketplaceAttempt) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseMarketplaceAttempt) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.MarketplaceAttemptQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.MarketplaceAttemptQuery", q)
+}
+
 // The MarketplacePolicyFunc type is an adapter to allow the use of ordinary function as a Querier.
 type MarketplacePolicyFunc func(context.Context, *ent.MarketplacePolicyQuery) (ent.Value, error)
 
@@ -735,6 +767,33 @@ func (f TraverseMarketplacePriceVersion) Traverse(ctx context.Context, q ent.Que
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.MarketplacePriceVersionQuery", q)
+}
+
+// The MarketplaceRequestFunc type is an adapter to allow the use of ordinary function as a Querier.
+type MarketplaceRequestFunc func(context.Context, *ent.MarketplaceRequestQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f MarketplaceRequestFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.MarketplaceRequestQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.MarketplaceRequestQuery", q)
+}
+
+// The TraverseMarketplaceRequest type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseMarketplaceRequest func(context.Context, *ent.MarketplaceRequestQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseMarketplaceRequest) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseMarketplaceRequest) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.MarketplaceRequestQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.MarketplaceRequestQuery", q)
 }
 
 // The PaymentAuditLogFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1061,6 +1120,60 @@ func (f TraverseSubscriptionPlan) Traverse(ctx context.Context, q ent.Query) err
 	return fmt.Errorf("unexpected query type %T. expect *ent.SubscriptionPlanQuery", q)
 }
 
+// The SupplierPayoutFunc type is an adapter to allow the use of ordinary function as a Querier.
+type SupplierPayoutFunc func(context.Context, *ent.SupplierPayoutQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f SupplierPayoutFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.SupplierPayoutQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.SupplierPayoutQuery", q)
+}
+
+// The TraverseSupplierPayout type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseSupplierPayout func(context.Context, *ent.SupplierPayoutQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseSupplierPayout) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseSupplierPayout) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.SupplierPayoutQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.SupplierPayoutQuery", q)
+}
+
+// The SupplierPayoutDestinationFunc type is an adapter to allow the use of ordinary function as a Querier.
+type SupplierPayoutDestinationFunc func(context.Context, *ent.SupplierPayoutDestinationQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f SupplierPayoutDestinationFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.SupplierPayoutDestinationQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.SupplierPayoutDestinationQuery", q)
+}
+
+// The TraverseSupplierPayoutDestination type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseSupplierPayoutDestination func(context.Context, *ent.SupplierPayoutDestinationQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseSupplierPayoutDestination) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseSupplierPayoutDestination) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.SupplierPayoutDestinationQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.SupplierPayoutDestinationQuery", q)
+}
+
 // The SupplierProfileFunc type is an adapter to allow the use of ordinary function as a Querier.
 type SupplierProfileFunc func(context.Context, *ent.SupplierProfileQuery) (ent.Value, error)
 
@@ -1086,6 +1199,33 @@ func (f TraverseSupplierProfile) Traverse(ctx context.Context, q ent.Query) erro
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.SupplierProfileQuery", q)
+}
+
+// The SupplierStatementFunc type is an adapter to allow the use of ordinary function as a Querier.
+type SupplierStatementFunc func(context.Context, *ent.SupplierStatementQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f SupplierStatementFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.SupplierStatementQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.SupplierStatementQuery", q)
+}
+
+// The TraverseSupplierStatement type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseSupplierStatement func(context.Context, *ent.SupplierStatementQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseSupplierStatement) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseSupplierStatement) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.SupplierStatementQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.SupplierStatementQuery", q)
 }
 
 // The SupplierWalletFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1484,10 +1624,14 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.LedgerEntryQuery, predicate.LedgerEntry, ledgerentry.OrderOption]{typ: ent.TypeLedgerEntry, tq: q}, nil
 	case *ent.LedgerTransactionQuery:
 		return &query[*ent.LedgerTransactionQuery, predicate.LedgerTransaction, ledgertransaction.OrderOption]{typ: ent.TypeLedgerTransaction, tq: q}, nil
+	case *ent.MarketplaceAttemptQuery:
+		return &query[*ent.MarketplaceAttemptQuery, predicate.MarketplaceAttempt, marketplaceattempt.OrderOption]{typ: ent.TypeMarketplaceAttempt, tq: q}, nil
 	case *ent.MarketplacePolicyQuery:
 		return &query[*ent.MarketplacePolicyQuery, predicate.MarketplacePolicy, marketplacepolicy.OrderOption]{typ: ent.TypeMarketplacePolicy, tq: q}, nil
 	case *ent.MarketplacePriceVersionQuery:
 		return &query[*ent.MarketplacePriceVersionQuery, predicate.MarketplacePriceVersion, marketplacepriceversion.OrderOption]{typ: ent.TypeMarketplacePriceVersion, tq: q}, nil
+	case *ent.MarketplaceRequestQuery:
+		return &query[*ent.MarketplaceRequestQuery, predicate.MarketplaceRequest, marketplacerequest.OrderOption]{typ: ent.TypeMarketplaceRequest, tq: q}, nil
 	case *ent.PaymentAuditLogQuery:
 		return &query[*ent.PaymentAuditLogQuery, predicate.PaymentAuditLog, paymentauditlog.OrderOption]{typ: ent.TypePaymentAuditLog, tq: q}, nil
 	case *ent.PaymentOrderQuery:
@@ -1512,8 +1656,14 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.SharingOfferQuery, predicate.SharingOffer, sharingoffer.OrderOption]{typ: ent.TypeSharingOffer, tq: q}, nil
 	case *ent.SubscriptionPlanQuery:
 		return &query[*ent.SubscriptionPlanQuery, predicate.SubscriptionPlan, subscriptionplan.OrderOption]{typ: ent.TypeSubscriptionPlan, tq: q}, nil
+	case *ent.SupplierPayoutQuery:
+		return &query[*ent.SupplierPayoutQuery, predicate.SupplierPayout, supplierpayout.OrderOption]{typ: ent.TypeSupplierPayout, tq: q}, nil
+	case *ent.SupplierPayoutDestinationQuery:
+		return &query[*ent.SupplierPayoutDestinationQuery, predicate.SupplierPayoutDestination, supplierpayoutdestination.OrderOption]{typ: ent.TypeSupplierPayoutDestination, tq: q}, nil
 	case *ent.SupplierProfileQuery:
 		return &query[*ent.SupplierProfileQuery, predicate.SupplierProfile, supplierprofile.OrderOption]{typ: ent.TypeSupplierProfile, tq: q}, nil
+	case *ent.SupplierStatementQuery:
+		return &query[*ent.SupplierStatementQuery, predicate.SupplierStatement, supplierstatement.OrderOption]{typ: ent.TypeSupplierStatement, tq: q}, nil
 	case *ent.SupplierWalletQuery:
 		return &query[*ent.SupplierWalletQuery, predicate.SupplierWallet, supplierwallet.OrderOption]{typ: ent.TypeSupplierWallet, tq: q}, nil
 	case *ent.TLSFingerprintProfileQuery:

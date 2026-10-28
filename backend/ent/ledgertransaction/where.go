@@ -89,6 +89,11 @@ func CreatedAt(v time.Time) predicate.LedgerTransaction {
 	return predicate.LedgerTransaction(sql.FieldEQ(FieldCreatedAt, v))
 }
 
+// BookedAt applies equality check predicate on the "booked_at" field. It's identical to BookedAtEQ.
+func BookedAt(v time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldEQ(FieldBookedAt, v))
+}
+
 // OperationIDEQ applies the EQ predicate on the "operation_id" field.
 func OperationIDEQ(v string) predicate.LedgerTransaction {
 	return predicate.LedgerTransaction(sql.FieldEQ(FieldOperationID, v))
@@ -447,6 +452,46 @@ func CreatedAtLT(v time.Time) predicate.LedgerTransaction {
 // CreatedAtLTE applies the LTE predicate on the "created_at" field.
 func CreatedAtLTE(v time.Time) predicate.LedgerTransaction {
 	return predicate.LedgerTransaction(sql.FieldLTE(FieldCreatedAt, v))
+}
+
+// BookedAtEQ applies the EQ predicate on the "booked_at" field.
+func BookedAtEQ(v time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldEQ(FieldBookedAt, v))
+}
+
+// BookedAtNEQ applies the NEQ predicate on the "booked_at" field.
+func BookedAtNEQ(v time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldNEQ(FieldBookedAt, v))
+}
+
+// BookedAtIn applies the In predicate on the "booked_at" field.
+func BookedAtIn(vs ...time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldIn(FieldBookedAt, vs...))
+}
+
+// BookedAtNotIn applies the NotIn predicate on the "booked_at" field.
+func BookedAtNotIn(vs ...time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldNotIn(FieldBookedAt, vs...))
+}
+
+// BookedAtGT applies the GT predicate on the "booked_at" field.
+func BookedAtGT(v time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldGT(FieldBookedAt, v))
+}
+
+// BookedAtGTE applies the GTE predicate on the "booked_at" field.
+func BookedAtGTE(v time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldGTE(FieldBookedAt, v))
+}
+
+// BookedAtLT applies the LT predicate on the "booked_at" field.
+func BookedAtLT(v time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldLT(FieldBookedAt, v))
+}
+
+// BookedAtLTE applies the LTE predicate on the "booked_at" field.
+func BookedAtLTE(v time.Time) predicate.LedgerTransaction {
+	return predicate.LedgerTransaction(sql.FieldLTE(FieldBookedAt, v))
 }
 
 // And groups predicates with the AND operator between them.

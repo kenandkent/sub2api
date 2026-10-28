@@ -1223,3 +1223,25 @@ func TestBuildSchedulerMetadataAccount_KeepsRPMFieldsForRPMGate(t *testing.T) {
 			"投影裁掉 rpm_strategy 会让粘性豁免账号退回三区判定")
 	})
 }
+
+func TestSchedulerSnapshotPreservesSupplierOwnershipForEligibility(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 31, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	owner := int64(72)
+	accounts := []service.Account{
+		{ID: 3101, OwnerUserID: &owner, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"_supplier_envelope": map[string]any{"ciphertext": "sealed"}}},
+		{ID: 3102, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey},
+	}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, accounts))
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, snapshot, 2)
+	require.NotNil(t, snapshot[0].OwnerUserID)
+	require.Equal(t, owner, *snapshot[0].OwnerUserID)
+	require.Nil(t, snapshot[1].OwnerUserID)
+	require.NotContains(t, snapshot[0].Credentials, "_supplier_envelope")
+}

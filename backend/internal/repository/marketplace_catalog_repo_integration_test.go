@@ -14,6 +14,7 @@ import (
 )
 
 func TestMarketplaceCatalogPublishedVersionsAndDedicatedGroups(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	var actor, group int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,role) VALUES($1,'hash','admin') RETURNING id`, fmt.Sprintf("catalog-admin-%d@example.com",time.Now().UnixNano())).Scan(&actor))

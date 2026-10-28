@@ -18,6 +18,7 @@ import (
 // The publication advisory lock serializes dispatches before either takes a
 // buyer funding lock. Reciprocal buyers must not deadlock on owner status.
 func TestMarketplaceGatewayReciprocalDispatch(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var users, keys, accounts, offers [2]int64

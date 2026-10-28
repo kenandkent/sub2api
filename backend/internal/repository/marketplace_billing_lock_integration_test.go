@@ -17,6 +17,7 @@ import (
 // These captures acquire their buyer locks concurrently before trying to use
 // each other's user as the supplier FK. Both existing and new wallets matter.
 func TestMarketplaceBillingReciprocalCapturesDoNotDeadlock(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	for _, walletsExist := range []bool{false, true} {
 		t.Run(fmt.Sprintf("wallets_exist_%v", walletsExist), func(t *testing.T) {
 			ctx := context.Background()

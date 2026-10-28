@@ -15,6 +15,7 @@ import (
 )
 
 func TestOpenCodeFreeSettlementIsAtomicAndIdempotent(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	client := testEntClient(t)
 	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("free-%s@example.com", uuid.NewString()), PasswordHash: "hash", Balance: 10})
@@ -88,6 +89,7 @@ func TestOpenCodeFreeSettlementIsAtomicAndIdempotent(t *testing.T) {
 }
 
 func TestOpenCodeFreeSessionKeepsFirstCandidateUntilExpiry(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	r := NewUsageBillingRepository(testEntClient(t), integrationDB).(service.OpenCodeFreeUsageRepository)
 	hash := uuid.NewString()
@@ -105,6 +107,7 @@ func TestOpenCodeFreeSessionKeepsFirstCandidateUntilExpiry(t *testing.T) {
 }
 
 func TestOpenCodeFreeRecoverySettlesOnlyFrozenUsageAndExpiresPending(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	client := testEntClient(t)
 	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("free-recovery-%s@example.com", uuid.NewString()), PasswordHash: "hash", Balance: 10})
@@ -139,6 +142,7 @@ func TestOpenCodeFreeRecoverySettlesOnlyFrozenUsageAndExpiresPending(t *testing.
 }
 
 func TestOpenCodeFreeRecoveryRotatesFailedRows(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	client := testEntClient(t)
 	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("free-rotate-%s@example.com", uuid.NewString()), PasswordHash: "hash", Balance: 10})

@@ -11,6 +11,7 @@ import (
 )
 
 func TestSupplierSchemaOwnerAndOfferConstraints(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var owner, other, account int64
@@ -49,6 +50,7 @@ func TestSupplierSchemaOwnerAndOfferConstraints(t *testing.T) {
 }
 
 func TestSupplierSchemaPublishedVersionsImmutable(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var publisher int64

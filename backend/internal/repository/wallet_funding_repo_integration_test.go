@@ -16,6 +16,7 @@ import (
 )
 
 func TestWalletFundingConcurrentHoldsAndReplay(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("funding-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -58,6 +59,7 @@ func TestWalletFundingConcurrentHoldsAndReplay(t *testing.T) {
 }
 
 func TestMarketplaceLedgerBalancedAndRollback(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx, err := integrationDB.BeginTx(ctx, nil)
 	require.NoError(t, err)
@@ -71,6 +73,7 @@ func TestMarketplaceLedgerBalancedAndRollback(t *testing.T) {
 }
 
 func TestWalletFundingOverdraftAndRelease(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("funding-debt-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -108,6 +111,7 @@ func TestWalletFundingOverdraftAndRelease(t *testing.T) {
 }
 
 func TestMarketplaceLedgerReplayAndImmutability(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	op := fmt.Sprintf("ledger-replay-%d", time.Now().UnixNano())
 	entries := []LedgerPosting{{Account: "a", Side: "debit", Amount: decimal.NewFromInt(2)}, {Account: "b", Side: "credit", Amount: decimal.NewFromInt(2)}}
@@ -132,6 +136,7 @@ func TestMarketplaceLedgerReplayAndImmutability(t *testing.T) {
 }
 
 func TestMarketplaceLedgerDatabaseRejectsUnbalancedAndRollback(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	op := fmt.Sprintf("ledger-rollback-%d", time.Now().UnixNano())
 	tx, err := integrationDB.BeginTx(ctx, nil)
@@ -156,6 +161,7 @@ func TestMarketplaceLedgerDatabaseRejectsUnbalancedAndRollback(t *testing.T) {
 }
 
 func TestWalletFundingCreditPaysDebtAndPromotionalIsExcluded(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("funding-credit-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -186,6 +192,7 @@ func TestWalletFundingCreditPaysDebtAndPromotionalIsExcluded(t *testing.T) {
 }
 
 func TestWalletFundingPartialCaptureReleasesRemainder(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("funding-capture-%d@example.test", time.Now().UnixNano())
 	var user int64

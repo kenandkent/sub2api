@@ -72,7 +72,7 @@ func (r *MarketplaceBillingRepository) ReserveBudget(ctx context.Context, id str
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, _, _, _, err = fundingLock(ctx, tx, buyer); err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	result, err := r.captureTx(ctx, tx, c, b)
 	if err != nil {
 		return nil, err
@@ -193,12 +193,13 @@ func (r *MarketplaceBillingRepository) captureTx(ctx context.Context, tx *sql.Tx
 	if receipt.Status != "dispatched" && receipt.Status != "usage_pending" && receipt.Status != "needs_review" {
 		return nil, service.ErrMarketplaceRequestState
 	}
-	if status == "possibly_executed" {
+	switch status {
+	case "possibly_executed":
 		data, _ := json.Marshal(c.Usage)
 		if _, err = tx.ExecContext(ctx, `UPDATE marketplace_attempts SET status='usage_recorded',usage=$2,updated_at=now() WHERE id=$1`, c.BillableAttemptID, string(data)); err != nil {
 			return nil, err
 		}
-	} else if status == "usage_recorded" {
+	case "usage_recorded":
 		var existing service.UsageSnapshot
 		if err = json.Unmarshal(usageJSON, &existing); err != nil {
 			return nil, err
@@ -206,7 +207,7 @@ func (r *MarketplaceBillingRepository) captureTx(ctx context.Context, tx *sql.Tx
 		if existing != c.Usage {
 			return nil, service.ErrUsageBillingRequestConflict
 		}
-	} else {
+	default:
 		return nil, service.ErrMarketplaceRequestState
 	}
 	if charge.GreaterThan(receipt.Budget.Decimal) {

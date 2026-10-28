@@ -19,6 +19,7 @@ import (
 )
 
 func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	env, err := service.NewCredentialEnvelope("test", map[string][]byte{"test": bytes.Repeat([]byte{9}, 32)})
 	require.NoError(t, err)

@@ -68,7 +68,7 @@ func (s *PaymentService) ResolveUncertainFunding(ctx context.Context, cmd Uncert
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
 	order, err := tx.PaymentOrder.Query().Where(paymentorder.IDEQ(cmd.OrderID)).ForUpdate().Only(txCtx)
 	if err != nil {

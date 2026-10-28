@@ -45,7 +45,9 @@ func credentialAAD(provider string, owner, account int64) ([]byte, error) {
 	return json.Marshal([]any{provider, owner, account})
 }
 func (e *CredentialEnvelope) aead(id string) (cipher.AEAD, error) {
-	if e == nil {return nil,ErrCredentialEnvelope}
+	if e == nil {
+		return nil, ErrCredentialEnvelope
+	}
 	key, ok := e.keys[id]
 	if !ok {
 		return nil, ErrCredentialEnvelope
@@ -57,7 +59,9 @@ func (e *CredentialEnvelope) aead(id string) (cipher.AEAD, error) {
 	return cipher.NewGCM(b)
 }
 func (e *CredentialEnvelope) Seal(provider string, owner, account int64, plaintext []byte) (EncryptedCredential, error) {
-	if e == nil {return EncryptedCredential{},ErrCredentialEnvelope}
+	if e == nil {
+		return EncryptedCredential{}, ErrCredentialEnvelope
+	}
 	aad, err := credentialAAD(provider, owner, account)
 	if err != nil {
 		return EncryptedCredential{}, err

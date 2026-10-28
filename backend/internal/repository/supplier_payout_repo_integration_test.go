@@ -15,6 +15,7 @@ import (
 )
 
 func TestPayoutConcurrentRequestsCannotExceedAvailable(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	var owner, admin int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES ($1,'x') RETURNING id`, fmt.Sprintf("payout-%d@example.com", time.Now().UnixNano())).Scan(&owner))
@@ -77,6 +78,7 @@ func payoutFixture(t *testing.T) (*SupplierPayoutRepository, int64, int64, *serv
 	return repo, owner, admin, d
 }
 func TestPayoutStateMachineAndRefundRelease(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, d := payoutFixture(t)
 	op := func(n string) string { return fmt.Sprintf("%s-%d", n, owner) }
@@ -114,6 +116,7 @@ func TestPayoutStateMachineAndRefundRelease(t *testing.T) {
 	require.True(t, reserved.IsZero())
 }
 func TestPayoutRiskCancellationAndStartRechecks(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, d := payoutFixture(t)
 	op := func(n string) string { return fmt.Sprintf("%s-%d", n, owner) }
@@ -141,6 +144,7 @@ func TestPayoutRiskCancellationAndStartRechecks(t *testing.T) {
 	require.True(t, reserved.IsZero())
 }
 func TestPayoutPaidRequiresMatchingEvidenceAndUniqueReference(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, d := payoutFixture(t)
 	op := func(n string) string { return fmt.Sprintf("%s-%d", n, owner) }
@@ -177,6 +181,7 @@ func TestPayoutPaidRequiresMatchingEvidenceAndUniqueReference(t *testing.T) {
 }
 
 func TestPayoutRetryReturnsOriginalWhenNewPayoutsDisabled(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, _, d := payoutFixture(t)
 	op := fmt.Sprintf("disabled-retry-%d", owner)
@@ -191,6 +196,7 @@ func TestPayoutRetryReturnsOriginalWhenNewPayoutsDisabled(t *testing.T) {
 }
 
 func TestPayoutDestinationEncryptedVersionAndImmutableSnapshot(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, _, d := payoutFixture(t)
 	env, err := service.NewCredentialEnvelope("k", map[string][]byte{"k": make([]byte, 32)})
@@ -214,6 +220,7 @@ func TestPayoutDestinationEncryptedVersionAndImmutableSnapshot(t *testing.T) {
 }
 
 func TestPayoutRefundAndStartSerializeOnWallet(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, d := payoutFixture(t)
 	op := func(n string) string { return fmt.Sprintf("%s-%d", n, owner) }
@@ -244,6 +251,7 @@ func TestPayoutRefundAndStartSerializeOnWallet(t *testing.T) {
 	require.Equal(t, "risk_cancelled", got.Status)
 }
 func TestPayoutStartRechecksFreeze(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, d := payoutFixture(t)
 	op := func(n string) string { return fmt.Sprintf("%s-%d", n, owner) }
@@ -261,6 +269,7 @@ func TestPayoutStartRechecksFreeze(t *testing.T) {
 }
 
 func TestPayoutRequestKeyCannotCollideWithRefundLedgerOperation(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, _, d := payoutFixture(t)
 	p, err := repo.Request(ctx, owner, d.ID, decimal.RequireFromString("10"), fmt.Sprintf("request-%d", owner))
@@ -277,6 +286,7 @@ func TestPayoutRequestKeyCannotCollideWithRefundLedgerOperation(t *testing.T) {
 }
 
 func TestPayoutDestinationAdminRevealAndEvidence(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, d := payoutFixture(t)
 	env, err := service.NewCredentialEnvelope("k", map[string][]byte{"k": make([]byte, 32)})
@@ -333,6 +343,7 @@ func TestPayoutDestinationAdminRevealAndEvidence(t *testing.T) {
 	require.Equal(t, "secret", string(secret))
 }
 func TestPayoutPaidProjectionIncludesProofForAdminOnly(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, d := payoutFixture(t)
 	op := func(n string) string { return fmt.Sprintf("projection-%s-%d", n, owner) }
@@ -374,6 +385,7 @@ func TestPayoutPaidProjectionIncludesProofForAdminOnly(t *testing.T) {
 }
 
 func TestPayoutDestinationRejectsUnmaskedCredentialLabel(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, _, _ := payoutFixture(t)
 	env, err := service.NewCredentialEnvelope("k", map[string][]byte{"k": make([]byte, 32)})
@@ -383,6 +395,7 @@ func TestPayoutDestinationRejectsUnmaskedCredentialLabel(t *testing.T) {
 }
 
 func TestPayoutFreezeAuditVersionDebtAndReplay(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, owner, admin, _ := payoutFixture(t)
 	cmd := service.PayoutFreezeCommand{SupplierID: owner, ActorID: admin, ExpectedVersion: 1, Frozen: true, Reason: "risk review", OperationID: fmt.Sprintf("freeze-%d", owner)}
@@ -424,6 +437,7 @@ func TestPayoutFreezeAuditVersionDebtAndReplay(t *testing.T) {
 }
 
 func TestPayoutFreezeBeforeFirstEarningsCreatesWallet(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo, _, admin, _ := payoutFixture(t)
 	var owner int64

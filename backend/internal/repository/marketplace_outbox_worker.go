@@ -43,7 +43,7 @@ func (w *MarketplaceOutboxWorker) ProcessOne(ctx context.Context) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var e MarketplaceOutboxEvent
 	err = tx.QueryRowContext(ctx, `SELECT o.id,o.event_id,o.event_type,o.receipt_id::text,o.capture_id,r.buyer_user_id,r.api_key_id,a.account_id,c.api_key_quota_exhausted,c.api_key_rate_limit_changed,c.buyer_balance_after FROM marketplace_outbox o JOIN marketplace_captures c ON c.id=o.capture_id JOIN marketplace_requests r ON r.id=o.receipt_id JOIN marketplace_attempts a ON a.id=c.attempt_id WHERE o.processed_at IS NULL AND o.next_attempt_at<=now() ORDER BY o.id FOR UPDATE OF o SKIP LOCKED LIMIT 1`).Scan(&e.ID, &e.EventID, &e.EventType, &e.ReceiptID, &e.CaptureID, &e.BuyerUserID, &e.APIKeyID, &e.AccountID, &e.APIKeyQuotaExhausted, &e.APIKeyRateLimitChanged, &e.BuyerBalanceAfter)
 	if errors.Is(err, sql.ErrNoRows) {

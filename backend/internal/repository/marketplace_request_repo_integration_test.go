@@ -16,6 +16,7 @@ import (
 )
 
 func TestMarketplaceRequestIdempotency(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	var user, key, group, account, offer int64

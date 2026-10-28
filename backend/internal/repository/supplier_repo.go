@@ -52,7 +52,7 @@ func (r *supplierRepository) Review(ctx context.Context, user, admin int64, stat
 	if e != nil {
 		return nil, e
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var previous string
 	e = tx.QueryRowContext(ctx, `SELECT status FROM supplier_profiles WHERE user_id=$1 FOR UPDATE`, user).Scan(&previous)
 	if errors.Is(e, sql.ErrNoRows) {
@@ -86,7 +86,7 @@ func (r *supplierRepository) ListProfiles(ctx context.Context, page, pageSize in
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.SupplierProfile{}
 	for rows.Next() {
 		p, err := scanSupplier(rows)
@@ -102,7 +102,7 @@ func (r *supplierRepository) ListAccounts(ctx context.Context, owner int64) ([]s
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.SupplierAccount{}
 	for rows.Next() {
 		var a service.SupplierAccount

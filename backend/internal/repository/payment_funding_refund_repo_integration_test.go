@@ -25,6 +25,7 @@ func paymentFundingTestOrder(t *testing.T, user int64, amount int, code string) 
 }
 
 func TestPaymentFundingRefundRequiresOwnAvailableCashLot(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-source-%d@example.test", time.Now().UnixNano())
 	var user, lot int64
@@ -62,6 +63,7 @@ func TestPaymentFundingRefundRequiresOwnAvailableCashLot(t *testing.T) {
 }
 
 func TestPaymentFundingRefundReleasePaysInterveningDebtAndIsIdempotent(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-debt-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -99,6 +101,7 @@ func TestPaymentFundingRefundReleasePaysInterveningDebtAndIsIdempotent(t *testin
 }
 
 func TestPaymentChargebackRevokesOwnFundsAndRecordsDebt(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("chargeback-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -135,6 +138,7 @@ func TestPaymentChargebackRevokesOwnFundsAndRecordsDebt(t *testing.T) {
 }
 
 func TestPaymentFundingRefundExecuteUsesSourceEvenWhenDeductDisabled(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-execute-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -159,6 +163,7 @@ func TestPaymentFundingRefundExecuteUsesSourceEvenWhenDeductDisabled(t *testing.
 }
 
 func TestPaymentFundingRefundRejectsUnreconciledMigrationVersion(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-version-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -176,6 +181,7 @@ func TestPaymentFundingRefundRejectsUnreconciledMigrationVersion(t *testing.T) {
 }
 
 func TestPaymentFundingRefundSerializesWithConsumption(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-race-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -271,6 +277,7 @@ func (g *refundGatewayFake) QueryRefund(_ context.Context, req payment.RefundQue
 }
 
 func TestPaymentFundingRefundUnknownRetainsHoldAcrossQuery(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-gateway-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -312,6 +319,7 @@ func TestPaymentFundingRefundUnknownRetainsHoldAcrossQuery(t *testing.T) {
 }
 
 func TestPaymentFundingRefundCertainFailureRestoresSameLot(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-failure-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -346,6 +354,7 @@ func TestPaymentFundingRefundCertainFailureRestoresSameLot(t *testing.T) {
 }
 
 func TestPaymentFundingRefundPendingFailureReleasesAfterRestart(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-gateway-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -381,6 +390,7 @@ func TestPaymentFundingRefundPendingFailureReleasesAfterRestart(t *testing.T) {
 }
 
 func TestPaymentFundingRefundRecoversClaimAfterRestart(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-crash-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -430,6 +440,7 @@ func TestPaymentFundingRefundRecoversClaimAfterRestart(t *testing.T) {
 }
 
 func TestPaymentFundingRefundLatePendingCannotUndoRecoveredSuccess(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-race-gateway-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -465,6 +476,7 @@ func TestPaymentFundingRefundLatePendingCannotUndoRecoveredSuccess(t *testing.T)
 }
 
 func TestPaymentFundingRefundLegacyDeductsOnceBeforeProvider(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-legacy-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -503,6 +515,7 @@ func (u *unprovenRefundGateway) QueryRefund(ctx context.Context, r payment.Refun
 }
 
 func TestPaymentFundingRefundUnprovenSuccessRemainsHeld(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-unproven-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -532,6 +545,7 @@ func TestPaymentFundingRefundUnprovenSuccessRemainsHeld(t *testing.T) {
 }
 
 func TestPaymentFundingRefundManualReconciliation(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-manual-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -616,6 +630,7 @@ func TestPaymentFundingRefundManualReconciliation(t *testing.T) {
 }
 
 func TestPaymentFundingRefundManualFailedRestoresSource(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-manual-fail-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -661,6 +676,7 @@ func TestPaymentFundingRefundManualFailedRestoresSource(t *testing.T) {
 }
 
 func TestPaymentFundingRefundMismatchedProviderReferenceRemainsHeld(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-gateway-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -696,6 +712,7 @@ func TestPaymentFundingRefundMismatchedProviderReferenceRemainsHeld(t *testing.T
 }
 
 func TestPaymentFundingRefundLateSuccessCannotUndoManualFailure(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-race-gateway-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -743,6 +760,7 @@ func TestPaymentFundingRefundLateSuccessCannotUndoManualFailure(t *testing.T) {
 }
 
 func TestPaymentBonusRefundReservesBothOrderSources(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-bonus-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -787,6 +805,7 @@ func TestPaymentBonusRefundReservesBothOrderSources(t *testing.T) {
 }
 
 func TestPaymentBonusChargebackRevokesBothSources(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("chargeback-bonus-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -809,6 +828,7 @@ func TestPaymentBonusChargebackRevokesBothSources(t *testing.T) {
 }
 
 func TestPaymentBonusRefundMissingOwnGiftCannotUseAnotherGift(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-gift-source-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -827,6 +847,7 @@ func TestPaymentBonusRefundMissingOwnGiftCannotUseAnotherGift(t *testing.T) {
 }
 
 func TestPaymentBonusRefundReleaseRetiresDebtFromOriginalParts(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-bonus-debt-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -863,6 +884,7 @@ func TestPaymentBonusRefundReleaseRetiresDebtFromOriginalParts(t *testing.T) {
 }
 
 func TestPaymentBonusRefundRoundingTail(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	email := fmt.Sprintf("refund-rounding-%d@example.test", time.Now().UnixNano())
 	var user int64
@@ -896,6 +918,7 @@ func createRefundTestOrder(t *testing.T, user int64, email string, amount float6
 }
 
 func TestPaymentFundingRefundRejectsRestoredCashAfterChargeback(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix, receipt, buyer, _, admin, lot, _ := paymentRefundCaptureFixture(t)
 	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(buyer).SetUserEmail(suffix + "@example.test").SetUserName(suffix).SetAmount(10).SetPayAmount(10).SetFeeRate(0).SetRechargeCode(suffix).SetOutTradeNo(suffix).SetPaymentType("stripe").SetPaymentTradeNo(suffix).SetOrderType("balance").SetStatus("COMPLETED").SetPaidAt(time.Now()).SetExpiresAt(time.Now().Add(time.Hour)).SetClientIP("127.0.0.1").SetSrcHost("example.test").Save(ctx)
@@ -960,6 +983,7 @@ func paymentRefundCaptureFixture(t *testing.T) (string, string, int64, int64, in
 }
 
 func TestPaymentRefundAndChargebackSerializeAgainstOrderCap(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	email := uuid.NewString() + "@test.invalid"

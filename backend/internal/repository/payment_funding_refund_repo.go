@@ -250,14 +250,12 @@ func (r *userRepository) SettlePaymentRefund(ctx context.Context, attempt string
 	}
 	total, paid := decimal.Zero, decimal.Zero
 	for _, p := range parts {
-		if p.originID != strconv.FormatInt(order, 10) || !((p.lot == lot && p.kind == "cash_paid" && p.origin == "payment_order") || (p.kind == "promotional" && p.origin == "payment_bonus")) || p.lotReserved.LessThan(p.amount) || p.remaining.LessThan(p.amount) || !p.captured.IsZero() || !p.released.IsZero() {
+		if p.originID != strconv.FormatInt(order, 10) || ((p.lot != lot || p.kind != "cash_paid" || p.origin != "payment_order") && (p.kind != "promotional" || p.origin != "payment_bonus")) || p.lotReserved.LessThan(p.amount) || p.remaining.LessThan(p.amount) || !p.captured.IsZero() || !p.released.IsZero() {
 			return ErrFundingInvariant
 		}
 		total = total.Add(p.amount)
-		remove := decimal.Zero
-		if confirm {
-			remove = p.amount
-		} else {
+		remove := p.amount
+		if !confirm {
 			remove = decimal.Min(p.amount, debt.Sub(paid))
 			paid = paid.Add(remove)
 		}
@@ -535,7 +533,7 @@ func (r *userRepository) ListPendingFundingRefunds(ctx context.Context, limit in
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []service.FundingRefundReviewItem{}
 	for rows.Next() {
 		var item service.FundingRefundReviewItem

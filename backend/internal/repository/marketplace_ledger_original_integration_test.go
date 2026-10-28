@@ -11,6 +11,7 @@ import (
 )
 
 func TestLedgerOriginalReferenceIsImmutableAndPartOfIdempotency(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	repo := NewMarketplaceLedgerRepository()
 	op := uuid.NewString()

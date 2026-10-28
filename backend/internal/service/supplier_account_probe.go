@@ -111,7 +111,7 @@ func probeOpenAIModels(ctx context.Context, baseURL, secret string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return errors.New("provider rejected health check")
 	}

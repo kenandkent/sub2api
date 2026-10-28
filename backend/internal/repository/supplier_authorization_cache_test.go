@@ -14,7 +14,7 @@ import (
 func TestSupplierAuthorizationCacheOneTimeAndExpiry(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	a := NewSupplierAuthorizationCache(client)
 	b := NewSupplierAuthorizationCache(client)
 	ctx := context.Background()

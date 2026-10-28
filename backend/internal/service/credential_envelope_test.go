@@ -2,14 +2,20 @@ package service
 
 import (
 	"bytes"
-	"testing"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestCredentialEnvelopeMissingKeysFailClosed(t *testing.T) {
 	var envelope *CredentialEnvelope
-	require.NotPanics(t,func(){ _,err:=envelope.Seal("openai",1,1,[]byte("secret"));require.ErrorIs(t,err,ErrCredentialEnvelope) })
-	require.NotPanics(t,func(){ _,err:=envelope.Open("openai",1,1,EncryptedCredential{Version:1});require.ErrorIs(t,err,ErrCredentialEnvelope) })
+	require.NotPanics(t, func() {
+		_, err := envelope.Seal("openai", 1, 1, []byte("secret"))
+		require.ErrorIs(t, err, ErrCredentialEnvelope)
+	})
+	require.NotPanics(t, func() {
+		_, err := envelope.Open("openai", 1, 1, EncryptedCredential{Version: 1})
+		require.ErrorIs(t, err, ErrCredentialEnvelope)
+	})
 }
 
 func TestCredentialEnvelopeAuthenticationAndRotation(t *testing.T) {

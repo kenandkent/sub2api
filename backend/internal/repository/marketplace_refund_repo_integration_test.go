@@ -53,6 +53,7 @@ func marketplaceRefundFixture(t *testing.T) (string, string, int64, int64, int64
 }
 
 func TestMarketplaceRefundPreservesFundingAndClosesRoundingTail(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, buyer, owner, admin, lot, original := marketplaceRefundFixture(t)
 	repo := NewMarketplaceRefundRepository(integrationDB)
@@ -106,6 +107,7 @@ func refundPayoutFixture(t *testing.T) (string, string, int64, int64, *SupplierP
 }
 
 func TestMarketplaceRefundAfterPaidCreatesDebt(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, owner, admin, payouts, payout := refundPayoutFixture(t)
 	_, err := payouts.Action(ctx, service.PayoutAction{PayoutID: payout.ID, ActorID: admin, OperationID: s + ":start", Action: "start"})
@@ -124,6 +126,7 @@ func TestMarketplaceRefundAfterPaidCreatesDebt(t *testing.T) {
 }
 
 func TestMarketplaceRefundCompetesWithPayoutStart(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, owner, admin, payouts, payout := refundPayoutFixture(t)
 	var wg sync.WaitGroup
@@ -159,6 +162,7 @@ func TestMarketplaceRefundCompetesWithPayoutStart(t *testing.T) {
 }
 
 func TestMarketplaceRefundRepaysBuyerDebtBeforeRestoringLot(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, buyer, _, admin, lot, _ := marketplaceRefundFixture(t)
 	_, err := integrationDB.ExecContext(ctx, `UPDATE wallet_funding_states SET debt=2 WHERE user_id=$1`, buyer)
@@ -178,6 +182,7 @@ func TestMarketplaceRefundRepaysBuyerDebtBeforeRestoringLot(t *testing.T) {
 }
 
 func TestMarketplaceRefundNeverReversesAnotherCapturesPending(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, _, owner, admin, _, _ := marketplaceRefundFixture(t)
 	_, err := integrationDB.ExecContext(ctx, `UPDATE marketplace_captures SET supplier_debt_offset=1 WHERE receipt_id=$1`, receipt)
@@ -193,6 +198,7 @@ func TestMarketplaceRefundNeverReversesAnotherCapturesPending(t *testing.T) {
 }
 
 func TestMarketplaceRefundRejectsNonAdminChangedReplayAndZeroCharge(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, buyer, _, admin, _, _ := marketplaceRefundFixture(t)
 	repo := NewMarketplaceRefundRepository(integrationDB)
@@ -209,6 +215,7 @@ func TestMarketplaceRefundRejectsNonAdminChangedReplayAndZeroCharge(t *testing.T
 }
 
 func TestPartialRefundThenMaturityMovesOnlyUnrefundedPending(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, _, owner, admin, _, _ := marketplaceRefundFixture(t)
 	refund := NewMarketplaceRefundRepository(integrationDB)
@@ -231,6 +238,7 @@ func TestPartialRefundThenMaturityMovesOnlyUnrefundedPending(t *testing.T) {
 }
 
 func TestMarketplaceRefundRejectsReversedCapture(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, _, _, admin, _, _ := marketplaceRefundFixture(t)
 	_, err := integrationDB.ExecContext(ctx, `UPDATE marketplace_captures SET status='reversed' WHERE receipt_id=$1`, receipt)
@@ -239,6 +247,7 @@ func TestMarketplaceRefundRejectsReversedCapture(t *testing.T) {
 }
 
 func TestMarketplaceRefundPreservesProcessingPayoutReservation(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, owner, admin, payouts, payout := refundPayoutFixture(t)
 	_, err := payouts.Action(ctx, service.PayoutAction{PayoutID: payout.ID, ActorID: admin, OperationID: s + ":start", Action: "start"})
@@ -253,6 +262,7 @@ func TestMarketplaceRefundPreservesProcessingPayoutReservation(t *testing.T) {
 }
 
 func TestMarketplaceRefundCancelsApprovedPayoutBeforeStart(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, owner, admin, payouts, payout := refundPayoutFixture(t)
 	require.NoError(t, NewMarketplaceRefundRepository(integrationDB).Refund(ctx, receipt, admin, decimal.NewFromInt(3), s+":refund"))
@@ -269,6 +279,7 @@ func TestMarketplaceRefundCancelsApprovedPayoutBeforeStart(t *testing.T) {
 }
 
 func TestMarketplaceRefundReasonIsImmutableAndBoundToReplay(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, _, _, admin, _, _ := marketplaceRefundFixture(t)
 	repo := NewMarketplaceRefundRepository(integrationDB)

@@ -40,7 +40,7 @@ func (r *MarketplaceRefundRepository) refund(ctx context.Context, receipt string
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if !lockPayoutAdmin(ctx, tx, actor) {
 		return service.ErrMarketplaceRefundInvalid
 	}
@@ -110,13 +110,13 @@ func (r *MarketplaceRefundRepository) refund(ctx context.Context, receipt string
 	for rows.Next() {
 		var a allocation
 		if err = rows.Scan(&a.id, &a.lot, &a.open); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		allocations = append(allocations, a)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return err
 	}

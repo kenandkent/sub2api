@@ -34,7 +34,7 @@ func fundingLock(ctx context.Context, tx *sql.Tx, user int64) (decimal.Decimal, 
 	if err != nil {
 		return b, h, debt, nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	lots := []service.FundingLot{}
 	total, reserved := decimal.Zero, decimal.Zero
 	for rows.Next() {
@@ -175,14 +175,14 @@ func (*WalletFundingRepository) SettleHold(ctx context.Context, tx *sql.Tx, user
 	for rows.Next() {
 		var a alloc
 		if err = rows.Scan(&a.id, &a.lot, &a.open); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		allocations = append(allocations, a)
 		total = total.Add(a.open)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return err
 	}

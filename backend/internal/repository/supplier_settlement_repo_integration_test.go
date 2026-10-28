@@ -12,6 +12,7 @@ import (
 )
 
 func TestMaturityConcurrentRepeatAndFreeze(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	receipt := uuid.NewString()
@@ -29,7 +30,7 @@ func TestMaturityConcurrentRepeatAndFreeze(t *testing.T) {
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_requests(id,buyer_user_id,api_key_id,group_id,request_digest,status) VALUES($1,$2,$3,$4,'test','settled')`, receipt, buyer, key, group)
 	require.NoError(t, err)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO marketplace_attempts(receipt_id,ordinal,account_id,offer_id,owner_user_id,quote,quote_digest,status) VALUES($1,1,$2,$3,$4,'{}','test','settled') RETURNING id`, receipt, account, offer, owner).Scan(&attempt))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO marketplace_captures(receipt_id,attempt_id,owner_user_id,consumer_charge,supplier_net,platform_fee,supplier_debt_offset,refunded_charge,refunded_net,refunded_fee,matures_at,fingerprint) VALUES($1,$2,$3,12,10,2,3,2.4,2,.4,now()-interval '1 hour','test') RETURNING id`, receipt, attempt, owner).Scan(&capture))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO marketplace_captures(receipt_id,attempt_id,owner_user_id,consumer_charge,supplier_net,platform_fee,supplier_debt_offset,refunded_charge,refunded_net,refunded_fee,matures_at,fingerprint,buyer_balance_after) VALUES($1,$2,$3,12,10,2,3,2.4,2,.4,now()-interval '1 hour','test',0) RETURNING id`, receipt, attempt, owner).Scan(&capture))
 	repo := NewSupplierSettlementRepository(integrationDB)
 	applied, err := repo.MatureCapture(ctx, capture, time.Now())
 	require.NoError(t, err)

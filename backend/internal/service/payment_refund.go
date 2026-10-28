@@ -51,7 +51,7 @@ func (s *PaymentService) RecordExternalChargeback(ctx context.Context, orderID, 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
 	if err = repo.RecordPaymentChargeback(txCtx, orderID, userID, actorID, amount, eventID, evidence); err != nil {
 		return err
@@ -87,7 +87,7 @@ func (s *PaymentService) claimRefund(ctx context.Context, p *RefundPlan) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
 	if p == nil || p.Order == nil || p.Order.ID != p.OrderID || math.IsNaN(p.RefundAmount) || math.IsInf(p.RefundAmount, 0) || p.RefundAmount <= 0 {
 		return infraerrors.BadRequest("INVALID_AMOUNT", "invalid refund plan")
@@ -204,7 +204,7 @@ func (s *PaymentService) confirmFundingRefund(ctx context.Context, p *RefundPlan
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
 	claimed, err := tx.PaymentOrder.Update().Where(paymentorder.IDEQ(p.OrderID), paymentorder.StatusEQ(OrderStatusRefunding)).SetStatus(OrderStatusRefunding).Save(txCtx)
 	if err != nil {
@@ -243,7 +243,7 @@ func (s *PaymentService) releaseFundingRefund(ctx context.Context, p *RefundPlan
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
 	status := OrderStatusCompleted
 	if p.Order.Status == OrderStatusRefundRequested {
@@ -817,7 +817,7 @@ func (s *PaymentService) finalizePendingRefundSuccess(ctx context.Context, p *Re
 	if err != nil {
 		return nil, fmt.Errorf("begin refund finalization: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
 
 	claimed, err := tx.PaymentOrder.Update().
@@ -1095,7 +1095,7 @@ func (s *PaymentService) markRefundNeedsReview(ctx context.Context, oid int64, a
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
 	current, err := tx.PaymentOrder.Get(txCtx, oid)
 	if err != nil {

@@ -131,7 +131,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	owner := int64(731007)
 	acct.OwnerUserID = &owner
 	snap := accountReadableSnapshotJSON(acct)
-	assert.NotContains(t,string(snap),"731007","supplier ownership must not be copied to plugin metadata")
+	assert.NotContains(t, string(snap), "731007", "supplier ownership must not be copied to plugin metadata")
 	require.NotNil(t, snap)
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(snap, &m))

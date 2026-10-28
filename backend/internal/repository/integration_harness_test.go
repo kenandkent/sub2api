@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -39,7 +40,10 @@ var (
 	integrationEntClient *dbent.Client
 	integrationRedis     *redisclient.Client
 
-	redisNamespaceSeq uint64
+	redisNamespaceSeq      uint64
+	integrationAdminDB     *sql.DB
+	integrationDSN         string
+	integrationDatabaseSeq uint64
 )
 
 func TestMain(m *testing.M) {
@@ -101,6 +105,30 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Clone a pristine migrated database before any test can create fixtures.
+	// Some tests need committed transactions and immutable rows, so rollback
+	// and row-by-row cleanup cannot reliably isolate them.
+	if err := integrationDB.Close(); err != nil {
+		log.Fatalf("close migrated database: %v", err)
+	}
+	parsedDSN, err := url.Parse(dsn)
+	if err != nil {
+		log.Fatalf("parse postgres dsn: %v", err)
+	}
+	parsedDSN.Path = "/postgres"
+	integrationAdminDB, err = openSQLWithRetry(ctx, parsedDSN.String(), 30*time.Second)
+	if err != nil {
+		log.Fatalf("open postgres administration database: %v", err)
+	}
+	if _, err := integrationAdminDB.ExecContext(ctx, `CREATE DATABASE sub2api_test_template TEMPLATE sub2api_test`); err != nil {
+		log.Fatalf("clone migrated test database: %v", err)
+	}
+	integrationDSN = dsn
+	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
+	if err != nil {
+		log.Fatalf("reopen test database: %v", err)
+	}
+
 	// 创建 ent client 用于集成测试
 	drv := entsql.OpenDB(dialect.Postgres, integrationDB)
 	integrationEntClient = dbent.NewClient(dbent.Driver(drv))
@@ -129,6 +157,7 @@ func TestMain(m *testing.M) {
 
 	_ = integrationEntClient.Close()
 	_ = integrationRedis.Close()
+	_ = integrationAdminDB.Close()
 	_ = integrationDB.Close()
 
 	os.Exit(code)
@@ -198,6 +227,36 @@ func pingWithTimeout(ctx context.Context, db *sql.DB, timeout time.Duration) err
 	pingCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return db.PingContext(pingCtx)
+}
+
+// isolateCommittedIntegrationTest gives a serial top-level test a fresh copy
+// of the migrated database. Do not call t.Parallel in these tests: the shared
+// harness pointers are temporarily switched until all subtests finish.
+func isolateCommittedIntegrationTest(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	name := fmt.Sprintf("sub2api_financial_%d", atomic.AddUint64(&integrationDatabaseSeq, 1))
+	_, err := integrationAdminDB.ExecContext(ctx, `CREATE DATABASE `+name+` TEMPLATE sub2api_test_template`)
+	require.NoError(t, err, "create isolated financial test database")
+
+	previousDB, previousClient := integrationDB, integrationEntClient
+	var isolatedDB *sql.DB
+	t.Cleanup(func() {
+		integrationDB, integrationEntClient = previousDB, previousClient
+		if isolatedDB != nil {
+			require.NoError(t, isolatedDB.Close(), "close isolated financial test database")
+		}
+		_, err := integrationAdminDB.ExecContext(context.Background(), `DROP DATABASE `+name)
+		require.NoError(t, err, "drop isolated financial test database")
+	})
+
+	parsedDSN, err := url.Parse(integrationDSN)
+	require.NoError(t, err)
+	parsedDSN.Path = "/" + name
+	isolatedDB, err = openSQLWithRetry(ctx, parsedDSN.String(), 30*time.Second)
+	require.NoError(t, err, "open isolated financial test database")
+	integrationDB = isolatedDB
+	integrationEntClient = dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, isolatedDB)))
 }
 
 func testTx(t *testing.T) *sql.Tx {

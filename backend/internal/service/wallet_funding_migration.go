@@ -19,7 +19,9 @@ type WalletFundingMigrationRepository interface {
 	GetBalance(context.Context, int64) (*MarketplaceFundingBalance, error)
 }
 
-type WalletFundingMigrationService struct{ repo WalletFundingMigrationRepository }
+type WalletFundingMigrationService struct {
+	repo WalletFundingMigrationRepository
+}
 
 func NewWalletFundingMigrationService(repo WalletFundingMigrationRepository) *WalletFundingMigrationService {
 	return &WalletFundingMigrationService{repo: repo}

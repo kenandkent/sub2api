@@ -180,7 +180,12 @@ func TestOpenCodeFreeCancelStopsUpstreamAndMarksUnknown(t *testing.T) {
 		w.Header().Set("X-Sub2api-Transport-Result", "upstream")
 		w.Header().Set("X-Sub2api-Dispatched", "true")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"))
-		w.(http.Flusher).Flush()
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("response writer does not support flushing")
+			return
+		}
+		flusher.Flush()
 		close(started)
 		<-r.Context().Done()
 		close(ended)

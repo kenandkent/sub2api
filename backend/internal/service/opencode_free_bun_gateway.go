@@ -57,7 +57,7 @@ func formatOpenCodeFreeSession(unixMillis int64, entropy [14]byte) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "ses_%012x", descending)
 	for _, v := range entropy {
-		s.WriteByte(chars[int(v)%len(chars)])
+		_ = s.WriteByte(chars[int(v)%len(chars)])
 	}
 	return s.String()
 }
@@ -152,7 +152,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 	if err != nil {
 		return nil, freeReject(c, http.StatusBadGateway, "OpenCode free transport failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	source, dispatched := resp.Header.Get("X-Sub2api-Transport-Result"), resp.Header.Get("X-Sub2api-Dispatched")
 	if source != "upstream" || dispatched != "true" {
 		return nil, freeReject(c, http.StatusBadGateway, "OpenCode free transport failed")

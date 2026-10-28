@@ -16,6 +16,7 @@ import (
 )
 
 func TestMarketplaceGatewayReserveReplayAndVoid(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	var buyer, group, key int64
@@ -46,6 +47,7 @@ func TestMarketplaceGatewayReserveReplayAndVoid(t *testing.T) {
 }
 
 func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	var buyer, owner, group, key, account, offer int64
@@ -197,6 +199,7 @@ func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
 }
 
 func TestMarketplaceGatewayZeroBudgetRejectsDebt(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	var buyer, group, key int64

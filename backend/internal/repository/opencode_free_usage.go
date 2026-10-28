@@ -102,7 +102,7 @@ func (r *usageBillingRepository) SettleOpenCodeFreeUsage(ctx context.Context, re
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var state string
 	var command, logData []byte
 	err = tx.QueryRowContext(ctx, `SELECT state,billing_command,usage_log FROM opencode_free_attempts WHERE request_id=$1 FOR UPDATE`, requestID).Scan(&state, &command, &logData)
@@ -164,13 +164,13 @@ func (r *usageBillingRepository) RecoverOpenCodeFreeUsage(ctx context.Context) (
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}

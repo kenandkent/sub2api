@@ -60,7 +60,7 @@ func (r *SupplierFinanceRepository) Earnings(ctx context.Context, id int64, f se
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var v service.SupplierEarning
 		if err = rows.Scan(&v.OperationID, &v.Date, &v.AccountID, &v.AccountName, &v.Model, &v.ConsumerCharge, &v.PlatformFee, &v.SupplierNet, &v.Status, &v.RefundAmount); err != nil {
@@ -105,7 +105,7 @@ func (r *SupplierFinanceRepository) StatementEntries(ctx context.Context, owner,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var v service.SupplierStatementEntry
 		if err = rows.Scan(&v.OperationID, &v.Date, &v.AccountID, &v.AccountName, &v.Model, &v.Kind, &v.ConsumerCharge, &v.PlatformFee, &v.SupplierNet); err != nil {
@@ -131,7 +131,7 @@ func (r *SupplierFinanceRepository) Statements(ctx context.Context, id int64, p,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		v, e := scanStatement(rows)
 		if e != nil {
@@ -165,7 +165,7 @@ func (r *SupplierFinanceRepository) generate(ctx context.Context, actor, id int6
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if id <= 0 || month.Location() != time.UTC || month.Day() != 1 || month.Hour() != 0 || month.Minute() != 0 || month.Second() != 0 || month.Nanosecond() != 0 {
 		return nil, service.ErrSupplierFinanceInvalid
 	}
@@ -265,13 +265,13 @@ func (r *SupplierFinanceRepository) Reconciliation(ctx context.Context, status s
 		var s string
 		var n int64
 		if err = rows.Scan(&s, &n); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		out.Totals.ReceiptStatuses[s] = n
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +291,7 @@ func (r *SupplierFinanceRepository) Reconciliation(ctx context.Context, status s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var item service.ReconciliationItem
 		var diff sql.NullString

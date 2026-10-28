@@ -16,6 +16,7 @@ import (
 )
 
 func TestMarketplaceBillingReserveInsufficientIsAtomic(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	var user, key, group int64
@@ -41,6 +42,7 @@ func TestMarketplaceBillingReserveInsufficientIsAtomic(t *testing.T) {
 }
 
 func TestMarketplaceBillingCaptureAtomicReplayAndConservation(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	var buyer, owner, key, group, account, offer int64

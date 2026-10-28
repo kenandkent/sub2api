@@ -14,6 +14,7 @@ import (
 )
 
 func TestSupplierAccountRepositoryLifecycle(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	var owner, other int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES($1,'hash') RETURNING id`, uniqueTestValue(t, "supplier-account")+"@example.com").Scan(&owner))

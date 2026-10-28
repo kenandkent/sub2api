@@ -11,6 +11,7 @@ import (
 )
 
 func TestSupplierOverviewIncludesDashboardValues(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	suffix := uuid.NewString()
 	var owner, account int64
@@ -37,6 +38,7 @@ func TestSupplierOverviewIncludesDashboardValues(t *testing.T) {
 }
 
 func TestSupplierAccountListUsageMatchesCapturedDetail(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	_,_,_,owner,_,_,_:=paymentRefundCaptureFixture(t)
 	repo:=NewSupplierAccountRepository(integrationDB,nil)
 	items,_,err:=repo.List(context.Background(),owner,service.SupplierAccountFilter{Page:1,PageSize:20})

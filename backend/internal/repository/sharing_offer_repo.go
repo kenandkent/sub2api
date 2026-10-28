@@ -77,14 +77,14 @@ func validOAuthRoutingID(id string) bool {
 // An unsuccessful or ambiguous exchange must never call this method.
 func (r *SharingOfferRepository) SaveSupplierAuthorization(ctx context.Context, owner int64, purpose string, target int64, provider string, token *openai.TokenResponse) (int64, error) {
 	operation := service.SupplierAuthorizationOperationID(ctx)
-	if r == nil || r.db == nil || r.envelope == nil || owner <= 0 || operation == "" || provider != "openai" || token == nil || strings.TrimSpace(token.AccessToken) == "" || token.ExpiresIn <= 0 || token.ExpiresIn > 31536000 || !((purpose == "create" && target == 0) || (purpose == "reauthorize" && target > 0)) {
+	if r == nil || r.db == nil || r.envelope == nil || owner <= 0 || operation == "" || provider != "openai" || token == nil || strings.TrimSpace(token.AccessToken) == "" || token.ExpiresIn <= 0 || token.ExpiresIn > 31536000 || ((purpose != "create" || target != 0) && (purpose != "reauthorize" || target <= 0)) {
 		return 0, service.ErrSupplierAuthorizationFailed
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var active bool
 	err = tx.QueryRowContext(ctx, `SELECT status = 'active' FROM supplier_profiles WHERE user_id = $1 FOR SHARE`, owner).Scan(&active)
 	if err != nil || !active {

@@ -46,9 +46,7 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 				continue
 			}
 			key, value, _ := strings.Cut(line, ":")
-			if strings.HasPrefix(value, " ") {
-				value = value[1:]
-			}
+			value = strings.TrimPrefix(value, " ")
 			switch key {
 			case "data":
 				data = append(data, value)
@@ -56,14 +54,14 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 				if value != "" && value != "message" {
 					return errors.New("unsupported SSE event")
 				}
-				metadata.WriteString(line)
-				metadata.WriteByte('\n')
+				_, _ = metadata.WriteString(line)
+				_ = metadata.WriteByte('\n')
 			case "id":
 				if strings.ContainsRune(value, 0) || !utf8.ValidString(value) {
 					return errors.New("invalid SSE id")
 				}
-				metadata.WriteString(line)
-				metadata.WriteByte('\n')
+				_, _ = metadata.WriteString(line)
+				_ = metadata.WriteByte('\n')
 			default:
 				return fmt.Errorf("unsupported SSE field %q", key)
 			}
@@ -294,8 +292,8 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 		if event.Len()+len(line)+1 > maxEvent {
 			return nil, errors.New("event limit exceeded")
 		}
-		event.WriteString(line)
-		event.WriteByte('\n')
+		_, _ = event.WriteString(line)
+		_ = event.WriteByte('\n')
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err

@@ -72,13 +72,13 @@ func (r *SupplierAccountRepository) Get(ctx context.Context, user, id int64) (*s
 	for rows.Next() {
 		var review service.SupplierAccountReview
 		if err = rows.Scan(&review.Status, &review.Reason, &review.CreatedAt); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		a.Reviews = append(a.Reviews, review)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (r *SupplierAccountRepository) Create(ctx context.Context, user int64, key,
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err = activeSupplier(ctx, tx, user); err != nil {
 		return nil, err
 	}
@@ -191,7 +191,7 @@ func (r *SupplierAccountRepository) Patch(ctx context.Context, user, id int64, i
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err = activeSupplier(ctx, tx, user); err != nil {
 		return nil, err
 	}
@@ -248,7 +248,7 @@ func (r *SupplierAccountRepository) Transition(ctx context.Context, user, id, ve
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err = activeSupplier(ctx, tx, user); err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func (r *SupplierAccountRepository) List(ctx context.Context, user int64, f serv
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.SupplierAccountDetail{}
 	for rows.Next() {
 		a, e := scanAccount(rows)
@@ -326,7 +326,7 @@ func (r *SupplierAccountRepository) List(ctx context.Context, user int64, f serv
 	if err = rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	if len(out) == 0 {
 		return out, total, nil
 	}
@@ -342,7 +342,7 @@ func (r *SupplierAccountRepository) List(ctx context.Context, user int64, f serv
 	if err != nil {
 		return nil, 0, err
 	}
-	defer usageRows.Close()
+	defer func() { _ = usageRows.Close() }()
 	for usageRows.Next() {
 		var id int64
 		var usage service.SupplierAccountUsage
@@ -372,7 +372,7 @@ func (r *SupplierAccountRepository) Review(ctx context.Context, admin, id, versi
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var owner, account, current int64
 	var previous string
 	err = tx.QueryRowContext(ctx, `SELECT owner_user_id,account_id,version,review_status FROM sharing_offers WHERE id=$1 FOR UPDATE`, id).Scan(&owner, &account, &current, &previous)
@@ -438,7 +438,7 @@ func (r *SupplierAccountRepository) ReplaceCredentials(ctx context.Context, user
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err = activeSupplier(ctx, tx, user); err != nil {
 		return nil, err
 	}
@@ -531,7 +531,7 @@ func (r *SupplierAccountRepository) Overview(ctx context.Context, user int64) (*
 		var id int64
 		var online bool
 		if err = accounts.Scan(&id, &online); err != nil {
-			accounts.Close()
+			_ = accounts.Close()
 			return nil, err
 		}
 		result.AccountIDs = append(result.AccountIDs, id)
@@ -540,7 +540,7 @@ func (r *SupplierAccountRepository) Overview(ctx context.Context, user int64) (*
 		}
 	}
 	err = accounts.Err()
-	accounts.Close()
+	_ = accounts.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +556,7 @@ func (r *SupplierAccountRepository) Overview(ctx context.Context, user int64) (*
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var d service.SupplierDailyUsage
 		if err = rows.Scan(&d.Date, &d.Requests, &d.InputTokens, &d.OutputTokens, &d.ConsumerCharge, &d.SupplierNet); err != nil {
@@ -575,7 +575,7 @@ func (r *SupplierAccountRepository) ReserveProbe(ctx context.Context, user, id i
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err = activeSupplier(ctx, tx, user); err != nil {
 		return "", err
 	}
@@ -633,7 +633,7 @@ func (r *SupplierAccountRepository) ListAdminOffers(ctx context.Context, f servi
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := []service.AdminSupplierOffer{}
 	for rows.Next() {
 		var a service.AdminSupplierOffer

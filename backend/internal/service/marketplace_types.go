@@ -11,7 +11,7 @@ import (
 // Money is an exact decimal value encoded as a JSON string.
 type Money struct{ decimal.Decimal }
 
-func (m Money) MarshalJSON() ([]byte, error) { return json.Marshal(m.Decimal.String()) }
+func (m Money) MarshalJSON() ([]byte, error) { return json.Marshal(m.String()) }
 func (m *Money) UnmarshalJSON(data []byte) error {
 	var value string
 	if err := json.Unmarshal(data, &value); err != nil {

@@ -14,6 +14,7 @@ import (
 )
 
 func TestWalletFundingSelfSpendLedgerReducesAvailable(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var userID int64
@@ -29,6 +30,7 @@ func TestWalletFundingSelfSpendLedgerReducesAvailable(t *testing.T) {
 }
 
 func TestWalletFundingLegacyMigrationAndBalanceWrites(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var userID int64
@@ -54,6 +56,7 @@ func TestWalletFundingLegacyMigrationAndBalanceWrites(t *testing.T) {
 }
 
 func TestWalletFundingLegacyUnmappedHoldFailsClosed(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var userID int64
@@ -63,6 +66,7 @@ func TestWalletFundingLegacyUnmappedHoldFailsClosed(t *testing.T) {
 }
 
 func TestWalletFundingLegacyHoldAndOverdraftDoNotStealReservedMoney(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var userID int64
@@ -91,6 +95,7 @@ func TestWalletFundingLegacyHoldAndOverdraftDoNotStealReservedMoney(t *testing.T
 }
 
 func TestWalletFundingLegacyCashNeedsMatchingPaidOrder(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var userID int64
@@ -116,6 +121,7 @@ func TestWalletFundingLegacyCashNeedsMatchingPaidOrder(t *testing.T) {
 }
 
 func TestWalletFundingLegacyMapsExistingBatchHoldExactlyOnce(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	tx := testTx(t)
 	var userID int64
@@ -144,6 +150,7 @@ func TestWalletFundingLegacyMapsExistingBatchHoldExactlyOnce(t *testing.T) {
 }
 
 func TestLegacyPaymentBonusKeepsCashAndGiftSeparate(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	for _, tc := range []struct {
 		name                                 string
 		amount, bonus, pay, debt, cash, gift int64

@@ -160,13 +160,13 @@ func (w *MarketplaceBackgroundWorker) closeMonths(ctx context.Context) error {
 	for rows.Next() {
 		var p period
 		if err = rows.Scan(&p.id, &p.month); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		periods = append(periods, p)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return err
 	}

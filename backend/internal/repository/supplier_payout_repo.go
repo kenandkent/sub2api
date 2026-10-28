@@ -65,7 +65,7 @@ func (r *SupplierPayoutRepository) CreateDestination(ctx context.Context, owner 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	fp := payoutFingerprint([]any{"destination", owner, mask})
 	var result service.PayoutDestination
 	found, err := payoutOp(ctx, tx, op, fp, &result)
@@ -133,7 +133,7 @@ func (r *SupplierPayoutRepository) VerifyDestination(ctx context.Context, id, ad
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	fp := payoutFingerprint([]any{"verify", id, admin, evidence})
 	var d service.PayoutDestination
 	found, err := payoutOp(ctx, tx, op, fp, &d)
@@ -160,7 +160,7 @@ func (r *SupplierPayoutRepository) ListDestinations(ctx context.Context, owner i
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.PayoutDestination{}
 	for rows.Next() {
 		var d service.PayoutDestination
@@ -204,7 +204,7 @@ func (r *SupplierPayoutRepository) Request(ctx context.Context, owner, destinati
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	fp := payoutFingerprint([]any{"request", owner, destination, amount.String()})
 	var result service.SupplierPayout
 	found, err := payoutOp(ctx, tx, op, fp, &result)
@@ -273,7 +273,7 @@ func (r *SupplierPayoutRepository) Action(ctx context.Context, a service.PayoutA
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if a.Action != "cancel" && !isPayoutAdmin(ctx, tx, a.ActorID) {
 		return nil, service.ErrPayoutInvalid
 	}
@@ -399,13 +399,13 @@ func (r *SupplierPayoutRepository) CancelPreProcessingTx(ctx context.Context, tx
 	for rows.Next() {
 		var p item
 		if err = rows.Scan(&p.id, &p.amount); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		items = append(items, p)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return err
 	}
@@ -424,7 +424,7 @@ func (r *SupplierPayoutRepository) List(ctx context.Context, owner int64) ([]ser
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.SupplierPayout{}
 	for rows.Next() {
 		p, err := scanPayout(rows)
@@ -453,7 +453,7 @@ func (r *SupplierPayoutRepository) ListAdmin(ctx context.Context, actor int64) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.SupplierPayout{}
 	for rows.Next() {
 		p, err := scanPayout(rows)
@@ -499,7 +499,7 @@ func (r *SupplierPayoutRepository) ListAdminDestinations(ctx context.Context, ac
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.AdminPayoutDestination{}
 	for rows.Next() {
 		var d service.AdminPayoutDestination
@@ -520,7 +520,7 @@ func (r *SupplierPayoutRepository) RevealDestination(ctx context.Context, id, ac
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	fp := payoutFingerprint([]any{"reveal", id, actor, reason})
 	var result struct {
 		ID int64 `json:"id"`
@@ -599,7 +599,7 @@ func (r *SupplierPayoutRepository) SetPayoutFrozen(ctx context.Context, cmd serv
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	fp := payoutFingerprint([]any{"freeze", cmd.SupplierID, cmd.ActorID, cmd.ExpectedVersion, cmd.Frozen, cmd.Reason})
 	var result service.PayoutFreezeResult
 	found, err := payoutOp(ctx, tx, cmd.OperationID, fp, &result)
@@ -612,7 +612,9 @@ func (r *SupplierPayoutRepository) SetPayoutFrozen(ctx context.Context, cmd serv
 	if found {
 		return &result, tx.Commit()
 	}
-	if _,err=tx.ExecContext(ctx,`INSERT INTO supplier_wallets(user_id) VALUES($1) ON CONFLICT(user_id,currency) DO NOTHING`,cmd.SupplierID);err!=nil{return nil,err}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO supplier_wallets(user_id) VALUES($1) ON CONFLICT(user_id,currency) DO NOTHING`, cmd.SupplierID); err != nil {
+		return nil, err
+	}
 	w, err := lockPayoutWallet(ctx, tx, cmd.SupplierID)
 	if err != nil {
 		return nil, err

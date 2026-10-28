@@ -12,6 +12,7 @@ import (
 )
 
 func TestSupplierAuthorizationOperationAtomicClaim(t *testing.T) {
+	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	// The temporary table mirrors migration 257 when it has not yet been merged.
 	integrationDB.SetMaxOpenConns(1)

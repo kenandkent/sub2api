@@ -23,7 +23,7 @@ func (r *SupplierSettlementRepository) MatureCapture(ctx context.Context, id int
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var owner int64
 	if err = tx.QueryRowContext(ctx, `SELECT owner_user_id FROM marketplace_captures WHERE id=$1`, id).Scan(&owner); err != nil {
 		return false, err
@@ -81,13 +81,13 @@ func (r *SupplierSettlementRepository) MatureDue(ctx context.Context, now time.T
 	for rows.Next() {
 		var id int64
 		if err = rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		ids = append(ids, id)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return 0, err
 	}

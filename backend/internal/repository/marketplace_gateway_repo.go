@@ -51,7 +51,7 @@ func (r *MarketplaceGatewayRepository) PrepareAndReserve(ctx context.Context, c 
 	if err != nil {
 		return nil, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err = lockMarketplaceBuyer(ctx, tx, c.BuyerUserID, c.APIKeyID, c.GroupID); err != nil {
 		return nil, false, err
 	}
@@ -141,7 +141,7 @@ func (r *MarketplaceGatewayRepository) Qualify(ctx context.Context, account, buy
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	offer, _, _, err := r.qualify(ctx, tx, account, buyer, group, model)
 	if err != nil {
 		return 0, err
@@ -223,7 +223,7 @@ func (r *MarketplaceGatewayRepository) Dispatch(ctx context.Context, id string, 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Serialize with publication, which takes this lock before touching groups.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(738241016260)`); err != nil {
 		return nil, err
@@ -286,7 +286,7 @@ func (r *MarketplaceGatewayRepository) MarkReview(ctx context.Context, id string
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err = NewMarketplaceRequestRepository(r.db).MarkNeedsReview(ctx, tx, id, attempt, reason); err != nil {
 		return err
 	}
@@ -297,7 +297,7 @@ func (r *MarketplaceGatewayRepository) VoidUndispatched(ctx context.Context, id 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	receipt, err := scanMarketplaceReceipt(tx.QueryRowContext(ctx, `SELECT `+receiptColumns+` FROM marketplace_requests WHERE id=$1`, id))
 	if err != nil {
 		return err
@@ -338,7 +338,7 @@ func (r *MarketplaceGatewayRepository) AdminRecoveryResolve(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var admin bool
 	err = tx.QueryRowContext(ctx, `SELECT role='admin' AND status='active' AND deleted_at IS NULL FROM users WHERE id=$1 FOR SHARE`, actor).Scan(&admin)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !admin) {

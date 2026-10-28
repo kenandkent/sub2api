@@ -28,7 +28,7 @@ func TestPayoutConcurrentRequestsCannotExceedAvailable(t *testing.T) {
 	require.NoError(t, err)
 	d, err := repo.CreateDestination(ctx, owner, "bank ending 1234", []byte("secret"), "destination-concurrency", envelope)
 	require.NoError(t, err)
-	_, err = repo.VerifyDestination(ctx, d.ID, admin, "verify-concurrency")
+	_, err = repo.VerifyDestination(ctx, d.ID, admin, "verify-concurrency", "bank verification")
 	require.NoError(t, err)
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
@@ -70,9 +70,9 @@ func payoutFixture(t *testing.T) (*SupplierPayoutRepository, int64, int64, *serv
 	require.NoError(t, err)
 	d, err := repo.CreateDestination(ctx, owner, "ending 1234", []byte("secret"), fmt.Sprintf("dest-%d", owner), env)
 	require.NoError(t, err)
-	_, err = repo.VerifyDestination(ctx, d.ID, owner, fmt.Sprintf("self-verify-%d", owner))
+	_, err = repo.VerifyDestination(ctx, d.ID, owner, fmt.Sprintf("self-verify-%d", owner), "bank verification")
 	require.Error(t, err)
-	d, err = repo.VerifyDestination(ctx, d.ID, admin, fmt.Sprintf("verify-%d", owner))
+	d, err = repo.VerifyDestination(ctx, d.ID, admin, fmt.Sprintf("verify-%d", owner), "bank verification")
 	require.NoError(t, err)
 	return repo, owner, admin, d
 }
@@ -274,4 +274,110 @@ func TestPayoutRequestKeyCannotCollideWithRefundLedgerOperation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.CancelPreProcessingTx(ctx, tx, owner, fmt.Sprintf("refund-%d", owner), "admin:refund"))
 	require.NoError(t, tx.Commit())
+}
+
+func TestPayoutDestinationAdminRevealAndEvidence(t *testing.T) {
+	ctx := context.Background()
+	repo, owner, admin, d := payoutFixture(t)
+	env, err := service.NewCredentialEnvelope("k", map[string][]byte{"k": make([]byte, 32)})
+	require.NoError(t, err)
+	list, err := repo.ListAdminDestinations(ctx, admin)
+	require.NoError(t, err)
+	found := false
+	for _, v := range list {
+		if v.ID == d.ID {
+			found = true
+			require.Equal(t, admin, *v.VerifiedBy)
+			require.Equal(t, "bank verification", *v.VerificationEvidence)
+			require.NotNil(t, v.VerifiedAt)
+		}
+	}
+	require.True(t, found)
+	_, err = repo.ListAdminDestinations(ctx, 0)
+	require.Error(t, err)
+	var regular int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES ($1,'x') RETURNING id`, fmt.Sprintf("regular-%d@example.com", owner)).Scan(&regular))
+	_, err = repo.RevealDestination(ctx, d.ID, regular, "investigate", fmt.Sprintf("reveal-user-%d", owner), env)
+	require.Error(t, err)
+	_, err = repo.RevealDestination(ctx, d.ID, admin, "", fmt.Sprintf("reveal-empty-%d", owner), env)
+	require.Error(t, err)
+	op := fmt.Sprintf("reveal-%d", owner)
+	secret, err := repo.RevealDestination(ctx, d.ID, admin, "verify recipient", op, env)
+	require.NoError(t, err)
+	require.Equal(t, "secret", string(secret))
+	secret, err = repo.RevealDestination(ctx, d.ID, admin, "verify recipient", op, env)
+	require.NoError(t, err)
+	require.Equal(t, "secret", string(secret))
+	_, err = repo.RevealDestination(ctx, d.ID, admin, "different reason", op, env)
+	require.Error(t, err)
+	var stored, reason string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT result::text,reason FROM supplier_payout_operations WHERE operation_id=$1`, op).Scan(&stored, &reason))
+	require.NotContains(t, stored, "secret")
+	require.Equal(t, "verify recipient", reason)
+	_, err = repo.RevealDestination(ctx, d.ID, admin, "secret", fmt.Sprintf("leaky-reason-%d", owner), env)
+	require.Error(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE users SET role='user' WHERE id=$1`, admin)
+	require.NoError(t, err)
+	_, err = repo.RevealDestination(ctx, d.ID, admin, "verify recipient", op, env)
+	require.Error(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE users SET role='admin' WHERE id=$1`, admin)
+	require.NoError(t, err)
+	d2, err := repo.CreateDestination(ctx, owner, "ending 9999", []byte("new secret"), fmt.Sprintf("reveal-new-%d", owner), env)
+	require.NoError(t, err)
+	_, err = repo.VerifyDestination(ctx, d2.ID, admin, fmt.Sprintf("verify-no-evidence-%d", owner), "")
+	require.Error(t, err)
+	p, err := repo.Request(ctx, owner, d.ID, decimal.RequireFromString("10"), fmt.Sprintf("snapshot-reveal-%d", owner))
+	require.NoError(t, err)
+	secret, err = repo.RevealDestination(ctx, p.DestinationID, admin, "pay snapshot", fmt.Sprintf("reveal-snapshot-%d", owner), env)
+	require.NoError(t, err)
+	require.Equal(t, "secret", string(secret))
+}
+func TestPayoutPaidProjectionIncludesProofForAdminOnly(t *testing.T) {
+	ctx := context.Background()
+	repo, owner, admin, d := payoutFixture(t)
+	op := func(n string) string { return fmt.Sprintf("projection-%s-%d", n, owner) }
+	p, err := repo.Request(ctx, owner, d.ID, decimal.RequireFromString("10"), op("request"))
+	require.NoError(t, err)
+	for _, act := range []string{"approve", "start"} {
+		_, err = repo.Action(ctx, service.PayoutAction{PayoutID: p.ID, ActorID: admin, OperationID: op(act), Action: act})
+		require.NoError(t, err)
+	}
+	paidAt := time.Now().UTC().Truncate(time.Microsecond)
+	paid, err := repo.Action(ctx, service.PayoutAction{PayoutID: p.ID, ActorID: admin, OperationID: op("confirm"), Action: "confirm", Evidence: "transfer-proof", ExternalReference: op("ref"), Currency: "USD", Amount: decimal.RequireFromString("10"), PaidAt: &paidAt})
+	require.NoError(t, err)
+	require.Equal(t, "transfer-proof", *paid.Evidence)
+	require.True(t, paidAt.Equal(*paid.PaidAt))
+	adminView, err := repo.Get(ctx, p.ID, admin, true)
+	require.NoError(t, err)
+	require.Equal(t, "transfer-proof", *adminView.Evidence)
+	require.True(t, paidAt.Equal(*adminView.PaidAt))
+	own, err := repo.Get(ctx, p.ID, owner, false)
+	require.NoError(t, err)
+	require.Nil(t, own.Evidence)
+	require.True(t, paidAt.Equal(*own.PaidAt))
+	ownList, err := repo.List(ctx, owner)
+	require.NoError(t, err)
+	require.Len(t, ownList, 1)
+	require.Nil(t, ownList[0].Evidence)
+	require.True(t, paidAt.Equal(*ownList[0].PaidAt))
+	adminList, err := repo.ListAdmin(ctx, admin)
+	require.NoError(t, err)
+	found := false
+	for _, v := range adminList {
+		if v.ID == p.ID {
+			found = true
+			require.Equal(t, "transfer-proof", *v.Evidence)
+			require.True(t, paidAt.Equal(*v.PaidAt))
+		}
+	}
+	require.True(t, found)
+}
+
+func TestPayoutDestinationRejectsUnmaskedCredentialLabel(t *testing.T) {
+	ctx := context.Background()
+	repo, owner, _, _ := payoutFixture(t)
+	env, err := service.NewCredentialEnvelope("k", map[string][]byte{"k": make([]byte, 32)})
+	require.NoError(t, err)
+	_, err = repo.CreateDestination(ctx, owner, "payout-canary-raw", []byte("payout-canary-raw"), fmt.Sprintf("unsafe-label-%d", owner), env)
+	require.Error(t, err)
 }

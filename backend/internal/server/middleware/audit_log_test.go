@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -187,4 +188,41 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.Len(t, logs, 1)
 	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
+}
+
+func TestPayoutDestinationCredentialNeverAppearsInAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &auditCaptureRepository{}
+	audit := service.NewAuditLogService(repo, nil)
+	audit.Start()
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set(string(ContextKeyUser), AuthSubject{UserID: 77}); c.Next() })
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(audit)))
+	router.POST("/api/v1/supplier/payout-destinations", func(c *gin.Context) {
+		var body map[string]any
+		require.NoError(t, c.ShouldBindJSON(&body))
+		require.Equal(t, "payout-canary-secret", body["credential"])
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	router.POST("/api/v1/admin/marketplace/payout-destinations/:id/reveal", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"credential": "payout-reveal-canary-secret"}) })
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/supplier/payout-destinations", bytes.NewBufferString(`{"masked_label":"ending 1234","credential":"payout-canary-secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/marketplace/payout-destinations/4/reveal", bytes.NewBufferString(`{"reason":"verify recipient"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Contains(t, rec.Body.String(), "payout-reveal-canary-secret")
+	audit.Stop()
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Len(t, repo.logs, 2)
+	for _, entry := range repo.logs {
+		raw, err := json.Marshal(entry)
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), "payout-canary-secret")
+		require.NotContains(t, string(raw), "payout-reveal-canary-secret")
+	}
 }

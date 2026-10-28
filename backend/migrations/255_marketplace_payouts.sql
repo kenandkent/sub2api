@@ -1,7 +1,7 @@
 CREATE TABLE supplier_payout_destinations (
  id bigserial PRIMARY KEY, supplier_id bigint NOT NULL REFERENCES users(id), masked_label text NOT NULL CHECK(masked_label<>''), version bigint NOT NULL CHECK(version>0),
- credential jsonb NOT NULL, verified boolean NOT NULL DEFAULT false, verified_by bigint REFERENCES users(id), verified_at timestamptz,
- created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(supplier_id,version), CHECK ((verified_by IS NULL) = (verified_at IS NULL)), CHECK (verified = (verified_by IS NOT NULL))
+ credential jsonb NOT NULL, verified boolean NOT NULL DEFAULT false, verified_by bigint REFERENCES users(id), verified_at timestamptz, verification_evidence text,
+ created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(supplier_id,version), CHECK ((verified_by IS NULL) = (verified_at IS NULL)), CHECK (verified = (verified_by IS NOT NULL)), CHECK (verified = (verification_evidence IS NOT NULL)), CHECK (verification_evidence IS NULL OR length(trim(verification_evidence)) > 0)
 );
 CREATE INDEX supplier_payout_destinations_owner_idx ON supplier_payout_destinations(supplier_id,id);
 CREATE TABLE supplier_payouts (
@@ -14,7 +14,7 @@ CREATE TABLE supplier_payouts (
 CREATE INDEX supplier_payouts_owner_idx ON supplier_payouts(supplier_id,id);
 CREATE TABLE supplier_payout_operations (
  operation_id text PRIMARY KEY, fingerprint text NOT NULL, kind text NOT NULL, result_id bigint NOT NULL,
- actor_id bigint NOT NULL REFERENCES users(id), result jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+ actor_id bigint NOT NULL REFERENCES users(id), result jsonb NOT NULL, reason text, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE FUNCTION supplier_payout_destination_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

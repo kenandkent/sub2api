@@ -198,3 +198,11 @@ func TestParseAuditLogRetentionDays(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactAuditBodyBareCredential(t *testing.T) {
+	raw := []byte(`{"credential":"canary-payout-destination","nested":{"Credential":"canary-other"}}`)
+	out := RedactAuditBody(raw, "application/json")
+	if strings.Contains(out, "canary-payout-destination") || strings.Contains(out, "canary-other") {
+		t.Fatalf("credential leaked: %s", out)
+	}
+}

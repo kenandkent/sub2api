@@ -30,6 +30,14 @@ func (h *SupplierPayoutHandler) actor(c *gin.Context, stepUp bool) (int64, bool)
 	}
 	return subject.UserID, true
 }
+func (h *SupplierPayoutHandler) adminActor(c *gin.Context, stepUp bool) (int64, bool) {
+	role, ok := middleware.GetUserRoleFromContext(c)
+	if c.GetString("auth_method") != service.AuditAuthMethodJWT || !ok || role != service.RoleAdmin {
+		response.Forbidden(c, "Admin JWT required")
+		return 0, false
+	}
+	return h.actor(c, stepUp)
+}
 func payoutID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -72,7 +80,7 @@ func (h *SupplierPayoutHandler) ListDestinations(c *gin.Context) {
 
 // VerifyDestination must be registered under the admin-only JWT route group.
 func (h *SupplierPayoutHandler) VerifyDestination(c *gin.Context) {
-	actor, ok := h.actor(c, true)
+	actor, ok := h.adminActor(c, true)
 	if !ok {
 		return
 	}
@@ -80,7 +88,14 @@ func (h *SupplierPayoutHandler) VerifyDestination(c *gin.Context) {
 	if !ok {
 		return
 	}
-	v, err := h.payouts.VerifyDestination(c.Request.Context(), id, actor, c.GetHeader("Idempotency-Key"))
+	var req struct {
+		Evidence string `json:"evidence" binding:"required"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		response.BadRequest(c, "Verification evidence required")
+		return
+	}
+	v, err := h.payouts.VerifyDestination(c.Request.Context(), id, actor, c.GetHeader("Idempotency-Key"), req.Evidence)
 	payoutResponse(c, v, err)
 }
 func (h *SupplierPayoutHandler) Request(c *gin.Context) {
@@ -120,7 +135,13 @@ func (h *SupplierPayoutHandler) Get(c *gin.Context) {
 	payoutResponse(c, v, err)
 }
 func (h *SupplierPayoutHandler) action(c *gin.Context, name string) {
-	actor, ok := h.actor(c, true)
+	var actor int64
+	var ok bool
+	if name == "cancel" {
+		actor, ok = h.actor(c, true)
+	} else {
+		actor, ok = h.adminActor(c, true)
+	}
 	if !ok {
 		return
 	}
@@ -153,10 +174,61 @@ func (h *SupplierPayoutHandler) Fail(c *gin.Context)    { h.action(c, "fail") }
 
 // AdminList must be registered under the admin-only JWT route group.
 func (h *SupplierPayoutHandler) AdminList(c *gin.Context) {
-	actor, ok := h.actor(c, false)
+	actor, ok := h.adminActor(c, false)
 	if !ok {
 		return
 	}
 	v, err := h.payouts.ListAdmin(c.Request.Context(), actor)
+	payoutResponse(c, v, err)
+}
+
+// AdminListDestinations must be registered under the admin-only JWT route group.
+func (h *SupplierPayoutHandler) AdminListDestinations(c *gin.Context) {
+	actor, ok := h.adminActor(c, false)
+	if !ok {
+		return
+	}
+	v, err := h.payouts.AdminDestinations(c.Request.Context(), actor)
+	payoutResponse(c, v, err)
+}
+
+// RevealDestination must be registered under the admin-only JWT route group.
+func (h *SupplierPayoutHandler) RevealDestination(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	actor, ok := h.adminActor(c, true)
+	if !ok {
+		return
+	}
+	id, ok := payoutID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason" binding:"required"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		response.BadRequest(c, "Reason required")
+		return
+	}
+	secret, err := h.payouts.RevealDestination(c.Request.Context(), id, actor, req.Reason, c.GetHeader("Idempotency-Key"))
+	if err != nil {
+		response.BadRequest(c, "Destination reveal could not be completed")
+		return
+	}
+	response.Success(c, gin.H{"credential": string(secret)})
+}
+
+// AdminGet must be registered under the admin-only JWT route group.
+func (h *SupplierPayoutHandler) AdminGet(c *gin.Context) {
+	actor, ok := h.adminActor(c, false)
+	if !ok {
+		return
+	}
+	id, ok := payoutID(c)
+	if !ok {
+		return
+	}
+	v, err := h.payouts.Get(c.Request.Context(), id, actor, true)
 	payoutResponse(c, v, err)
 }

@@ -58,7 +58,7 @@ func savePayoutOp(ctx context.Context, tx *sql.Tx, id, fingerprint, kind string,
 	return err
 }
 func (r *SupplierPayoutRepository) CreateDestination(ctx context.Context, owner int64, mask string, secret []byte, op string, envelope *service.CredentialEnvelope) (*service.PayoutDestination, error) {
-	if owner <= 0 || strings.TrimSpace(mask) == "" || len(secret) == 0 || envelope == nil {
+	if owner <= 0 || strings.TrimSpace(mask) == "" || len(secret) == 0 || strings.Contains(mask, string(secret)) || envelope == nil {
 		return nil, service.ErrPayoutInvalid
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -120,25 +120,33 @@ func isPayoutAdmin(ctx context.Context, tx *sql.Tx, id int64) bool {
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND role='admin' AND status='active' AND deleted_at IS NULL)`, id).Scan(&ok)
 	return err == nil && ok
 }
-func (r *SupplierPayoutRepository) VerifyDestination(ctx context.Context, id, admin int64, op string) (*service.PayoutDestination, error) {
+func lockPayoutAdmin(ctx context.Context, tx *sql.Tx, id int64) bool {
+	var role, status string
+	err := tx.QueryRowContext(ctx, `SELECT role,status FROM users WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, id).Scan(&role, &status)
+	return err == nil && role == "admin" && status == "active"
+}
+func (r *SupplierPayoutRepository) VerifyDestination(ctx context.Context, id, admin int64, op, evidence string) (*service.PayoutDestination, error) {
+	if strings.TrimSpace(evidence) == "" || len(evidence) > 4096 {
+		return nil, service.ErrPayoutInvalid
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	fp := payoutFingerprint([]any{"verify", id, admin})
+	fp := payoutFingerprint([]any{"verify", id, admin, evidence})
 	var d service.PayoutDestination
 	found, err := payoutOp(ctx, tx, op, fp, &d)
 	if err != nil {
 		return nil, err
 	}
+	if !lockPayoutAdmin(ctx, tx, admin) {
+		return nil, service.ErrPayoutInvalid
+	}
 	if found {
 		return &d, tx.Commit()
 	}
-	if !isPayoutAdmin(ctx, tx, admin) {
-		return nil, service.ErrPayoutInvalid
-	}
-	err = tx.QueryRowContext(ctx, `UPDATE supplier_payout_destinations SET verified=true,verified_by=$2,verified_at=now() WHERE id=$1 AND supplier_id<>$2 AND NOT verified RETURNING id,supplier_id,masked_label,version,verified,created_at`, id, admin).Scan(&d.ID, &d.SupplierID, &d.MaskedLabel, &d.Version, &d.Verified, &d.CreatedAt)
+	err = tx.QueryRowContext(ctx, `UPDATE supplier_payout_destinations SET verified=true,verified_by=$2,verified_at=now(),verification_evidence=$3 WHERE id=$1 AND supplier_id<>$2 AND NOT verified RETURNING id,supplier_id,masked_label,version,verified,created_at`, id, admin, evidence).Scan(&d.ID, &d.SupplierID, &d.MaskedLabel, &d.Version, &d.Verified, &d.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -182,11 +190,11 @@ func lockPayoutWallet(ctx context.Context, tx *sql.Tx, owner int64) (payoutWalle
 func canPayout(w payoutWallet) bool { return w.status == "active" && !w.frozen && w.debt.IsZero() }
 func scanPayout(row interface{ Scan(...any) error }) (*service.SupplierPayout, error) {
 	var p service.SupplierPayout
-	err := row.Scan(&p.ID, &p.SupplierID, &p.DestinationID, &p.MaskedLabel, &p.Amount, &p.Currency, &p.Status, &p.ExternalReference, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.SupplierID, &p.DestinationID, &p.MaskedLabel, &p.Amount, &p.Currency, &p.Status, &p.ExternalReference, &p.PaidAt, &p.Evidence, &p.CreatedAt)
 	return &p, err
 }
 
-const payoutColumns = `id,supplier_id,destination_id,masked_label,amount,currency,status,external_reference,created_at`
+const payoutColumns = `id,supplier_id,destination_id,masked_label,amount,currency,status,external_reference,paid_at,evidence,created_at`
 
 func (r *SupplierPayoutRepository) Request(ctx context.Context, owner, destination int64, amount decimal.Decimal, op string) (*service.SupplierPayout, error) {
 	if owner <= 0 || destination <= 0 || service.ValidatePayoutAmount(amount, decimal.Zero) != nil {
@@ -266,6 +274,9 @@ func (r *SupplierPayoutRepository) Action(ctx context.Context, a service.PayoutA
 		return nil, err
 	}
 	defer tx.Rollback()
+	if a.Action != "cancel" && !isPayoutAdmin(ctx, tx, a.ActorID) {
+		return nil, service.ErrPayoutInvalid
+	}
 	fp := payoutFingerprint([]any{"action", a})
 	var original service.SupplierPayout
 	found, err := payoutOp(ctx, tx, a.OperationID, fp, &original)
@@ -420,6 +431,7 @@ func (r *SupplierPayoutRepository) List(ctx context.Context, owner int64) ([]ser
 		if err != nil {
 			return nil, err
 		}
+		p.Evidence = nil
 		out = append(out, *p)
 	}
 	return out, rows.Err()
@@ -428,7 +440,12 @@ func (r *SupplierPayoutRepository) Get(ctx context.Context, id, actor int64, adm
 	if admin {
 		return scanPayout(r.db.QueryRowContext(ctx, `SELECT `+payoutColumns+` FROM supplier_payouts WHERE id=$1 AND EXISTS (SELECT 1 FROM users WHERE id=$2 AND role='admin' AND status='active' AND deleted_at IS NULL)`, id, actor))
 	}
-	return scanPayout(r.db.QueryRowContext(ctx, `SELECT `+payoutColumns+` FROM supplier_payouts WHERE id=$1 AND supplier_id=$2`, id, actor))
+	p, err := scanPayout(r.db.QueryRowContext(ctx, `SELECT `+payoutColumns+` FROM supplier_payouts WHERE id=$1 AND supplier_id=$2`, id, actor))
+	if err != nil {
+		return nil, err
+	}
+	p.Evidence = nil
+	return p, nil
 }
 
 func (r *SupplierPayoutRepository) ListAdmin(ctx context.Context, actor int64) ([]service.SupplierPayout, error) {
@@ -467,4 +484,81 @@ func (r *SupplierPayoutRepository) FindRequest(ctx context.Context, owner, desti
 		return nil, err
 	}
 	return &result, nil
+}
+
+// ListAdminDestinations returns review metadata only after checking current admin status.
+func (r *SupplierPayoutRepository) ListAdminDestinations(ctx context.Context, actor int64) ([]service.AdminPayoutDestination, error) {
+	var ok bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND role='admin' AND status='active' AND deleted_at IS NULL)`, actor).Scan(&ok); err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, service.ErrPayoutInvalid
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id,supplier_id,masked_label,version,verified,created_at,verified_by,verified_at,verification_evidence FROM supplier_payout_destinations ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []service.AdminPayoutDestination{}
+	for rows.Next() {
+		var d service.AdminPayoutDestination
+		if err = rows.Scan(&d.ID, &d.SupplierID, &d.MaskedLabel, &d.Version, &d.Verified, &d.CreatedAt, &d.VerifiedBy, &d.VerifiedAt, &d.VerificationEvidence); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// RevealDestination records a durable reason before returning plaintext to an authorized operator.
+func (r *SupplierPayoutRepository) RevealDestination(ctx context.Context, id, actor int64, reason, op string, env *service.CredentialEnvelope) ([]byte, error) {
+	if id <= 0 || actor <= 0 || strings.TrimSpace(reason) == "" || len(reason) > 1024 || env == nil {
+		return nil, service.ErrPayoutInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	fp := payoutFingerprint([]any{"reveal", id, actor, reason})
+	var result struct {
+		ID int64 `json:"id"`
+	}
+	found, err := payoutOp(ctx, tx, op, fp, &result)
+	if err != nil {
+		return nil, err
+	}
+	if !lockPayoutAdmin(ctx, tx, actor) {
+		return nil, service.ErrPayoutInvalid
+	}
+	var owner int64
+	var raw []byte
+	if err = tx.QueryRowContext(ctx, `SELECT supplier_id,credential FROM supplier_payout_destinations WHERE id=$1`, id).Scan(&owner, &raw); err != nil {
+		return nil, err
+	}
+	var enc service.EncryptedCredential
+	if err = json.Unmarshal(raw, &enc); err != nil {
+		return nil, err
+	}
+	plain, err := env.Open("payout", owner, id, enc)
+	if err != nil {
+		return nil, err
+	}
+	if len(plain) > 0 && (strings.Contains(reason, string(plain)) || strings.Contains(op, string(plain))) {
+		return nil, service.ErrPayoutInvalid
+	}
+	if !found {
+		result.ID = id
+		if err = savePayoutOp(ctx, tx, op, fp, "reveal", id, actor, result); err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE supplier_payout_operations SET reason=$2 WHERE operation_id=$1`, op, reason); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return plain, nil
 }

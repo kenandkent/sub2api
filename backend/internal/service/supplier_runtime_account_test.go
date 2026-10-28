@@ -59,10 +59,16 @@ func runtimeTestAccount(t *testing.T, creds map[string]any) (*CredentialEnvelope
 }
 func TestMarketplaceSupplierRuntimePreparesEphemeralAccount(t *testing.T) {
 	env, a, store := runtimeTestAccount(t, map[string]any{"chatgpt_account_id": "account-a", "access_token": "secret", "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
+	proxyID := int64(9)
+	a.ProxyID = &proxyID
+	a.Proxy = &Proxy{ID: proxyID}
 	svc := NewSupplierRuntimeAccountService(env, store, nil, nil, SupplierRuntimeProviderConfig{})
 	out, err := svc.Prepare(context.Background(), a)
 	require.NoError(t, err)
 	require.Equal(t, "secret", out.GetOpenAIAccessToken())
+	require.Equal(t, a.ProxyID, out.ProxyID)
+	require.Same(t, a.Proxy, out.Proxy)
+	require.Contains(t, a.Credentials, "_supplier_envelope")
 	require.Empty(t, a.GetOpenAIAccessToken())
 	require.NotSame(t, a, out)
 	require.Equal(t, 0, store.writes)

@@ -23,6 +23,12 @@ func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
 	env, err := service.NewCredentialEnvelope("test", map[string][]byte{"test": bytes.Repeat([]byte{9}, 32)})
 	require.NoError(t, err)
 	repo := NewSharingOfferRepository(integrationDB, env)
+	var proxy, nextProxy int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO proxies(name,protocol,host,port) VALUES($1,'http','proxy.example',8080) RETURNING id`, uniqueTestValue(t, "oauth-proxy")).Scan(&proxy))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO proxies(name,protocol,host,port) VALUES($1,'http','proxy.example',8080) RETURNING id`, uniqueTestValue(t, "oauth-proxy")).Scan(&nextProxy))
+	defaults, ok := any(repo).(interface{ SetProviderProxy(*int64) })
+	require.True(t, ok, "OAuth writer must accept the trusted provider proxy")
+	defaults.SetProviderProxy(&proxy)
 	accounts := NewSupplierAccountRepository(integrationDB, env)
 	var owner, other, group int64
 	for i, id := range []*int64{&owner, &other} {
@@ -47,6 +53,9 @@ func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
 	valid := jwt("https://auth.openai.com", []string{openai.ClientID}, time.Now().Add(time.Hour).Unix(), "account-private")
 	id, err := repo.SaveSupplierAuthorization(operation(owner, "create", "create", 0), owner, "create", 0, "openai", token(valid, "access-private"))
 	require.NoError(t, err)
+	var actualProxy int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT proxy_id FROM accounts WHERE id=$1`, id).Scan(&actualProxy))
+	require.Equal(t, proxy, actualProxy)
 	var raw string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT credentials::text FROM accounts WHERE id=$1`, id).Scan(&raw))
 	require.NotContains(t, raw, "account-private")
@@ -86,9 +95,12 @@ func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
 	// Owner and operation bindings are checked before any credential or review changes.
 	_, err = repo.SaveSupplierAuthorization(operation(other, "wrong-owner", "reauthorize", id), other, "reauthorize", id, "openai", token(valid, "wrong-secret"))
 	require.Error(t, err)
+	defaults.SetProviderProxy(&nextProxy)
 	reauth := operation(owner, "reauth", "reauthorize", id)
 	_, err = repo.SaveSupplierAuthorization(reauth, owner, "reauthorize", id, "openai", token(valid, "new-access"))
 	require.NoError(t, err)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT proxy_id FROM accounts WHERE id=$1`, id).Scan(&actualProxy))
+	require.Equal(t, nextProxy, actualProxy)
 	_, err = repo.SaveSupplierAuthorization(reauth, owner, "reauthorize", id, "openai", token(valid, "replay"))
 	require.Error(t, err)
 	a, err = accounts.Get(ctx, owner, id)
@@ -102,10 +114,13 @@ func TestSharingOfferOAuthIdentityAndReauthorization(t *testing.T) {
 	require.NoError(t, err)
 	var before, after, operationStatus string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT credentials::text FROM accounts WHERE id=$1`, id).Scan(&before))
+	defaults.SetProviderProxy(&proxy)
 	_, err = repo.SaveSupplierAuthorization(operation(owner, "conflicting-reauth", "reauthorize", id), owner, "reauthorize", id, "openai", token(otherToken, "collision-secret"))
 	require.Error(t, err)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT credentials::text FROM accounts WHERE id=$1`, id).Scan(&after))
 	require.Equal(t, before, after)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT proxy_id FROM accounts WHERE id=$1`, id).Scan(&actualProxy))
+	require.Equal(t, nextProxy, actualProxy)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT fingerprint FROM marketplace_credential_fingerprints WHERE account_id=$1`, id).Scan(&stored))
 	require.Equal(t, hex.EncodeToString(fingerprint[:]), stored)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT status FROM supplier_operations WHERE user_id=$1 AND operation_key='conflicting-reauth'`, owner).Scan(&operationStatus))

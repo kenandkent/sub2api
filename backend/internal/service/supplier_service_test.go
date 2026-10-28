@@ -108,7 +108,7 @@ func TestSupplierOptionsAndSimpleMode(t *testing.T) {
 	cfg := &config.Config{RunMode: config.RunModeSimple, Marketplace: config.MarketplaceConfig{Enabled: true, OnboardingEnabled: true, AgreementVersion: 7, ApplicationFields: []string{"contact"}, MaxSupplierConcurrency: &n, FeeBPS: &fee, HoldHours: &hold}}
 	svc := NewSupplierService(&supplierTestRepo{}, cfg)
 	options := svc.Options()
-	if options.AgreementVersion != 7 || len(options.ApplicationFields) != 1 || *options.MaxSupplierConcurrency != 4 || *options.FeeBPS != 200 || *options.HoldHours != 24 {
+	if options.AgreementVersion != 7 || len(options.ApplicationFields) != 1 || options.MaxSupplierConcurrency != nil || options.FeeBPS != nil || options.HoldHours != nil || options.MinimumPayoutUSD != nil {
 		t.Fatalf("options: %+v", options)
 	}
 	caps, err := svc.Capabilities(context.Background(), 1)

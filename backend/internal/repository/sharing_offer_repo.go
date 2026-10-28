@@ -16,12 +16,22 @@ import (
 
 // SharingOfferRepository persists supplier credentials only as authenticated envelopes.
 type SharingOfferRepository struct {
-	db       *sql.DB
-	envelope *service.CredentialEnvelope
+	db            *sql.DB
+	envelope      *service.CredentialEnvelope
+	providerProxy *int64
 }
 
 func NewSharingOfferRepository(db *sql.DB, envelope *service.CredentialEnvelope) *SharingOfferRepository {
 	return &SharingOfferRepository{db: db, envelope: envelope}
+}
+
+// SetProviderProxy supplies the operator-owned OpenAI proxy, never a user input.
+func (r *SharingOfferRepository) SetProviderProxy(proxy *int64) {
+	r.providerProxy = nil
+	if proxy != nil {
+		id := *proxy
+		r.providerProxy = &id
+	}
 }
 
 // supplierOAuthIdentity only handles tokens received from the fixed OpenAI
@@ -146,7 +156,7 @@ func (r *SharingOfferRepository) SaveSupplierAuthorization(ctx context.Context, 
 	if err != nil {
 		return 0, service.ErrSupplierAuthorizationFailed
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE accounts SET credentials=jsonb_strip_nulls(jsonb_build_object('base_url',credentials->'base_url','model_mapping',credentials->'model_mapping','openai_capabilities',credentials->'openai_capabilities')) || $1::jsonb,extra=COALESCE(extra,'{}'::jsonb) || '{"openai_responses_supported":true}'::jsonb,updated_at=NOW() WHERE id=$2 AND owner_user_id=$3`, string(payload), id, owner)
+	result, err := tx.ExecContext(ctx, `UPDATE accounts SET credentials=jsonb_strip_nulls(jsonb_build_object('base_url',credentials->'base_url','model_mapping',credentials->'model_mapping','openai_capabilities',credentials->'openai_capabilities')) || $1::jsonb,extra=COALESCE(extra,'{}'::jsonb) || '{"openai_responses_supported":true}'::jsonb,proxy_id=$4,updated_at=NOW() WHERE id=$2 AND owner_user_id=$3`, string(payload), id, owner, r.providerProxy)
 	if err != nil {
 		return 0, err
 	}

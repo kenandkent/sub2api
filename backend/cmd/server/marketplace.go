@@ -40,6 +40,11 @@ func provideMarketplaceHandlers(db *sql.DB, rdb *redis.Client, cfg *config.Confi
 	supplierHandler.SetAccountService(accounts)
 	supplierHandler.SetCatalogService(catalog)
 	writer := repository.NewSharingOfferRepository(db, envelope)
+	for _, provider := range cfg.Marketplace.Providers {
+		if provider.Platform == service.PlatformOpenAI {
+			writer.SetProviderProxy(provider.ProxyID)
+		}
+	}
 	authorization, err := service.NewSupplierAuthorizationService(repository.NewSupplierAuthorizationCache(rdb), oauth, writer,
 		service.SupplierAuthorizationConfig{Provider: "openai", RedirectURI: openai.DefaultRedirectURI, ProxyURL: cfg.Marketplace.OAuthProxyURL})
 	if err != nil {

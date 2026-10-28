@@ -59,21 +59,12 @@ func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO supplier_profiles(user_id,status) VALUES($1,'active')`, owner)
 	require.NoError(t, err)
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type,owner_user_id) VALUES($1,'openai','apikey',$2) RETURNING id`, suffix, owner).Scan(&account))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type,owner_user_id,concurrency) VALUES($1,'openai','apikey',$2,1) RETURNING id`, suffix, owner).Scan(&account))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO sharing_offers(account_id,owner_user_id,review_status,enabled,allowed_models) VALUES($1,$2,'approved',true,'["m"]') RETURNING id`, account, owner).Scan(&offer))
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, account, group)
 	require.NoError(t, err)
 	cfg := &config.Config{Marketplace: config.MarketplaceConfig{Enabled: true, DispatchEnabled: true, Providers: []config.MarketplaceProviderConfig{{Platform: "openai", AccountTypes: []string{"apikey"}, Models: []string{"m"}}}}}
 	repo := NewMarketplaceGatewayRepository(integrationDB, cfg)
-	got, err := repo.Qualify(ctx, account, buyer, group, "m")
-	require.NoError(t, err)
-	require.Equal(t, offer, got)
-	_, err = repo.Qualify(ctx, account, owner, group, "m")
-	require.ErrorIs(t, err, service.ErrMarketplaceAccountIneligible)
-	_, err = repo.Qualify(ctx, account, buyer, group, "other")
-	require.ErrorIs(t, err, service.ErrMarketplaceAccountIneligible)
-	receipt, _, err := repo.PrepareAndReserve(ctx, service.MarketplacePrepareCommand{BuyerUserID: buyer, APIKeyID: key, GroupID: group, RequestDigest: "digest"}, service.Money{Decimal: decimal.NewFromInt(2)})
-	require.NoError(t, err)
 	rate := decimal.NewFromInt(1)
 	price := service.Money{Decimal: rate}
 	var version int64
@@ -84,6 +75,15 @@ func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_policies(version,fee_bps,hold_hours,max_supplier_concurrency,minimum_payout_usd,published_by,published_at) VALUES($1,0,0,1,0,$2,now())`, version, owner)
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO marketplace_price_versions(version,rules,published_by,published_at) VALUES($1,$2,$3,now())`, version, string(data), owner)
+	require.NoError(t, err)
+	got, err := repo.Qualify(ctx, account, buyer, group, "m")
+	require.NoError(t, err)
+	require.Equal(t, offer, got)
+	_, err = repo.Qualify(ctx, account, owner, group, "m")
+	require.ErrorIs(t, err, service.ErrMarketplaceAccountIneligible)
+	_, err = repo.Qualify(ctx, account, buyer, group, "other")
+	require.ErrorIs(t, err, service.ErrMarketplaceAccountIneligible)
+	receipt, _, err := repo.PrepareAndReserve(ctx, service.MarketplacePrepareCommand{BuyerUserID: buyer, APIKeyID: key, GroupID: group, RequestDigest: "digest"}, service.Money{Decimal: decimal.NewFromInt(2)})
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE groups SET rate_multiplier=2, subscription_type='subscription', peak_rate_enabled=true, peak_start='00:00', peak_end='23:59', peak_rate_multiplier=2 WHERE id=$1`, group)
 	require.NoError(t, err)
@@ -106,6 +106,24 @@ func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrMarketplacePriceUnavailable)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE user_group_rate_multipliers SET rate_multiplier=0.75 WHERE user_id=$1 AND group_id=$2`, buyer, group)
 	require.NoError(t, err)
+	// Disable or soft-delete the owner after preflight; neither may dispatch.
+	for _, change := range []string{"status='disabled'", "deleted_at=now()"} {
+		_, err = integrationDB.ExecContext(ctx, `UPDATE users SET `+change+` WHERE id=$1`, owner)
+		require.NoError(t, err)
+		_, err = repo.Dispatch(ctx, receipt.ID, q)
+		require.ErrorIs(t, err, service.ErrMarketplaceAccountIneligible)
+		_, err = integrationDB.ExecContext(ctx, `UPDATE users SET status='active',deleted_at=NULL WHERE id=$1`, owner)
+		require.NoError(t, err)
+	}
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET concurrency=2 WHERE id=$1`, account)
+	require.NoError(t, err)
+	_, err = repo.Dispatch(ctx, receipt.ID, q)
+	require.ErrorIs(t, err, service.ErrMarketplaceAccountIneligible)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET concurrency=1 WHERE id=$1`, account)
+	require.NoError(t, err)
+	var attempts int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM marketplace_attempts WHERE receipt_id=$1`, receipt.ID).Scan(&attempts))
+	require.Zero(t, attempts)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE supplier_profiles SET status='suspended' WHERE user_id=$1`, owner)
 	require.NoError(t, err)
 	_, err = repo.Dispatch(ctx, receipt.ID, q)
@@ -176,4 +194,21 @@ func TestMarketplaceGatewayQualificationAndDispatchRecheck(t *testing.T) {
 	_, err = repo.Dispatch(ctx, receipt.ID, q)
 	require.ErrorIs(t, err, service.ErrMarketplacePriceUnavailable)
 	require.NoError(t, repo.VoidUndispatched(ctx, receipt.ID))
+}
+
+func TestMarketplaceGatewayZeroBudgetRejectsDebt(t *testing.T) {
+	ctx := context.Background()
+	suffix := uuid.NewString()
+	var buyer, group, key int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',-1) RETURNING id`, suffix+"@example.test").Scan(&buyer))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups(name) VALUES($1) RETURNING id`, suffix).Scan(&group))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,group_id,key,name) VALUES($1,$2,$3,'test') RETURNING id`, buyer, group, suffix).Scan(&key))
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version,reconciled_at,debt) VALUES($1,1,now(),1)`, buyer)
+	require.NoError(t, err)
+	repo := NewMarketplaceGatewayRepository(integrationDB, &config.Config{})
+	_, _, err = repo.PrepareAndReserve(ctx, service.MarketplacePrepareCommand{BuyerUserID: buyer, APIKeyID: key, GroupID: group, RequestDigest: "zero"}, service.Money{Decimal: decimal.Zero})
+	require.ErrorIs(t, err, service.ErrMarketplaceRequestInvalid)
+	var count int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM marketplace_requests WHERE buyer_user_id=$1`, buyer).Scan(&count))
+	require.Zero(t, count)
 }

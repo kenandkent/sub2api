@@ -15,7 +15,8 @@ func (s authorizationPolicyAccounts) Get(_ context.Context,owner,id int64)(*Supp
 	if owner!=s.owner || s.account==nil || s.account.ID!=id {return nil,ErrSupplierAuthorizationInvalid};return s.account,nil
 }
 func TestSupplierAuthorizationPolicyEnforcesTypeAndOwner(t *testing.T) {
-	cfg:=&config.Config{Marketplace:config.MarketplaceConfig{Enabled:true,Providers:[]config.MarketplaceProviderConfig{{Platform:"openai",Label:"OpenAI",BaseURL:"https://api.openai.com/v1",AccountTypes:[]string{"apikey"},Models:[]string{"m"}}}}}
+	limit:=4
+	cfg:=&config.Config{Marketplace:config.MarketplaceConfig{Enabled:true,MaxSupplierConcurrency:&limit,Providers:[]config.MarketplaceProviderConfig{{Platform:"openai",Label:"OpenAI",BaseURL:"https://api.openai.com/v1",AccountTypes:[]string{"apikey"},Models:[]string{"m"}}}}}
 	p:=authorizationPolicyProfiles{profile:&SupplierProfile{UserID:7,Status:SupplierStatusActive}}
 	a:=authorizationPolicyAccounts{owner:7,account:&SupplierAccountDetail{ID:8,Platform:"openai",Type:"oauth"}}
 	s:=NewSupplierAccountService(cfg,a,p,nil,nil)

@@ -133,6 +133,30 @@ type SupplierAccountService struct {
 func NewSupplierAccountService(cfg *config.Config, store SupplierAccountStore, profiles SupplierRepository, catalog SupplierCatalog, concurrency *ConcurrencyService) *SupplierAccountService {
 	return &SupplierAccountService{cfg: cfg, store: store, profiles: profiles, catalog: catalog, concurrency: concurrency}
 }
+
+// supplierConcurrencyLimit resolves live commercial terms. A nil catalog supports
+// isolated callers that do not wire a catalog.
+func (s *SupplierAccountService) supplierConcurrencyLimit(ctx context.Context) (int, error) {
+	if s.catalog != nil {
+		terms, ok := s.catalog.(MarketplacePolicyTermsSource)
+		if !ok {
+			return 0, ErrMarketplaceCatalogUnavailable
+		}
+		policy, err := terms.CurrentPolicy(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if policy.MaxSupplierConcurrency <= 0 {
+			return 0, ErrMarketplaceCatalogUnavailable
+		}
+		return policy.MaxSupplierConcurrency, nil
+	}
+	if s.cfg == nil || s.cfg.Marketplace.MaxSupplierConcurrency == nil || *s.cfg.Marketplace.MaxSupplierConcurrency <= 0 {
+		return 0, ErrMarketplaceCatalogUnavailable
+	}
+	return *s.cfg.Marketplace.MaxSupplierConcurrency, nil
+}
+
 func (s *SupplierAccountService) authorize(ctx context.Context, user int64, write bool) error {
 	if user <= 0 || s == nil || s.store == nil || s.profiles == nil {
 		return apperrors.Forbidden("supplier_required", "Supplier profile required")
@@ -185,6 +209,9 @@ func (s *SupplierAccountService) AuthorizeSupplierAuthorization(ctx context.Cont
 		if target != 0 {
 			return ErrSupplierAuthorizationInvalid
 		}
+		if _, err := s.supplierConcurrencyLimit(ctx); err != nil {
+			return err
+		}
 	case "reauthorize":
 		if target <= 0 {
 			return ErrSupplierAuthorizationInvalid
@@ -205,8 +232,12 @@ func (s *SupplierAccountService) Create(ctx context.Context, user int64, key str
 	if err := s.authorize(ctx, user, true); err != nil {
 		return nil, err
 	}
+	limit, err := s.supplierConcurrencyLimit(ctx)
+	if err != nil {
+		return nil, err
+	}
 	p, ok := s.provider(in.Platform)
-	if !ok || in.Type != "apikey" || !supplierProviderAllowsType(p, in.Type) || (in.APIKey != "" && !validSupplierAPIKey(in.APIKey)) || strings.TrimSpace(in.Name) != in.Name || in.Name == "" || len(in.Name) > 100 || !validSupplierModels(p, in.AllowedModels) || s.cfg.Marketplace.MaxSupplierConcurrency == nil || in.Concurrency <= 0 || in.Concurrency > *s.cfg.Marketplace.MaxSupplierConcurrency || strings.TrimSpace(key) != key || len(key) == 0 || len(key) > 200 {
+	if !ok || in.Type != "apikey" || !supplierProviderAllowsType(p, in.Type) || (in.APIKey != "" && !validSupplierAPIKey(in.APIKey)) || strings.TrimSpace(in.Name) != in.Name || in.Name == "" || len(in.Name) > 100 || !validSupplierModels(p, in.AllowedModels) || in.Concurrency <= 0 || in.Concurrency > limit || strings.TrimSpace(key) != key || len(key) == 0 || len(key) > 200 {
 		return nil, apperrors.BadRequest("invalid_account", "Invalid account or idempotency key")
 	}
 	// Only a digest of the key enters durable operation metadata.
@@ -247,8 +278,16 @@ func (s *SupplierAccountService) Patch(ctx context.Context, user, id int64, in S
 	if err != nil {
 		return nil, err
 	}
+	limit, err := s.supplierConcurrencyLimit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	concurrency := a.Concurrency
+	if in.Concurrency != nil {
+		concurrency = *in.Concurrency
+	}
 	p, ok := s.provider(a.Platform)
-	if !ok || in.ExpectedVersion <= 0 || (in.Name != nil && (strings.TrimSpace(*in.Name) != *in.Name || *in.Name == "" || len(*in.Name) > 100)) || (in.Concurrency != nil && (*in.Concurrency <= 0 || s.cfg.Marketplace.MaxSupplierConcurrency == nil || *in.Concurrency > *s.cfg.Marketplace.MaxSupplierConcurrency)) || (in.AllowedModels != nil && !validSupplierModels(p, *in.AllowedModels)) {
+	if !ok || in.ExpectedVersion <= 0 || (in.Name != nil && (strings.TrimSpace(*in.Name) != *in.Name || *in.Name == "" || len(*in.Name) > 100)) || (concurrency <= 0 || concurrency > limit) || (in.AllowedModels != nil && !validSupplierModels(p, *in.AllowedModels)) {
 		return nil, apperrors.BadRequest("invalid_account", "Invalid account update")
 	}
 	return s.store.Patch(ctx, user, id, in)
@@ -263,6 +302,15 @@ func (s *SupplierAccountService) Transition(ctx context.Context, user, id, versi
 	a, err := s.store.Get(ctx, user, id)
 	if err != nil {
 		return nil, err
+	}
+	if action == "submit" || action == "resume" {
+		limit, e := s.supplierConcurrencyLimit(ctx)
+		if e != nil {
+			return nil, e
+		}
+		if a.Concurrency <= 0 || a.Concurrency > limit {
+			return nil, apperrors.BadRequest("invalid_account", "Account concurrency exceeds published limit")
+		}
 	}
 	if action == "submit" {
 		if a.CredentialStatus != "valid" && a.CredentialStatus != "configured" {
@@ -391,6 +439,13 @@ func (s *SupplierAccountService) AdminReview(ctx context.Context, admin, id, ver
 	}
 	groups := []int64{}
 	if status == "approved" {
+		limit, e := s.supplierConcurrencyLimit(ctx)
+		if e != nil {
+			return nil, e
+		}
+		if a.Concurrency <= 0 || a.Concurrency > limit {
+			return nil, apperrors.BadRequest("invalid_account", "Account concurrency exceeds published limit")
+		}
 		if s.catalog == nil {
 			return nil, apperrors.Conflict("price_unavailable", "Marketplace prices unavailable")
 		}

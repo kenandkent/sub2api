@@ -205,10 +205,6 @@ func (s *SupplierService) Options() SupplierOptions {
 			o.AgreementURL = c.AgreementURL
 		}
 		o.ApplicationFields = append(o.ApplicationFields, c.ApplicationFields...)
-		o.MaxSupplierConcurrency = c.MaxSupplierConcurrency
-		o.FeeBPS = c.FeeBPS
-		o.HoldHours = c.HoldHours
-		o.MinimumPayoutUSD = c.MinimumPayoutUSD
 	}
 	return o
 }

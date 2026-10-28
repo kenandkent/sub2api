@@ -8,6 +8,7 @@ type SupplierCatalog interface {
 }
 
 type SupplierModelPrice struct {
+	GroupID        int64                  `json:"group_id"`
 	Model          string                 `json:"model"`
 	PublicModel    string                 `json:"public_model"`
 	GroupName      string                 `json:"group_name"`

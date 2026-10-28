@@ -8,6 +8,7 @@ import (
 
 var (
 	ErrMarketplaceIdempotencyConflict = errors.New("marketplace idempotency key reused with different request")
+	ErrMarketplaceAccountIneligible   = errors.New("marketplace account ineligible")
 	ErrMarketplaceRequestState        = errors.New("invalid marketplace request state")
 	ErrMarketplaceRequestInvalid      = errors.New("invalid marketplace request")
 )

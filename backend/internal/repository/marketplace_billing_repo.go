@@ -92,7 +92,24 @@ func (r *MarketplaceBillingRepository) ReserveBudget(ctx context.Context, id str
 	return tx.Commit()
 }
 
-func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.MarketplaceCaptureCommand, _ service.UsageBillingCommand) (*service.MarketplaceBillingResult, error) {
+func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.MarketplaceCaptureCommand, b service.UsageBillingCommand) (*service.MarketplaceBillingResult, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	result, err := r.captureTx(ctx, tx, c, b)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// captureTx allows recovery audit and settlement to commit together.
+func (r *MarketplaceBillingRepository) captureTx(ctx context.Context, tx *sql.Tx, c service.MarketplaceCaptureCommand, _ service.UsageBillingCommand) (*service.MarketplaceBillingResult, error) {
 	if c.ReceiptID == "" || c.BillableAttemptID <= 0 || c.QuoteDigest == "" {
 		return nil, service.ErrMarketplaceRequestInvalid
 	}
@@ -100,11 +117,7 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 	if c.OperationID != "" && c.OperationID != expectedOp {
 		return nil, service.ErrMarketplaceRequestInvalid
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+	var err error
 	var buyer, owner int64
 	if err = tx.QueryRowContext(ctx, `SELECT r.buyer_user_id,a.owner_user_id FROM marketplace_requests r JOIN marketplace_attempts a ON a.receipt_id=r.id WHERE r.id=$1 AND a.id=$2`, c.ReceiptID, c.BillableAttemptID).Scan(&buyer, &owner); err != nil {
 		return nil, err
@@ -203,9 +216,6 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 			if _, err = tx.ExecContext(ctx, `UPDATE marketplace_requests SET status='needs_review',review_reason=$2,updated_at=now() WHERE id=$1`, c.ReceiptID, "insufficient eligible funding; shortfall="+extra.StringFixed(8)); err != nil {
 				return nil, err
 			}
-			if err = tx.Commit(); err != nil {
-				return nil, err
-			}
 			return &service.MarketplaceBillingResult{NeedsReview: true}, nil
 		}
 		if err != nil {
@@ -291,9 +301,6 @@ func (r *MarketplaceBillingRepository) Capture(ctx context.Context, c service.Ma
 		return nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO marketplace_outbox(event_id,event_type,receipt_id,capture_id) VALUES($1,'marketplace_captured',$2,$3)`, expectedOp, c.ReceiptID, captureID); err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 	balanceFloat, _ := balance.Float64()

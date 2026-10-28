@@ -1850,11 +1850,6 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	// 环境变量支持
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	for _, key := range []string{"enabled", "onboarding_enabled", "dispatch_enabled", "payouts_enabled", "fee_bps", "hold_hours", "max_supplier_concurrency", "minimum_payout_usd"} {
-		if err := viper.BindEnv("marketplace." + key); err != nil {
-			return nil, fmt.Errorf("bind marketplace.%s: %w", key, err)
-		}
-	}
 	if tz, ok := os.LookupEnv("TZ"); ok && strings.TrimSpace(tz) != "" {
 		// AutomaticEnv 会先把 timezone 映射到 TIMEZONE；显式 Set 保证标准 TZ 变量优先。
 		viper.Set("timezone", strings.TrimSpace(tz))
@@ -2669,6 +2664,11 @@ func setDefaults() {
 // environment. Any subsystem that wants a richer default still applies it after
 // unmarshal, exactly as before.
 func setEnvReachableDefaults() {
+	// Bind these without defaults so omitted commercial terms remain nil.
+	for _, key := range []string{"enabled", "onboarding_enabled", "dispatch_enabled", "payouts_enabled", "fee_bps", "hold_hours", "max_supplier_concurrency", "minimum_payout_usd", "agreement_version", "agreement_text", "agreement_url", "application_fields"} {
+		_ = viper.BindEnv("marketplace." + key)
+	}
+
 	viper.SetDefault("gateway.forced_codex_instructions_template_file", "")
 	viper.SetDefault("gateway.session_idle_timeout_minutes", 0)
 	viper.SetDefault("gateway.user_message_queue.mode", "")

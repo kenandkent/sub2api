@@ -31,3 +31,17 @@ func TestMarketplaceConfigRefusesIncompleteEnabledConfig(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 }
+
+func TestMarketplaceAgreementEnvironment(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("MARKETPLACE_AGREEMENT_VERSION", "7")
+	t.Setenv("MARKETPLACE_AGREEMENT_TEXT", "Terms")
+	t.Setenv("MARKETPLACE_AGREEMENT_URL", "/terms")
+	t.Setenv("MARKETPLACE_APPLICATION_FIELDS", "contact,company")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, int64(7), cfg.Marketplace.AgreementVersion)
+	require.Equal(t, "Terms", cfg.Marketplace.AgreementText)
+	require.Equal(t, "/terms", cfg.Marketplace.AgreementURL)
+	require.Equal(t, []string{"contact", "company"}, cfg.Marketplace.ApplicationFields)
+}

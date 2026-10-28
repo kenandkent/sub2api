@@ -1313,3 +1313,17 @@ image_storage:
   presign_expiry_hours: 24
   # 当上游返回的是图片 url 时，下载该图片再转存的字节上限（默认 32MB）
   max_download_bytes: 33554432
+
+# Marketplace is opt-in. Set commercial terms explicitly before enabling it.
+# Supply real agreement text or an HTTPS / local absolute-path URL before onboarding.
+# marketplace:
+#   enabled: false
+#   onboarding_enabled: false
+#   agreement_version: 1
+#   agreement_text: ""
+#   agreement_url: ""
+#   application_fields: ["contact"] # Required non-secret fields only
+#   fee_bps: 0
+#   hold_hours: 0
+#   max_supplier_concurrency: 1
+#   minimum_payout_usd: "0.00"

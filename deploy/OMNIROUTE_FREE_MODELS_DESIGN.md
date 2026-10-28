@@ -1,6 +1,8 @@
-# OmniRoute 免费模型 Bun 传输方案设计
+# OmniRoute 免费模型 Bun 传输方案设计（历史 v2）
 
-核查日期：2026-10-27。本文是设计与实施建议，**本轮不修改、构建或部署线上 OmniRoute**。本项目和线上 OmniRoute 是不同代码库；以下未来文件路径除特别注明外均相对于线上 OmniRoute 源码根目录。线上源码行号基于本次只读检查的容器 `omniroute:gw-nonstream-failfast-20260926`，实施前必须重新核对目标版本。
+> **历史设计说明（2026-10-27）：** 本文保留当时的 v2 方案、假设和证据，正文中的“本轮不部署”、text-only、Unix socket 等描述不代表当前实现或部署状态。当前实现、canary 门禁、切换与回滚状态以 [OmniRoute Free Bun 运行手册](OMNIROUTE_FREE_BUN_RUNBOOK.md) 和最终部署证据为准；截至运行手册草稿，生产切换仍待验证。
+
+核查日期：2026-10-27。以下为当时的设计与实施建议，当时的范围为**不修改、构建或部署线上 OmniRoute**。本项目和线上 OmniRoute 是不同代码库；以下未来文件路径除特别注明外均相对于线上 OmniRoute 源码根目录。线上源码行号基于本次只读检查的容器 `omniroute:gw-nonstream-failfast-20260926`，实施前必须重新核对目标版本。
 
 ## 结论与证据边界
 

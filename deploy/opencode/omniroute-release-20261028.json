@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-28T00:55:40+08:00",
+  "models": [
+    "oc/big-pickle",
+    "oc/mimo-v2.6-flash-free"
+  ],
+  "runtime": {
+    "app_image": "sha256:c14feb156da25b368938c89a76820838dce943d573a947ff6c75c26bfc72566c",
+    "worker_image": "sha256:9457db450f167a2383348f2d5aeabd5d5665a08caca6d93f7b701d61c0c26ea5",
+    "compose_file": "/home/workspace/OmniRoute/.config/opencode-free-bun/compose.json",
+    "worker_loopback": "127.0.0.1:19090",
+    "worker_has_no_published_port": true
+  },
+  "verification": {
+    "canary_api_cases_passed": 8,
+    "canary_usage_records_reconciled": 8,
+    "production_stream_cases_passed": 2,
+    "post_cleanup_nonstream_cases_passed": 1,
+    "cancel_sockets_before": 1,
+    "cancel_sockets_during": 6,
+    "cancel_sockets_after": [
+      1,
+      1,
+      1
+    ],
+    "node_focused_tests_passed": 74,
+    "bun_worker_tests_passed": 26,
+    "legacy_serve_vitest_tests_passed": 31,
+    "related_regressions_passed": 85,
+    "existing_typecheck_diagnostics": 11,
+    "public_health_http_status": 200,
+    "restart_health_passed": true,
+    "production_usage_records_reconciled": 3
+  },
+  "retirement": {
+    "services": [
+      "omniroute-gw-serve.service",
+      "omniroute-gateway-serve.service"
+    ],
+    "stopped_disabled_and_archived": true,
+    "port_14937_closed": true,
+    "canary_containers_removed": true,
+    "rollback_container": "omniroute-prev-bun-20261027",
+    "old_binary_and_service_json_retained": true
+  },
+  "source": {
+    "branch": "codex/opencode-free-bun-20261027",
+    "worktree": "/home/workspace/OmniRoute/.claude/worktrees/codex-opencode-free-bun-20261027",
+    "parent_commit": "788848706e98d19e7d8b0b9573793466dd6b5995",
+    "status": "uncommitted_changes_retained_in_dedicated_worktree",
+    "owned_files": 34,
+    "source_archive_sha256": "95cdb8cbcd207cbdfd863d50ae4808da50f0db9c5e4dea452ca66647fb6617ea",
+    "patch_sha256": "bbdcc4e89fd2bbb732e1a40ad937a50f9c88bdeeea2222265d4b1fbb337b8d65",
+    "shared_checkout_source_unchanged": true,
+    "running_critical_source_hashes_matched": 7
+  },
+  "accounting_note": "Upstream usage and free provenance are preserved. Existing reasoning token quota double-counting and price-default behavior are unchanged."
+}

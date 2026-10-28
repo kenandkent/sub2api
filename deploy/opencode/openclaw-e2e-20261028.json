@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-28T11:18:29+08:00",
+  "passed": true,
+  "clients": [
+    {
+      "site": "local",
+      "openclaw_version": "2026.9.5",
+      "configured_model": "ominiroute/oc/mimo-v2.6-flash-free",
+      "tests": [
+        {
+          "kind": "conversation",
+          "passed": true,
+          "duration_ms": 6111,
+          "model": "oc/mimo-v2.6-flash-free",
+          "provider": "ominiroute",
+          "effective_tools": [],
+          "tool_execution_verified": false,
+          "upstream_http_requests": 1,
+          "all_upstream_http_200": true,
+          "keyless_bun_route_verified": true
+        },
+        {
+          "kind": "read_tool",
+          "passed": true,
+          "duration_ms": 13992,
+          "model": "oc/mimo-v2.6-flash-free",
+          "provider": "ominiroute",
+          "effective_tools": [
+            "read"
+          ],
+          "tool_execution_verified": true,
+          "upstream_http_requests": 2,
+          "all_upstream_http_200": true,
+          "keyless_bun_route_verified": true
+        }
+      ]
+    },
+    {
+      "site": "server",
+      "openclaw_version": "2026.7.1-2",
+      "configured_model": "omniroute/oc/mimo-v2.6-flash-free",
+      "tests": [
+        {
+          "kind": "conversation",
+          "passed": true,
+          "duration_ms": 7269,
+          "model": "oc/mimo-v2.6-flash-free",
+          "provider": "omniroute",
+          "effective_tools": [],
+          "tool_execution_verified": false,
+          "upstream_http_requests": 1,
+          "all_upstream_http_200": true,
+          "keyless_bun_route_verified": true
+        },
+        {
+          "kind": "read_tool",
+          "passed": true,
+          "duration_ms": 12795,
+          "model": "oc/mimo-v2.6-flash-free",
+          "provider": "omniroute",
+          "effective_tools": [
+            "read"
+          ],
+          "tool_execution_verified": true,
+          "upstream_http_requests": 2,
+          "all_upstream_http_200": true,
+          "keyless_bun_route_verified": true
+        }
+      ]
+    }
+  ],
+  "upstream_http_requests_total": 6,
+  "bun_mode_enabled": true,
+  "worker_healthy": true,
+  "legacy_serve_port_closed": true,
+  "global_configuration_changed": false,
+  "external_message_delivery": false,
+  "test_method": "Existing OpenClaw Gateways, isolated test sessions, enforced empty/read-only tool sets, actual model/tool-result/model loop.",
+  "route_evidence": "Each synthetic test matched opencode/mimo-v2.6-flash-free HTTP 200 logs using anonymous/keyless credentials with Bun mode enabled. Stream log summaries do not retain the vendor billing_source extension."
+}

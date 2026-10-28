@@ -29,10 +29,12 @@
       </div>
     </div>
 
+    <WorkModeSwitcher v-if="!appStore.backendModeEnabled || isAdmin" :collapsed="sidebarCollapsed" />
+
     <!-- Navigation -->
     <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
       <!-- Admin View: Admin menu first, then personal menu -->
-      <template v-if="isAdmin">
+      <template v-if="isAdminContext(isAdmin, route.path)">
         <!-- Admin Section -->
         <div class="sidebar-section">
           <template v-for="item in adminNavItems" :key="item.path">
@@ -127,10 +129,10 @@
       </template>
 
       <!-- Regular User View -->
-      <template v-else-if="!appStore.backendModeEnabled">
+      <template v-else-if="!appStore.backendModeEnabled || isAdmin">
         <div class="sidebar-section">
           <router-link
-            v-for="item in userNavItems"
+            v-for="item in workspaceNavItems"
             :key="item.path"
             :to="item.path"
             class="sidebar-link mb-1"
@@ -142,6 +144,10 @@
             <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+          </router-link>
+          <router-link v-if="isAdmin" to="/admin/dashboard" class="sidebar-link mb-1" :class="{ 'sidebar-link-collapsed': sidebarCollapsed }" :title="sidebarCollapsed ? t('marketplace.admin') : undefined" @click="handleMenuItemClick('/admin/dashboard')">
+            <component :is="CogIcon" class="h-5 w-5 flex-shrink-0" />
+            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }">{{ t('marketplace.admin') }}</span>
           </router-link>
         </div>
       </template>
@@ -193,6 +199,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import VersionBadge from '@/components/common/VersionBadge.vue'
+import WorkModeSwitcher from './WorkModeSwitcher.vue'
+import { useWorkModeStore } from '@/stores/workMode'
+import { isAdminContext } from '@/router/workspace'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
@@ -244,6 +253,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
+const workMode = useWorkModeStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
@@ -756,6 +766,11 @@ const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(tru
 // Personal navigation items (for admin's "My Account" section, without Dashboard).
 // Admins access 可用渠道 from this section just like regular users — there is no
 // separate admin entry, since the page is purely a user-facing view.
+const workspaceNavItems = computed((): NavItem[] => workMode.mode === 'supplier' ? [
+  { path: workMode.canUseSupplier() ? '/supplier/overview' : '/supplier/onboarding', label: t(workMode.canUseSupplier() ? 'marketplace.overview' : 'marketplace.onboarding'), icon: DashboardIcon },
+  { path: '/profile', label: t('nav.profile'), icon: UserIcon }
+] : userNavItems.value)
+
 const personalNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(false)))
 
 // Custom menu items filtered by visibility

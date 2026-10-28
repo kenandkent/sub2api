@@ -54,11 +54,11 @@
         <LocaleSwitcher />
 
         <!-- Subscription Progress (for users with active subscriptions; not mounted at all when the feature is off) -->
-        <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" />
+        <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled && workMode.mode === 'consumer'" />
 
         <!-- Balance Display -->
         <div
-          v-if="user"
+          v-if="user && workMode.mode === 'consumer'"
           class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
         >
           <svg
@@ -103,6 +103,7 @@
           </div>
         </div>
 
+        <div v-if="user && workMode.mode === 'supplier'" class="hidden rounded-xl bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 dark:bg-primary-900/20 dark:text-primary-300 sm:block">{{ t('marketplace.withdrawable') }}: —</div>
         <!-- User Dropdown -->
         <div v-if="user" class="relative" ref="dropdownRef">
           <button
@@ -142,7 +143,7 @@
               </div>
 
               <!-- Balance (mobile only) -->
-              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
+              <div v-if="workMode.mode === 'consumer'" class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
                 <div class="text-xs text-gray-500 dark:text-dark-400">
                   {{ t('common.balance') }}
                 </div>
@@ -154,6 +155,7 @@
                 </div>
               </div>
 
+              <div v-if="workMode.mode === 'supplier'" class="border-b border-gray-100 px-4 py-2 text-sm text-gray-700 dark:border-dark-700 dark:text-dark-200 sm:hidden">{{ t('marketplace.withdrawable') }}: —</div>
               <div class="py-1">
                 <router-link to="/profile" @click="closeDropdown" class="dropdown-item">
                   <Icon name="user" size="sm" />
@@ -257,6 +259,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
+import { useWorkModeStore } from '@/stores/workMode'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
@@ -269,6 +272,7 @@ import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
+const workMode = useWorkModeStore()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()

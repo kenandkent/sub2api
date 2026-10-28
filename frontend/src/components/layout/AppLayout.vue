@@ -3,6 +3,8 @@
     <!-- Background Decoration -->
     <div class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>
 
+    <ConfirmDialog :show="workMode.leaveConfirmationOpen" :title="t('marketplace.unsavedTitle')" :message="t('marketplace.unsavedMessage')" @confirm="workMode.resolveLeave(true)" @cancel="workMode.resolveLeave(false)" />
+
     <!-- Sidebar -->
     <AppSidebar />
 
@@ -25,6 +27,9 @@
 <script setup lang="ts">
 import '@/styles/onboarding.css'
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useWorkModeStore } from '@/stores/workMode'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
@@ -32,6 +37,8 @@ import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 
+const { t } = useI18n()
+const workMode = useWorkModeStore()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)

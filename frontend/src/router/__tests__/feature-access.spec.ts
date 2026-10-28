@@ -18,6 +18,9 @@ const authStore = vi.hoisted(() => ({
   hasPendingAuthSession: false,
 }))
 
+const workMode = vi.hoisted(() => ({ dirty: false, confirmLeave: vi.fn() }))
+vi.mock('@/stores/workMode', () => ({ useWorkModeStore: () => workMode }))
+
 const appStore = vi.hoisted(() => ({
   siteName: 'Sub2API',
   backendModeEnabled: false,
@@ -100,7 +103,7 @@ function runGuard(meta: Record<string, unknown>, path: string) {
       params: {},
       meta: { requiresAuth: true, ...meta },
     },
-    {},
+    { matched: [], fullPath: '/' },
     next
   )
   return { navigation, next }
@@ -208,5 +211,25 @@ describe('subscription route guard (opt-out flag)', () => {
     await navigation
 
     expect(next).toHaveBeenCalledWith('/admin/dashboard')
+  })
+})
+
+
+describe('unsaved navigation guard', () => {
+  beforeAll(async () => { await import('@/router') })
+  it('holds a route change until the user confirms and cancels when declined', async () => {
+    const deferred = createDeferred<boolean>()
+    workMode.dirty = true
+    workMode.confirmLeave.mockReturnValue(deferred.promise)
+    const next = vi.fn()
+    const navigation = routerHarness.guard!(
+      { path: '/keys', fullPath: '/keys', name: 'Keys', params: {}, meta: { requiresAuth: true } },
+      { matched: [{}], fullPath: '/supplier/overview' }, next
+    )
+    expect(next).not.toHaveBeenCalled()
+    deferred.resolve(false)
+    await navigation
+    expect(next).toHaveBeenCalledWith(false)
+    workMode.dirty = false
   })
 })

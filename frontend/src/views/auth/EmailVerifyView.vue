@@ -178,6 +178,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_WORKSPACE_PATH } from '@/router/workspace'
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -743,7 +744,7 @@ async function handleVerify(): Promise<void> {
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
 
     // Redirect to dashboard
-    await router.push(pendingRedirect.value || '/dashboard')
+    await router.push(pendingRedirect.value || DEFAULT_WORKSPACE_PATH)
   } catch (error: unknown) {
     errorMessage.value = buildRegistrationErrorMessage(error, t('auth.verifyFailed'))
 

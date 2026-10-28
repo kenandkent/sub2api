@@ -243,6 +243,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_WORKSPACE_PATH } from '@/router/workspace'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -283,7 +284,7 @@ const needsInvitation = ref(false)
 const invitationCode = ref('')
 const isSubmitting = ref(false)
 const invitationError = ref('')
-const redirectTo = ref('/dashboard')
+const redirectTo = ref(DEFAULT_WORKSPACE_PATH)
 const providerName = ref('OIDC')
 const adoptionRequired = ref(false)
 const suggestedDisplayName = ref('')
@@ -780,7 +781,7 @@ onMounted(async () => {
   const error = params.get('error')
   const errorDesc = params.get('error_description') || params.get('error_message') || ''
   const redirect = sanitizeRedirectPath(
-    params.get('redirect') || (route.query.redirect as string | undefined) || '/dashboard'
+    params.get('redirect') || (route.query.redirect as string | undefined) || DEFAULT_WORKSPACE_PATH
   )
 
   try {
@@ -809,7 +810,7 @@ onMounted(async () => {
 
     const completion = await exchangePendingOAuthCompletion() as PendingOidcCompletion
     const completionRedirect = sanitizeRedirectPath(
-      completion.redirect || (route.query.redirect as string | undefined) || '/dashboard'
+      completion.redirect || (route.query.redirect as string | undefined) || DEFAULT_WORKSPACE_PATH
     )
     applyAdoptionSuggestionState(completion)
     redirectTo.value = completionRedirect

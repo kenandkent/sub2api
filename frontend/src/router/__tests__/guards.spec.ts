@@ -81,7 +81,7 @@ function simulateGuard(
       if (authState.backendModeEnabled && !authState.isAdmin) {
         return null
       }
-      return authState.isAdmin ? '/admin/dashboard' : '/dashboard'
+      return '/workspace'
     }
     if (authState.backendModeEnabled && !authState.isAuthenticated) {
       const allowed = ['/login', '/key-usage', '/setup', '/payment/result']
@@ -201,14 +201,14 @@ describe('路由守卫逻辑', () => {
       hasPendingAuthSession: false,
     }
 
-    it('访问 /login 重定向到 /dashboard', () => {
+    it('访问 /login 重定向到默认工作区', () => {
       const redirect = simulateGuard('/login', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/dashboard')
+      expect(redirect).toBe('/workspace')
     })
 
-    it('访问 /register 重定向到 /dashboard', () => {
+    it('访问 /register 重定向到默认工作区', () => {
       const redirect = simulateGuard('/register', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/dashboard')
+      expect(redirect).toBe('/workspace')
     })
 
     it('访问 /dashboard 允许通过', () => {
@@ -238,9 +238,9 @@ describe('路由守卫逻辑', () => {
       hasPendingAuthSession: false,
     }
 
-    it('访问 /login 重定向到 /admin/dashboard', () => {
+    it('管理员访问 /login 重定向到默认工作区', () => {
       const redirect = simulateGuard('/login', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/admin/dashboard')
+      expect(redirect).toBe('/workspace')
     })
 
     it('访问管理页面允许通过', () => {
@@ -421,7 +421,7 @@ describe('路由守卫逻辑', () => {
       expect(redirect).toBeNull()
     })
 
-    it('admin: /login redirects to /admin/dashboard', () => {
+    it('admin: /login redirects to the default workspace', () => {
       const authState: MockAuthState = {
         isAuthenticated: true,
         isAdmin: true,
@@ -430,7 +430,7 @@ describe('路由守卫逻辑', () => {
         hasPendingAuthSession: false,
       }
       const redirect = simulateGuard('/login', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/admin/dashboard')
+      expect(redirect).toBe('/workspace')
     })
 
     it('non-admin authenticated: /dashboard redirects to /login', () => {
@@ -528,5 +528,27 @@ describe('路由守卫逻辑', () => {
       const redirect = simulateGuard('/email-verify', { requiresAuth: false }, authState)
       expect(redirect).toBe('/login')
     })
+  })
+})
+
+describe('supplier workspace guard', () => {
+  it('redirects unapproved users to onboarding but allows suspended history', async () => {
+    const { supplierRedirect } = await import('../workspace')
+    const pending = { consumer: true, supplier_status: 'pending' as const, marketplace_enabled: true, allowed_workspaces: ['consumer' as const] }
+    const suspended = { ...pending, supplier_status: 'suspended' as const, allowed_workspaces: ['consumer' as const, 'supplier' as const] }
+    expect(supplierRedirect('/supplier/overview', pending)).toBe('/supplier/onboarding')
+    expect(supplierRedirect('/supplier/overview', suspended)).toBeNull()
+    expect(supplierRedirect('/supplier/onboarding', null)).toBeNull()
+    expect(supplierRedirect('/supplier/overview', null)).toBe('/supplier/onboarding')
+  })
+})
+
+describe('admin navigation context', () => {
+  it('shows admin navigation only inside the admin route context', async () => {
+    const { isAdminContext } = await import('../workspace')
+    expect(isAdminContext(true, '/admin/dashboard')).toBe(true)
+    expect(isAdminContext(true, '/keys')).toBe(false)
+    expect(isAdminContext(true, '/supplier/overview')).toBe(false)
+    expect(isAdminContext(false, '/admin/dashboard')).toBe(false)
   })
 })

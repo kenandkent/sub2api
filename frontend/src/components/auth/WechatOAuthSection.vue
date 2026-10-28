@@ -28,6 +28,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_WORKSPACE_PATH } from '@/router/workspace'
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -88,7 +89,7 @@ function startLogin(): void {
   if (buttonDisabled.value || !resolvedStart.value.mode) {
     return
   }
-  const redirectTo = (route.query.redirect as string) || '/dashboard'
+  const redirectTo = (route.query.redirect as string) || DEFAULT_WORKSPACE_PATH
   storeOAuthAffiliateCode(resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code))
   const mode = resolvedStart.value.mode
   emit('start', {

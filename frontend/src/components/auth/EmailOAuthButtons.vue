@@ -26,6 +26,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_WORKSPACE_PATH } from '@/router/workspace'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -76,7 +77,7 @@ function providerLabel(provider: EmailOAuthProvider): string {
 }
 
 function startLogin(provider: EmailOAuthProvider): void {
-  const redirectTo = (route.query.redirect as string) || '/dashboard'
+  const redirectTo = (route.query.redirect as string) || DEFAULT_WORKSPACE_PATH
   const affiliateCode = resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code)
   storeOAuthAffiliateCode(affiliateCode)
   window.sessionStorage.setItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY, provider)

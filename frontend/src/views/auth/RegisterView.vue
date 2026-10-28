@@ -365,6 +365,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_WORKSPACE_PATH } from '@/router/workspace'
 import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -1093,7 +1094,7 @@ async function handleRegister(): Promise<void> {
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
 
     // Redirect to dashboard
-    await router.push('/dashboard')
+    await router.push((route.query.redirect as string) || DEFAULT_WORKSPACE_PATH)
   } catch (error: unknown) {
     // Handle registration error
     errorMessage.value = buildRegistrationErrorMessage(error, t('auth.registrationFailed'))

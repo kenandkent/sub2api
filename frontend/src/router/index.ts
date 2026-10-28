@@ -5,6 +5,7 @@
 
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useWorkModeStore } from '@/stores/workMode'
 import { useAppStore } from '@/stores/app'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAdminComplianceStore } from '@/stores/adminCompliance'
@@ -13,6 +14,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { supplierRedirect } from './workspace'
 
 /**
  * Route definitions with lazy loading
@@ -190,6 +192,20 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     redirect: '/home'
+  },
+  {
+    path: '/workspace', name: 'DefaultWorkspace', component: () => import('@/views/supplier/OnboardingView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/supplier/onboarding', name: 'SupplierOnboarding',
+    component: () => import('@/views/supplier/OnboardingView.vue'),
+    meta: { requiresAuth: true, titleKey: 'marketplace.onboarding' }
+  },
+  {
+    path: '/supplier/overview', name: 'SupplierOverview',
+    component: () => import('@/views/supplier/OverviewView.vue'),
+    meta: { requiresAuth: true, titleKey: 'marketplace.overview' }
   },
   {
     path: '/dashboard',
@@ -779,7 +795,7 @@ function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: bo
   return false
 }
 
-router.beforeEach(async (to, _from, next) => {
+router.beforeEach(async (to, from, next) => {
   // 开始导航加载状态
   navigationLoading.startNavigation()
 
@@ -789,6 +805,10 @@ router.beforeEach(async (to, _from, next) => {
   if (!authInitialized) {
     authStore.checkAuth()
     authInitialized = true
+  }
+
+  if (from.matched.length && to.fullPath !== from.fullPath && useWorkModeStore().dirty) {
+    if (!await useWorkModeStore().confirmLeave()) { next(false); return }
   }
 
   // Set page title
@@ -826,8 +846,8 @@ router.beforeEach(async (to, _from, next) => {
         next()
         return
       }
-      // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      // No explicit destination: restore this user's preferred workspace.
+      next('/workspace')
       return
     }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
@@ -881,6 +901,27 @@ router.beforeEach(async (to, _from, next) => {
       query: { redirect: to.fullPath } // Save intended destination
     })
     return
+  }
+
+  if (to.path === '/workspace') {
+    const workMode = useWorkModeStore()
+    const userId = authStore.user!.id
+    await workMode.loadCapabilities(userId)
+    if (authStore.user?.id !== userId) { next('/login'); return }
+    next(workMode.defaultPath(userId))
+    return
+  }
+
+  if (to.path.startsWith('/supplier/')) {
+    const workMode = useWorkModeStore()
+    const userId = authStore.user!.id
+    await workMode.loadCapabilities(userId)
+    if (authStore.user?.id !== userId) { next('/login'); return }
+    const redirect = supplierRedirect(to.path, workMode.capabilities)
+    if (redirect) {
+      next(redirect)
+      return
+    }
   }
 
   // Check admin requirement
@@ -982,7 +1023,8 @@ router.beforeEach(async (to, _from, next) => {
 /**
  * Navigation guard: End loading and trigger prefetch
  */
-router.afterEach((to) => {
+router.afterEach((to, _from, failure) => {
+  if (!failure && useAuthStore().isAuthenticated) useWorkModeStore().recordRoute(to.path)
   // 结束导航加载状态
   navigationLoading.endNavigation()
 

@@ -4,6 +4,7 @@
  */
 
 import { defineStore } from 'pinia'
+import { useWorkModeStore } from './workMode'
 import { ref, computed, readonly } from 'vue'
 import { authAPI, isTotp2FARequired, passkeyAPI, type LoginResponse } from '@/api'
 import type {
@@ -297,6 +298,7 @@ export const useAuthStore = defineStore('auth', () => {
    * Internal helper function
    */
   function setAuthFromResponse(response: AuthResponse): void {
+    useWorkModeStore().clear()
     // Store token and user
     token.value = response.access_token
 
@@ -355,6 +357,7 @@ export const useAuthStore = defineStore('auth', () => {
    * @param newToken - 后端签发的 JWT access token
    */
   async function setToken(newToken: string): Promise<User> {
+    useWorkModeStore().clear()
     // Clear any previous state first (avoid mixing sessions)
     // Note: Don't clear localStorage here as OAuth callback may have set refresh_token
     stopAutoRefresh()
@@ -414,6 +417,7 @@ export const useAuthStore = defineStore('auth', () => {
    * Clears all authentication state and persisted data
    */
   async function logout(): Promise<void> {
+    useWorkModeStore().clear()
     try {
       // Call API logout (revokes refresh token on server)
       await authAPI.logout()
@@ -463,6 +467,7 @@ export const useAuthStore = defineStore('auth', () => {
    * Internal helper function
    */
   function clearAuth(options?: { preservePendingAuthSession?: boolean }): void {
+    useWorkModeStore().clear()
     // Stop auto-refresh
     stopAutoRefresh()
     // Stop token refresh

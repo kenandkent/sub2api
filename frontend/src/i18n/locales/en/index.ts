@@ -1,3 +1,4 @@
+import marketplace from './marketplace'
 import adminAccessKeys from './adminAccessKeys'
 import landing from './landing'
 import common from './common'
@@ -8,6 +9,7 @@ import admin from './admin'
 import misc from './misc'
 
 export default {
+  ...marketplace,
   adminAccessKeys,
   ...landing,
   ...common,

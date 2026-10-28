@@ -146,6 +146,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_WORKSPACE_PATH } from '@/router/workspace'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -180,7 +181,7 @@ const confirmPassword = ref('')
 const invitationCode = ref('')
 const registrationError = ref('')
 const pendingProvider = ref<'github' | 'google'>('github')
-const redirectTo = ref('/dashboard')
+const redirectTo = ref(DEFAULT_WORKSPACE_PATH)
 const invalidCallback = ref(false)
 const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
 
@@ -290,7 +291,7 @@ async function resumePendingEmailOAuth() {
   isProcessing.value = true
   try {
     const completion = await exchangePendingOAuthCompletion() as EmailOAuthPendingCompletion
-    const completionRedirect = completion.redirect || '/dashboard'
+    const completionRedirect = completion.redirect || DEFAULT_WORKSPACE_PATH
     if (hasOAuthTokenResponse(completion)) {
       await finalizeTokenResponse(completion, completionRedirect)
       return
@@ -388,7 +389,7 @@ onMounted(async () => {
 
   isProcessing.value = true
   try {
-    await finalizeTokenResponse(tokenResponse, params.get('redirect') || '/dashboard')
+    await finalizeTokenResponse(tokenResponse, params.get('redirect') || DEFAULT_WORKSPACE_PATH)
   } catch (error: unknown) {
     const message = (error as { message?: string })?.message || t('auth.loginFailed')
     appStore.showError(message)

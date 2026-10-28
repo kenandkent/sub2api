@@ -20,6 +20,7 @@
 </template>
 
 <script setup lang="ts">
+import { DEFAULT_WORKSPACE_PATH } from '@/router/workspace'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -50,7 +51,7 @@ const normalizedProviderName = computed(() => {
 const providerInitial = computed(() => normalizedProviderName.value.charAt(0).toUpperCase() || 'O')
 
 function startLogin(): void {
-  const redirectTo = (route.query.redirect as string) || '/dashboard'
+  const redirectTo = (route.query.redirect as string) || DEFAULT_WORKSPACE_PATH
   storeOAuthAffiliateCode(resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code))
   emit('start', { provider: 'oidc', params: { redirect: redirectTo } })
 }

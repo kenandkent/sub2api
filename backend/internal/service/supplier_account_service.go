@@ -161,6 +161,7 @@ func (s *SupplierAccountService) provider(platform string) (config.MarketplacePr
 	return config.MarketplaceProviderConfig{}, false
 }
 func (s *SupplierAccountService) Create(ctx context.Context, user int64, key string, in SupplierAccountCreate) (*SupplierOperation, error) {
+	if in.Type=="api_key" {in.Type="apikey"}
 	if err := s.authorize(ctx, user, true); err != nil {
 		return nil, err
 	}

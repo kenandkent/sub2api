@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -11,6 +12,19 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
+
+type marketplaceTermsFixture struct{ terms MarketplacePolicyVersion }
+func (s marketplaceTermsFixture) CurrentPolicy(context.Context) (MarketplacePolicyVersion,error) {return s.terms,nil}
+
+func TestMarketplacePolicyUsesPublishedTermsForNewRequests(t *testing.T) {
+	s:=NewMarketplacePolicyService(&config.Config{Marketplace:validMarketplaceConfig()})
+	s.SetTermsSource(marketplaceTermsFixture{terms:MarketplacePolicyVersion{Version:2,FeeBPS:500,HoldHours:48,MaxSupplierConcurrency:4,MinimumPayoutUSD:Money{Decimal:decimal.RequireFromString("3.25")}}})
+	terms,err:=s.CurrentTerms(context.Background())
+	require.NoError(t,err)
+	require.EqualValues(t,2,terms.Version)
+	require.Equal(t,"3.25",terms.MinimumPayoutUSD.String())
+	require.Equal(t,500,terms.FeeBPS)
+}
 
 func validMarketplaceConfig() config.MarketplaceConfig {
 	fee, hold, concurrency, minimum := 0, 0, 1, "0.00"

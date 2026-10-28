@@ -155,6 +155,11 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 		return &service.BatchImageBalanceHoldResult{Applied: false}, nil
 	}
 
+	// The funding compatibility bridge associates legacy batch holds with their
+	// original business key; it never takes money from another request's hold.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('sub2api.legacy_hold_id', $1, true)`, service.BatchImageHoldRequestID(cmd.BatchID)); err != nil {
+		return nil, err
+	}
 	result, err := apply(ctx, tx, cmd)
 	if err != nil {
 		return nil, err

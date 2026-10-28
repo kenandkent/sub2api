@@ -192,6 +192,7 @@ type SupplierOptions struct {
 	MaxSupplierConcurrency *int                     `json:"max_supplier_concurrency"`
 	FeeBPS                 *int                     `json:"fee_bps"`
 	HoldHours              *int                     `json:"hold_hours"`
+	MinimumPayoutUSD        *string                  `json:"minimum_payout_usd"`
 }
 
 func (s *SupplierService) Options() SupplierOptions {
@@ -207,6 +208,7 @@ func (s *SupplierService) Options() SupplierOptions {
 		o.MaxSupplierConcurrency = c.MaxSupplierConcurrency
 		o.FeeBPS = c.FeeBPS
 		o.HoldHours = c.HoldHours
+		o.MinimumPayoutUSD = c.MinimumPayoutUSD
 	}
 	return o
 }

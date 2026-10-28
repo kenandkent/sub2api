@@ -105,11 +105,11 @@ func (s *SupplierPayoutService) Request(ctx context.Context, actor, destination 
 	if actor <= 0 || destination <= 0 || strings.TrimSpace(operation) == "" || ValidatePayoutAmount(amount, decimal.Zero) != nil {
 		return nil, ErrPayoutInvalid
 	}
-	if s.policy == nil || !s.policy.PayoutsEnabled() || s.policy.cfg.Marketplace.MinimumPayoutUSD == nil {
+	if s.policy == nil || !s.policy.PayoutsEnabled() {
 		return s.store.FindRequest(ctx, actor, destination, amount, operation)
 	}
-	minimum, err := decimal.NewFromString(*s.policy.cfg.Marketplace.MinimumPayoutUSD)
-	if err != nil || ValidatePayoutAmount(amount, minimum) != nil {
+	terms, err := s.policy.CurrentTerms(ctx)
+	if err != nil || ValidatePayoutAmount(amount, terms.MinimumPayoutUSD.Decimal) != nil {
 		return s.store.FindRequest(ctx, actor, destination, amount, operation)
 	}
 	return s.store.Request(ctx, actor, destination, amount, operation)

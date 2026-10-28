@@ -490,6 +490,14 @@ func (s *RedeemService) redeem(ctx context.Context, userID int64, code string, r
 	switch redeemCode.Type {
 	case RedeemTypeBalance:
 		amount := redeemCode.Value
+		// Only a matching, confirmed payment order may classify this credit as
+		// cash. The database bridge verifies owner, status and amount itself;
+		// ordinary redeem codes remain promotional.
+		if amount > 0 && s.entClient.Driver().Dialect() == "postgres" {
+			if _, err := tx.ExecContext(ctx, `SELECT set_config('sub2api.payment_redeem_code', $1, true)`, redeemCode.Code); err != nil {
+				return nil, fmt.Errorf("bind funding payment origin: %w", err)
+			}
+		}
 		if amount < 0 {
 			if s.redeemUserRepo == nil {
 				return nil, errors.New("user repository does not support atomic redeem balance adjustments")

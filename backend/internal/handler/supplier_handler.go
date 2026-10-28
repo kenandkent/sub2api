@@ -13,7 +13,10 @@ import (
 type SupplierHandler struct {
 	svc      *service.SupplierService
 	accounts *service.SupplierAccountService
+	catalog *service.MarketplaceCatalogService
 }
+
+func (h *SupplierHandler) SetCatalogService(catalog *service.MarketplaceCatalogService) {h.catalog=catalog}
 
 func (h *SupplierHandler) SetAccountService(accounts *service.SupplierAccountService) {
 	h.accounts = accounts
@@ -152,6 +155,13 @@ func (h *SupplierHandler) Options(c *gin.Context) {
 		return
 	}
 	options := h.svc.Options()
+	if h.catalog!=nil {
+		if current,err:=h.catalog.Current(c.Request.Context());err==nil {
+			options.FeeBPS=&current.Policy.FeeBPS;options.HoldHours=&current.Policy.HoldHours
+			options.MaxSupplierConcurrency=&current.Policy.MaxSupplierConcurrency
+			minimum:=current.Policy.MinimumPayoutUSD.String();options.MinimumPayoutUSD=&minimum
+		}
+	}
 	if h.accounts != nil {
 		providers, err := h.accounts.Providers(c.Request.Context())
 		if response.ErrorFrom(c, err) {

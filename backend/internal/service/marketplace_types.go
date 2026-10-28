@@ -136,12 +136,12 @@ type CaptureResult struct {
 }
 
 type MarketplacePolicyVersion struct {
-	Version                int64
-	FeeBPS                 int
-	HoldHours              int
-	MaxSupplierConcurrency int
-	MinimumPayoutUSD       Money
-	Rules                  map[string]any
-	PublishedBy            *int64
-	PublishedAt            *time.Time
+	Version                int64          `json:"version"`
+	FeeBPS                 int            `json:"fee_bps"`
+	HoldHours              int            `json:"hold_hours"`
+	MaxSupplierConcurrency int            `json:"max_supplier_concurrency"`
+	MinimumPayoutUSD       Money          `json:"minimum_payout_usd"`
+	Rules                  map[string]any `json:"rules,omitempty"`
+	PublishedBy            *int64         `json:"published_by,omitempty"`
+	PublishedAt            *time.Time     `json:"published_at,omitempty"`
 }

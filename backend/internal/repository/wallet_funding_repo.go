@@ -285,5 +285,5 @@ func (*WalletFundingRepository) SpendSelfOwned(ctx context.Context, tx *sql.Tx, 
 	if err = fundingUserUpdate(ctx, tx, `UPDATE users SET balance=balance-$2 WHERE id=$1`, user, amount); err != nil {
 		return err
 	}
-	return fundingPost(ctx, tx, user, op, actor, "self_consumption", "buyer_available", amount)
+	return fundingPost(ctx, tx, user, op, actor, "buyer_available", "self_consumption", amount)
 }

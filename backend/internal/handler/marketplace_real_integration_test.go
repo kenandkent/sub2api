@@ -126,7 +126,7 @@ func newRealGatewayFixture(t *testing.T, db *sql.DB, rdb *redis.Client) *realGat
 	exec(`INSERT INTO wallet_funding_states(user_id,migration_version,reconciled_at) VALUES($1,1,now())`, f.buyer)
 	exec(`INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','test',$2,5,5)`, f.buyer, suffix)
 	exec(`INSERT INTO supplier_profiles(user_id,status) VALUES($1,'active')`, f.owner)
-	f.account = row(`INSERT INTO accounts(name,platform,type,owner_user_id) VALUES($1,'openai','apikey',$2) RETURNING id`, suffix, f.owner)
+	f.account = row(`INSERT INTO accounts(name,platform,type,owner_user_id,concurrency) VALUES($1,'openai','apikey',$2,1) RETURNING id`, suffix, f.owner)
 	exec(`INSERT INTO sharing_offers(account_id,owner_user_id,review_status,enabled,allowed_models) VALUES($1,$2,'approved',true,'["gpt-5.4"]')`, f.account, f.owner)
 	exec(`INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, f.account, f.group)
 	var err error

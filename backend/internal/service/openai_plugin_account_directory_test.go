@@ -91,7 +91,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// (refresh_token) not handed out by ResolveOutboundIdentity. Groups/AccountGroups
 	// = relational graphs with back-references that would cycle under encoding/json.
 	stripped := map[string]struct{}{
-		"Credentials": {}, "Groups": {}, "AccountGroups": {},
+		"Credentials": {}, "OwnerUserID": {}, "Groups": {}, "AccountGroups": {},
 	}
 	// Fields intentionally exposed as readable metadata (incl. Extra and Proxy —
 	// the proxy password is already handed out via ResolveOutboundIdentity's URL).
@@ -128,7 +128,10 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 		Extra:       map[string]any{"opaque": "extra-released"},
 		Proxy:       &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
 	}
+	owner := int64(731007)
+	acct.OwnerUserID = &owner
 	snap := accountReadableSnapshotJSON(acct)
+	assert.NotContains(t,string(snap),"731007","supplier ownership must not be copied to plugin metadata")
 	require.NotNil(t, snap)
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(snap, &m))

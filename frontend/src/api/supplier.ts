@@ -6,12 +6,12 @@ export async function getCapabilities(signal?: AbortSignal): Promise<UserCapabil
   return data
 }
 
-import type { SupplierProfile, SupplierOptions, SupplierAccount, SupplierOverview, Page, CreateSupplierAccount } from '@/types/marketplace'
+import type { SupplierProfile, SupplierOptions, SupplierAccount, SupplierOverview, Page, CreateSupplierAccount, SupplierAccountFilters } from '@/types/marketplace'
 export async function getSupplierProfile(): Promise<SupplierProfile> { return (await apiClient.get('/supplier/profile')).data }
 export async function submitSupplierProfile(payload: { agreement_version: number; fields: Record<string, string> }): Promise<SupplierProfile> { return (await apiClient.post('/supplier/profile', payload)).data }
 export async function getSupplierOptions(): Promise<SupplierOptions> { return (await apiClient.get('/supplier/options')).data }
 export async function getSupplierOverview(): Promise<SupplierOverview> { return (await apiClient.get('/supplier/overview')).data }
-export async function listAccounts(page = 1): Promise<Page<SupplierAccount>> { return (await apiClient.get('/supplier/accounts', { params: { page, page_size: 20 } })).data }
+export async function listAccounts(page = 1, filters?: SupplierAccountFilters): Promise<Page<SupplierAccount>> { return (await apiClient.get('/supplier/accounts', { params: { page, page_size: 20, ...filters } })).data }
 export async function getAccount(id: number): Promise<SupplierAccount> { return (await apiClient.get(`/supplier/accounts/${id}`)).data }
 export async function createAccount(payload: CreateSupplierAccount): Promise<SupplierAccount> { return (await apiClient.post('/supplier/accounts', payload)).data }
 export async function updateAccount(id: number, payload: { expected_version: number; name: string; concurrency: number; allowed_models: string[] }): Promise<SupplierAccount> { return (await apiClient.patch(`/supplier/accounts/${id}`, payload)).data }

@@ -364,7 +364,7 @@ function closeDropdown() {
 async function handleLogout() {
   closeDropdown()
   try {
-    await authStore.logout()
+    if (!await authStore.logout()) return
   } catch (error) {
     // Ignore logout errors - still redirect to login
     console.error('Logout error:', error)

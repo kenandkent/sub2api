@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import { useWorkModeStore } from '@/stores/workMode'
 
 // Mock authAPI
 const mockLogin = vi.fn()
@@ -136,6 +137,36 @@ describe('useAuthStore', () => {
   // --- logout ---
 
   describe('logout', () => {
+    it('preserves the session when logout is cancelled with unsaved changes', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const auth = useAuthStore()
+      await auth.login({ email: 'test@example.com', password: '123456' })
+      const workMode = useWorkModeStore()
+      workMode.dirty = true
+      const logout = auth.logout()
+      expect(workMode.leaveConfirmationOpen).toBe(true)
+      expect(mockLogout).not.toHaveBeenCalled()
+      workMode.resolveLeave(false)
+      expect(await logout).toBe(false)
+      expect(auth.isAuthenticated).toBe(true)
+      expect(localStorage.getItem('auth_token')).toBe('test-token-123')
+      expect(workMode.dirty).toBe(true)
+    })
+    it('logs out only after discarding unsaved changes is confirmed', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      mockLogout.mockResolvedValue(undefined)
+      const auth = useAuthStore()
+      await auth.login({ email: 'test@example.com', password: '123456' })
+      const workMode = useWorkModeStore()
+      workMode.dirty = true
+      const logout = auth.logout()
+      expect(mockLogout).not.toHaveBeenCalled()
+      workMode.resolveLeave(true)
+      expect(await logout).toBe(true)
+      expect(mockLogout).toHaveBeenCalledOnce()
+      expect(auth.isAuthenticated).toBe(false)
+      expect(localStorage.getItem('auth_token')).toBeNull()
+    })
     it('注销后清除所有状态和 localStorage', async () => {
       mockLogin.mockResolvedValue(fakeAuthResponse)
       mockLogout.mockResolvedValue(undefined)

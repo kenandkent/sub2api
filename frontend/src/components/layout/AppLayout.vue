@@ -3,7 +3,7 @@
     <!-- Background Decoration -->
     <div class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>
 
-    <ConfirmDialog :show="workMode.leaveConfirmationOpen" :title="t('marketplace.unsavedTitle')" :message="t('marketplace.unsavedMessage')" @confirm="workMode.resolveLeave(true)" @cancel="workMode.resolveLeave(false)" />
+    <ConfirmDialog :z-index="90" :show="workMode.leaveConfirmationOpen" :title="t('marketplace.unsavedTitle')" :message="t('marketplace.unsavedMessage')" @confirm="workMode.resolveLeave(true)" @cancel="workMode.resolveLeave(false)" />
 
     <!-- Sidebar -->
     <AppSidebar />

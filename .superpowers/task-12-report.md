@@ -21,3 +21,11 @@
 - T13 forms can set `useWorkModeStore().dirty` while unsaved; the layout owns the confirmation dialog and the router resolves the pending navigation. Clear it when a form is saved.
 - Supplier routes depend on the server capability envelope described in the brief. In particular, suspended profiles must include `supplier` in `allowed_workspaces` for historical access.
 - The complete suite emitted existing expected stderr from error-path tests and a Browserslist age notice; there were no test failures in the final run.
+
+## Independent review fixes
+
+- Logout now asks about dirty forms before revoking the session; cancelling preserves both the token and form state. Both header and admin compliance logout paths respect cancellation, and the confirmation appears above the compliance dialog.
+- Protected non-admin routes determine consumer mode without a fixed URL list. Unmatched routes are not saved as recent destinations, and the router checks that a remembered destination still exists before switching.
+- Re-selecting the current workspace persists the user's preference on a duplicated navigation; cancelled or aborted navigation does not.
+- RED: the four review regressions failed before their fixes (logout, nested consumer routes, duplicate selection, unmatched supplier route), and the stale-route fallback failed before validation was added.
+- GREEN: focused suite passed 96 tests across seven files; `vue-tsc --noEmit` and ESLint on changed production files passed. The subsequent full Vitest run passed 374 files and 2,931 tests. Expected error-path stderr remains present in the test output.

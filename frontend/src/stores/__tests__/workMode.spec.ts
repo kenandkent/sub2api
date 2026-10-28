@@ -20,6 +20,20 @@ describe('workspace state', () => {
     store.recordRoute('/supplier/overview')
     expect(store.mode).toBe('supplier')
   })
+  it('switches to consumer mode for nested and custom consumer routes', () => {
+    const store = useWorkModeStore()
+    for (const path of ['/docs/batch-image', '/custom/123']) {
+      store.recordRoute('/supplier/overview')
+      store.recordRoute(path)
+      expect(store.mode).toBe('consumer')
+    }
+  })
+  it('does not remember an unmatched supplier URL as a destination', () => {
+    const store = useWorkModeStore()
+    store.capabilities = { consumer: true, supplier_status: 'active', marketplace_enabled: true, allowed_workspaces: ['consumer', 'supplier'] }
+    store.recordRoute('/supplier/typo', false)
+    expect(store.targetFor('supplier')).toBe('/supplier/overview')
+  })
   it('does not react to another tab changing the preference', () => {
     const store = useWorkModeStore()
     store.recordRoute('/keys')

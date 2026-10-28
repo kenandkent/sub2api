@@ -3,8 +3,6 @@ import { ref } from 'vue'
 import { getCapabilities } from '@/api/supplier'
 import type { UserCapabilities, WorkMode } from '@/types/marketplace'
 
-const consumerPaths = ['/dashboard', '/keys', '/usage', '/redeem', '/affiliate', '/available-channels', '/profile', '/subscriptions', '/purchase', '/orders', '/batch-image', '/monitor']
-
 export const useWorkModeStore = defineStore('workMode', () => {
   const mode = ref<WorkMode>('consumer')
   const capabilities = ref<UserCapabilities | null>(null)
@@ -33,13 +31,13 @@ export const useWorkModeStore = defineStore('workMode', () => {
   function defaultPath(userId: number) {
     return targetFor(localStorage.getItem(`work-mode:${userId}`) === 'supplier' ? 'supplier' : 'consumer')
   }
-  function recordRoute(path: string) {
+  function recordRoute(path: string, matched = true) {
     if (path === '/supplier' || path.startsWith('/supplier/')) {
       mode.value = 'supplier'
-      if (path !== '/supplier/onboarding') lastSupplier.value = path
-    } else if (consumerPaths.includes(path)) {
+      if (matched && path !== '/supplier/onboarding') lastSupplier.value = path
+    } else if (path !== '/admin' && !path.startsWith('/admin/')) {
       mode.value = 'consumer'
-      lastConsumer.value = path
+      if (matched) lastConsumer.value = path
     }
   }
   async function loadCapabilities(userId: number) {

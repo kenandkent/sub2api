@@ -178,7 +178,7 @@ async function submit(): Promise<void> {
 }
 
 async function logout(): Promise<void> {
-  await authStore.logout()
+  if (!await authStore.logout()) return
   window.location.href = '/login'
 }
 </script>

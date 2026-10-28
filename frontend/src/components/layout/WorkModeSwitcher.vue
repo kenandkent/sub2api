@@ -15,12 +15,13 @@
 </template>
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useWorkModeStore } from '@/stores/workMode'
 import type { WorkMode } from '@/types/marketplace'
+import { validWorkspaceTarget } from '@/router/workspace'
 import Icon from '@/components/icons/Icon.vue'
 
 defineProps<{ collapsed: boolean }>()
@@ -43,8 +44,10 @@ async function switchTo(mode: WorkMode) {
   if (userId == null) return
   await workMode.loadCapabilities(userId)
   if (auth.user?.id !== userId) return
-  const result = await router.push(workMode.targetFor(mode))
-  if (!result && auth.user?.id === userId) { workMode.setPreference(userId, mode); app.setMobileOpen(false) }
+  const fallback = mode === 'consumer' ? '/dashboard' : workMode.canUseSupplier() ? '/supplier/overview' : '/supplier/onboarding'
+  const target = validWorkspaceTarget(router, workMode.targetFor(mode), fallback)
+  const result = await router.push(target)
+  if ((!result || isNavigationFailure(result, NavigationFailureType.duplicated)) && auth.user?.id === userId) { workMode.setPreference(userId, mode); app.setMobileOpen(false) }
 }
 function outside(event: MouseEvent) { if (!root.value?.contains(event.target as Node)) open.value = false }
 onMounted(() => document.addEventListener('click', outside))

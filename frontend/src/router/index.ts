@@ -14,7 +14,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
-import { supplierRedirect } from './workspace'
+import { supplierRedirect, validWorkspaceTarget } from './workspace'
 
 /**
  * Route definitions with lazy loading
@@ -908,7 +908,9 @@ router.beforeEach(async (to, from, next) => {
     const userId = authStore.user!.id
     await workMode.loadCapabilities(userId)
     if (authStore.user?.id !== userId) { next('/login'); return }
-    next(workMode.defaultPath(userId))
+    const target = workMode.defaultPath(userId)
+    const fallback = workMode.canUseSupplier() && target.startsWith('/supplier/') ? '/supplier/overview' : '/dashboard'
+    next(validWorkspaceTarget(router, target, fallback))
     return
   }
 
@@ -1024,7 +1026,9 @@ router.beforeEach(async (to, from, next) => {
  * Navigation guard: End loading and trigger prefetch
  */
 router.afterEach((to, _from, failure) => {
-  if (!failure && useAuthStore().isAuthenticated) useWorkModeStore().recordRoute(to.path)
+  if (!failure && useAuthStore().isAuthenticated && to.meta.requiresAuth !== false) {
+    useWorkModeStore().recordRoute(to.path, to.matched.length > 0 && to.name !== 'NotFound')
+  }
   // 结束导航加载状态
   navigationLoading.endNavigation()
 

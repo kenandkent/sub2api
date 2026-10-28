@@ -416,8 +416,10 @@ export const useAuthStore = defineStore('auth', () => {
    * User logout
    * Clears all authentication state and persisted data
    */
-  async function logout(): Promise<void> {
-    useWorkModeStore().clear()
+  async function logout(): Promise<boolean> {
+    const workMode = useWorkModeStore()
+    if (!await workMode.confirmLeave()) return false
+    workMode.clear()
     try {
       // Call API logout (revokes refresh token on server)
       await authAPI.logout()
@@ -428,6 +430,7 @@ export const useAuthStore = defineStore('auth', () => {
       // Always clear local state (tokens, user data, refresh timers)
       clearAuth()
     }
+    return true
   }
 
   /**

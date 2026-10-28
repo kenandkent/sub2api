@@ -134,6 +134,7 @@ deploy/docker-compose.override.yml
 vite.config.js
 docs/*
 .worktrees/
+.superpowers/
 !docs/superpowers/
 docs/superpowers/*
 !docs/superpowers/specs/

@@ -54,8 +54,16 @@ func refundPost(ctx context.Context, q sqlExecutor, op string, user int64, debit
 	return err
 }
 
-// ReservePaymentRefund returns false only for users not yet migrated. Migrated
-// users can reserve exclusively the unspent, unheld cash belonging to this order.
+// refundParts uses cumulative rounding so successive partial refunds and chargebacks
+// consume exactly the original cash and bonus components by the final unit.
+func refundParts(amount, prior, orderAmount, bonus decimal.Decimal) (decimal.Decimal, decimal.Decimal) {
+	cash := orderAmount.Sub(bonus)
+	part := prior.Add(amount).Mul(cash).DivRound(orderAmount, 8).Sub(prior.Mul(cash).DivRound(orderAmount, 8))
+	return part, amount.Sub(part)
+}
+
+// ReservePaymentRefund returns false only for users not yet migrated. Each
+// credited refund reserves the order's own cash and bonus in proportion.
 func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user int64, amount float64, attempt string) (bool, error) {
 	q, err := r.refundExecutor(ctx)
 	if err != nil {
@@ -96,26 +104,31 @@ func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user i
 	if !errors.Is(err, sql.ErrNoRows) {
 		return true, err
 	}
-	// The user lock serializes this cap with refunds and chargebacks for the
-	// same owner. Do not lock the order here: payment claims lock it first.
-	var orderAmount, prior decimal.Decimal
-	if err = scanSingleRow(ctx, q, `SELECT amount FROM payment_orders WHERE id=$1 AND user_id=$2 AND order_type='balance'`, []any{order, user}, &orderAmount); err != nil {
+	// The already-held user lock serializes refunds and chargebacks. Do not
+	// lock the order here: payment claims acquire their order lock first.
+	var orderAmount, bonus, prior decimal.Decimal
+	var open bool
+	if err = scanSingleRow(ctx, q, `SELECT amount,bonus_amount FROM payment_orders WHERE id=$1 AND user_id=$2 AND order_type='balance'`, []any{order, user}, &orderAmount, &bonus); err != nil {
 		return true, err
 	}
-	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state IN ('reserved','confirmed')),0)`, []any{order}, &prior); err != nil {
+	if !orderAmount.IsPositive() || bonus.IsNegative() || bonus.GreaterThan(orderAmount) {
+		return true, ErrFundingInvariant
+	}
+	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state IN ('reserved','confirmed')),0), EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='reserved')`, []any{order}, &prior, &open); err != nil {
 		return true, err
 	}
-	if prior.Add(a).GreaterThan(orderAmount) {
+	if open || prior.Add(a).GreaterThan(orderAmount) {
 		return true, service.ErrInsufficientFunding
 	}
+	cashPart, bonusPart := refundParts(a, prior, orderAmount, bonus)
 	// Lock all lots in fixed order, and verify the projection before touching it.
 	rows, err := q.QueryContext(ctx, `SELECT id,kind,origin_type,origin_id,remaining,reserved FROM wallet_funding_lots WHERE user_id=$1 ORDER BY id FOR UPDATE`, user)
 	if err != nil {
 		return true, err
 	}
 	total, held := decimal.Zero, decimal.Zero
-	var lot int64
-	available := decimal.Zero
+	var lot, bonusLot int64
+	available, bonusAvailable := decimal.Zero, decimal.Zero
 	for rows.Next() {
 		var id int64
 		var kind, origin, originID string
@@ -130,6 +143,10 @@ func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user i
 			lot = id
 			available = remaining.Sub(reserved)
 		}
+		if kind == "promotional" && origin == "payment_bonus" && originID == strconv.FormatInt(order, 10) {
+			bonusLot = id
+			bonusAvailable = remaining.Sub(reserved)
+		}
 	}
 	err = rows.Err()
 	_ = rows.Close()
@@ -139,7 +156,7 @@ func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user i
 	if !total.Sub(debt).Equal(balance.Add(frozen)) || !held.Equal(frozen) {
 		return true, ErrFundingInvariant
 	}
-	if lot == 0 || debt.IsPositive() || balance.LessThan(a) || available.LessThan(a) {
+	if lot == 0 || debt.IsPositive() || balance.LessThan(a) || available.LessThan(cashPart) || (bonusPart.IsPositive() && (bonusLot == 0 || bonusAvailable.LessThan(bonusPart))) {
 		return true, service.ErrInsufficientFunding
 	}
 	if _, err = q.ExecContext(ctx, `INSERT INTO marketplace_payment_refund_attempts(attempt_id,order_id,user_id,lot_id,amount,state) VALUES($1,$2,$3,$4,$5,'reserved')`, attempt, order, user, lot, a); err != nil {
@@ -149,11 +166,19 @@ func (r *userRepository) ReservePaymentRefund(ctx context.Context, order, user i
 	if _, err = q.ExecContext(ctx, `INSERT INTO wallet_funding_operations(operation_id,user_id,actor,operation_type,fingerprint) VALUES($1,$2,'payment_refund','refund_hold',$3)`, holdID, user, a.StringFixed(8)); err != nil {
 		return true, err
 	}
-	if _, err = q.ExecContext(ctx, `INSERT INTO wallet_funding_allocations(lot_id,hold_operation_id,reserved) VALUES($1,$2,$3)`, lot, holdID, a); err != nil {
-		return true, err
-	}
-	if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_lots SET reserved=reserved+$2 WHERE id=$1`, lot, a); err != nil {
-		return true, err
+	for _, part := range []struct {
+		lot    int64
+		amount decimal.Decimal
+	}{{lot, cashPart}, {bonusLot, bonusPart}} {
+		if !part.amount.IsPositive() {
+			continue
+		}
+		if _, err = q.ExecContext(ctx, `INSERT INTO wallet_funding_allocations(lot_id,hold_operation_id,reserved) VALUES($1,$2,$3)`, part.lot, holdID, part.amount); err != nil {
+			return true, err
+		}
+		if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_lots SET reserved=reserved+$2 WHERE id=$1`, part.lot, part.amount); err != nil {
+			return true, err
+		}
 	}
 	if err = refundUserUpdate(ctx, q, `UPDATE users SET balance=balance-$2,frozen_balance=frozen_balance+$2 WHERE id=$1`, user, a); err != nil {
 		return true, err
@@ -168,11 +193,11 @@ func (r *userRepository) SettlePaymentRefund(ctx context.Context, attempt string
 	if err != nil {
 		return err
 	}
-	var user, lot int64
+	var user, lot, order int64
 	var amount decimal.Decimal
 	var state string
 	// Read identity before taking the prescribed user -> state -> lot locks.
-	if err = scanSingleRow(ctx, q, `SELECT user_id,lot_id,amount,state FROM marketplace_payment_refund_attempts WHERE attempt_id=$1`, []any{attempt}, &user, &lot, &amount, &state); err != nil {
+	if err = scanSingleRow(ctx, q, `SELECT user_id,lot_id,order_id,amount,state FROM marketplace_payment_refund_attempts WHERE attempt_id=$1`, []any{attempt}, &user, &lot, &order, &amount, &state); err != nil {
 		return err
 	}
 	var balance, frozen, debt decimal.Decimal
@@ -182,8 +207,29 @@ func (r *userRepository) SettlePaymentRefund(ctx context.Context, attempt string
 	if err = scanSingleRow(ctx, q, `SELECT debt FROM wallet_funding_states WHERE user_id=$1 FOR UPDATE`, []any{user}, &debt); err != nil {
 		return err
 	}
-	var remaining, reserved decimal.Decimal
-	if err = scanSingleRow(ctx, q, `SELECT remaining,reserved FROM wallet_funding_lots WHERE id=$1 AND user_id=$2 FOR UPDATE`, []any{lot, user}, &remaining, &reserved); err != nil {
+	// Lock each source allocation in lot order. An attempt may contain both
+	// the verified cash and promotional part of the same order.
+	rows, err := q.QueryContext(ctx, `SELECT l.id,l.kind,l.origin_type,l.origin_id,l.remaining,l.reserved,a.reserved,a.captured,a.released FROM wallet_funding_allocations a JOIN wallet_funding_lots l ON l.id=a.lot_id WHERE a.hold_operation_id=$1 AND l.user_id=$2 ORDER BY l.id FOR UPDATE OF l,a`, "payment-refund:"+attempt, user)
+	if err != nil {
+		return err
+	}
+	type allocation struct {
+		lot                                                int64
+		kind, origin, originID                             string
+		remaining, lotReserved, amount, captured, released decimal.Decimal
+	}
+	var parts []allocation
+	for rows.Next() {
+		var p allocation
+		if err = rows.Scan(&p.lot, &p.kind, &p.origin, &p.originID, &p.remaining, &p.lotReserved, &p.amount, &p.captured, &p.released); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		parts = append(parts, p)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
 		return err
 	}
 	if err = scanSingleRow(ctx, q, `SELECT state FROM marketplace_payment_refund_attempts WHERE attempt_id=$1 FOR UPDATE`, []any{attempt}, &state); err != nil {
@@ -199,19 +245,43 @@ func (r *userRepository) SettlePaymentRefund(ctx context.Context, attempt string
 	if state != "reserved" {
 		return ErrFundingOperationConflict
 	}
-	if reserved.LessThan(amount) || remaining.LessThan(amount) || frozen.LessThan(amount) {
+	if frozen.LessThan(amount) {
 		return ErrFundingInvariant
 	}
-	paid := decimal.Zero
-	if !confirm {
-		paid = decimal.Min(amount, debt)
+	total, paid := decimal.Zero, decimal.Zero
+	for _, p := range parts {
+		if p.originID != strconv.FormatInt(order, 10) || !((p.lot == lot && p.kind == "cash_paid" && p.origin == "payment_order") || (p.kind == "promotional" && p.origin == "payment_bonus")) || p.lotReserved.LessThan(p.amount) || p.remaining.LessThan(p.amount) || !p.captured.IsZero() || !p.released.IsZero() {
+			return ErrFundingInvariant
+		}
+		total = total.Add(p.amount)
+		remove := decimal.Zero
+		if confirm {
+			remove = p.amount
+		} else {
+			remove = decimal.Min(p.amount, debt.Sub(paid))
+			paid = paid.Add(remove)
+		}
+		if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_lots SET remaining=remaining-$2,reserved=reserved-$3 WHERE id=$1`, p.lot, remove, p.amount); err != nil {
+			return err
+		}
+		field := "released"
+		if confirm {
+			field = "captured"
+		}
+		result, e := q.ExecContext(ctx, `UPDATE wallet_funding_allocations SET `+field+`=`+field+`+$2 WHERE hold_operation_id=$1 AND lot_id=$3 AND captured+released=0`, "payment-refund:"+attempt, p.amount, p.lot)
+		if e != nil {
+			return e
+		}
+		n, e := result.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if n != 1 {
+			return ErrFundingInvariant
+		}
 	}
-	remove := paid
-	if confirm {
-		remove = amount
-	}
-	if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_lots SET remaining=remaining-$2,reserved=reserved-$3 WHERE id=$1`, lot, remove, amount); err != nil {
-		return err
+	if !total.Equal(amount) {
+		return ErrFundingInvariant
 	}
 	if paid.IsPositive() {
 		if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_states SET debt=debt-$2 WHERE user_id=$1`, user, paid); err != nil {
@@ -225,22 +295,6 @@ func (r *userRepository) SettlePaymentRefund(ctx context.Context, attempt string
 	}
 	if err != nil {
 		return err
-	}
-	var allocationResult sql.Result
-	if confirm {
-		allocationResult, err = q.ExecContext(ctx, `UPDATE wallet_funding_allocations SET captured=captured+$2 WHERE hold_operation_id=$1 AND lot_id=$3 AND captured+released=0`, "payment-refund:"+attempt, amount, lot)
-	} else {
-		allocationResult, err = q.ExecContext(ctx, `UPDATE wallet_funding_allocations SET released=released+$2 WHERE hold_operation_id=$1 AND lot_id=$3 AND captured+released=0`, "payment-refund:"+attempt, amount, lot)
-	}
-	if err != nil {
-		return err
-	}
-	changed, err := allocationResult.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return ErrFundingInvariant
 	}
 	if _, err = q.ExecContext(ctx, `UPDATE marketplace_payment_refund_attempts SET state=$2,needs_review=false,updated_at=now() WHERE attempt_id=$1`, attempt, target); err != nil {
 		return err
@@ -294,8 +348,8 @@ func (r *userRepository) RecordPaymentChargeback(ctx context.Context, order, use
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	var orderAmount decimal.Decimal
-	if err = scanSingleRow(ctx, q, `SELECT amount FROM payment_orders WHERE id=$1 AND user_id=$2 AND order_type='balance' AND paid_at IS NOT NULL`, []any{order, user}, &orderAmount); err != nil {
+	var orderAmount, bonus decimal.Decimal
+	if err = scanSingleRow(ctx, q, `SELECT amount,bonus_amount FROM payment_orders WHERE id=$1 AND user_id=$2 AND order_type='balance' AND paid_at IS NOT NULL`, []any{order, user}, &orderAmount, &bonus); err != nil {
 		return err
 	}
 	var prior decimal.Decimal
@@ -303,15 +357,19 @@ func (r *userRepository) RecordPaymentChargeback(ctx context.Context, order, use
 	if err = scanSingleRow(ctx, q, `SELECT coalesce((SELECT sum(amount) FROM marketplace_payment_chargebacks WHERE order_id=$1),0)+coalesce((SELECT sum(amount) FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='confirmed'),0), EXISTS(SELECT 1 FROM marketplace_payment_refund_attempts WHERE order_id=$1 AND state='reserved')`, []any{order}, &prior, &open); err != nil {
 		return err
 	}
+	if !orderAmount.IsPositive() || bonus.IsNegative() || bonus.GreaterThan(orderAmount) {
+		return ErrFundingInvariant
+	}
 	if open || prior.Add(amount).GreaterThan(orderAmount) {
 		return service.ErrInsufficientFunding
 	}
+	cashPart, bonusPart := refundParts(amount, prior, orderAmount, bonus)
 	rows, err := q.QueryContext(ctx, `SELECT id,kind,origin_type,origin_id,remaining,reserved FROM wallet_funding_lots WHERE user_id=$1 ORDER BY id FOR UPDATE`, user)
 	if err != nil {
 		return err
 	}
-	total, held, available := decimal.Zero, decimal.Zero, decimal.Zero
-	var lot int64
+	total, held, available, bonusAvailable := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
+	var lot, bonusLot int64
 	for rows.Next() {
 		var id int64
 		var kind, origin, originID string
@@ -326,6 +384,10 @@ func (r *userRepository) RecordPaymentChargeback(ctx context.Context, order, use
 			lot = id
 			available = rem.Sub(res)
 		}
+		if kind == "promotional" && origin == "payment_bonus" && originID == strconv.FormatInt(order, 10) {
+			bonusLot = id
+			bonusAvailable = rem.Sub(res)
+		}
 	}
 	err = rows.Err()
 	_ = rows.Close()
@@ -335,13 +397,20 @@ func (r *userRepository) RecordPaymentChargeback(ctx context.Context, order, use
 	if !total.Sub(debt).Equal(balance.Add(frozen)) || !held.Equal(frozen) {
 		return ErrFundingInvariant
 	}
-	revoked := decimal.Min(amount, available)
-	newDebt := amount.Sub(revoked)
-	if revoked.IsPositive() {
-		if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_lots SET remaining=remaining-$2 WHERE id=$1`, lot, revoked); err != nil {
-			return err
+	revoked := decimal.Zero
+	for _, part := range []struct {
+		lot               int64
+		available, amount decimal.Decimal
+	}{{lot, available, cashPart}, {bonusLot, bonusAvailable, bonusPart}} {
+		remove := decimal.Min(part.amount, part.available)
+		if remove.IsPositive() {
+			if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_lots SET remaining=remaining-$2 WHERE id=$1`, part.lot, remove); err != nil {
+				return err
+			}
+			revoked = revoked.Add(remove)
 		}
 	}
+	newDebt := amount.Sub(revoked)
 	if newDebt.IsPositive() {
 		if _, err = q.ExecContext(ctx, `UPDATE wallet_funding_states SET debt=debt+$2 WHERE user_id=$1`, user, newDebt); err != nil {
 			return err

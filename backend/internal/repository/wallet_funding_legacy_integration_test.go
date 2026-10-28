@@ -8,20 +8,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
 func TestWalletFundingSelfSpendLedgerReducesAvailable(t *testing.T) {
-	ctx:=context.Background();tx:=testTx(t);var userID int64
-	require.NoError(t,tx.QueryRowContext(ctx,`INSERT INTO users(email,password_hash,balance) VALUES($1,'hash',0) RETURNING id`,fmt.Sprintf("journal-%d@example.com",time.Now().UnixNano())).Scan(&userID))
-	_,err:=tx.ExecContext(ctx,`SELECT marketplace_migrate_funding_user($1)`,userID);require.NoError(t,err)
-	repo:=NewWalletFundingRepository()
-	require.NoError(t,repo.Credit(ctx,tx,userID,fmt.Sprintf("credit-%d",userID),"test",decimal.NewFromInt(5),"cash_paid","test",fmt.Sprint(userID)))
-	require.NoError(t,repo.SpendSelfOwned(ctx,tx,userID,fmt.Sprintf("spend-%d",userID),"test",decimal.NewFromInt(2)))
+	ctx := context.Background()
+	tx := testTx(t)
+	var userID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'hash',0) RETURNING id`, fmt.Sprintf("journal-%d@example.com", time.Now().UnixNano())).Scan(&userID))
+	_, err := tx.ExecContext(ctx, `SELECT marketplace_migrate_funding_user($1)`, userID)
+	require.NoError(t, err)
+	repo := NewWalletFundingRepository()
+	require.NoError(t, repo.Credit(ctx, tx, userID, fmt.Sprintf("credit-%d", userID), "test", decimal.NewFromInt(5), "cash_paid", "test", fmt.Sprint(userID)))
+	require.NoError(t, repo.SpendSelfOwned(ctx, tx, userID, fmt.Sprintf("spend-%d", userID), "test", decimal.NewFromInt(2)))
 	var journal decimal.Decimal
-	require.NoError(t,tx.QueryRowContext(ctx,`SELECT coalesce(sum(CASE side WHEN 'credit' THEN amount ELSE -amount END),0) FROM ledger_entries WHERE subject_id=$1 AND account='buyer_available'`,userID).Scan(&journal))
-	require.Equal(t,"3",journal.String())
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT coalesce(sum(CASE side WHEN 'credit' THEN amount ELSE -amount END),0) FROM ledger_entries WHERE subject_id=$1 AND account='buyer_available'`, userID).Scan(&journal))
+	require.Equal(t, "3", journal.String())
 }
 
 func TestWalletFundingLegacyMigrationAndBalanceWrites(t *testing.T) {
@@ -137,4 +141,39 @@ func TestWalletFundingLegacyMapsExistingBatchHoldExactlyOnce(t *testing.T) {
 	var balance decimal.Decimal
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT balance FROM users WHERE id=$1`, userID).Scan(&balance))
 	require.Equal(t, "8", balance.String())
+}
+
+func TestLegacyPaymentBonusKeepsCashAndGiftSeparate(t *testing.T) {
+	for _, tc := range []struct {
+		name                                 string
+		amount, bonus, pay, debt, cash, gift int64
+	}{
+		{"bonus", 120, 20, 100, 0, 100, 20},
+		{"discount", 100, 20, 80, 0, 80, 20},
+		{"debt", 120, 20, 100, 50, 50, 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tx := testTx(t)
+			var user, order int64
+			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',$2) RETURNING id`, fmt.Sprintf("bonus-%s-%d@example.test", tc.name, time.Now().UnixNano()), -tc.debt).Scan(&user))
+			_, err := tx.ExecContext(ctx, `SELECT marketplace_migrate_funding_user($1)`, user)
+			require.NoError(t, err)
+			code := fmt.Sprintf("bonus-code-%d", user)
+			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO payment_orders(user_id,amount,bonus_amount,pay_amount,recharge_code,status,expires_at) VALUES($1,$2,$3,$4,$5,'PAID',now()+interval '1 day') RETURNING id`, user, tc.amount, tc.bonus, tc.pay, code).Scan(&order))
+			_, err = tx.ExecContext(ctx, `SELECT set_config('sub2api.payment_redeem_code',$1,true)`, code)
+			require.NoError(t, err)
+			_, err = tx.ExecContext(ctx, `UPDATE users SET balance=balance+$2 WHERE id=$1`, user, tc.amount)
+			require.NoError(t, err)
+			var cash, gift, balance, debt decimal.Decimal
+			require.NoError(t, tx.QueryRowContext(ctx, `SELECT coalesce(sum(remaining) FILTER (WHERE kind='cash_paid' AND origin_type='payment_order' AND origin_id=$2),0),coalesce(sum(remaining) FILTER (WHERE kind='promotional' AND origin_type='payment_bonus' AND origin_id=$2),0) FROM wallet_funding_lots WHERE user_id=$1`, user, fmt.Sprint(order)).Scan(&cash, &gift))
+			require.True(t, cash.Equal(decimal.NewFromInt(tc.cash)))
+			require.True(t, gift.Equal(decimal.NewFromInt(tc.gift)))
+			require.NoError(t, tx.QueryRowContext(ctx, `SELECT u.balance,s.debt FROM users u JOIN wallet_funding_states s ON s.user_id=u.id WHERE u.id=$1`, user).Scan(&balance, &debt))
+			require.True(t, debt.IsZero())
+			require.True(t, balance.Equal(cash.Add(gift)))
+			err = NewWalletFundingRepository().Hold(ctx, tx, user, fmt.Sprintf("bonus-hold-%d", user), "test", cash.Add(decimal.NewFromInt(1)))
+			require.ErrorIs(t, err, service.ErrInsufficientFunding)
+		})
+	}
 }

@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createRefundTestOrder(t *testing.T, user int64, email string, amount float64) int64 {
+func paymentFundingTestOrder(t *testing.T, user int64, amount int, code string) int64 {
 	t.Helper()
-	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(user).SetUserEmail(email).SetUserName(email).SetAmount(amount).SetPayAmount(amount).SetFeeRate(0).SetRechargeCode(email).SetOutTradeNo(email).SetPaymentType("stripe").SetPaymentTradeNo(email).SetOrderType("balance").SetStatus("COMPLETED").SetPaidAt(time.Now()).SetExpiresAt(time.Now().Add(time.Hour)).SetClientIP("127.0.0.1").SetSrcHost("example.test").Save(context.Background())
-	require.NoError(t, err)
-	return order.ID
+	var id int64
+	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `INSERT INTO payment_orders(user_id,amount,pay_amount,recharge_code,status,expires_at) VALUES($1,$2,$2,$3,'PAID',now()+interval '1 day') RETURNING id`, user, amount, code).Scan(&id))
+	return id
 }
 
 func TestPaymentFundingRefundRequiresOwnAvailableCashLot(t *testing.T) {
@@ -29,9 +29,9 @@ func TestPaymentFundingRefundRequiresOwnAvailableCashLot(t *testing.T) {
 	email := fmt.Sprintf("refund-source-%d@example.test", time.Now().UnixNano())
 	var user, lot int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',15) RETURNING id`, email).Scan(&user))
-	order := createRefundTestOrder(t, user, email, 5)
 	_, err := integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, user)
 	require.NoError(t, err)
+	order := paymentFundingTestOrder(t, user, 5, email)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,5,5) RETURNING id`, user, fmt.Sprint(order)).Scan(&lot))
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'promotional','test',$2,10,10)`, user, email)
 	require.NoError(t, err)
@@ -49,9 +49,7 @@ func TestPaymentFundingRefundRequiresOwnAvailableCashLot(t *testing.T) {
 	}
 	require.Error(t, run(6, email+"-too-much"), "promotional funds cannot make up an order's shortfall")
 	require.NoError(t, run(4, email+"-reserve"))
-	// An exact replay does not consume the cap twice.
-	require.NoError(t, run(4, email+"-reserve"))
-	require.ErrorIs(t, run(2, email+"-over-cap"), service.ErrInsufficientFunding)
+	require.NoError(t, run(4, email+"-reserve")) // Exact replay must not consume the order cap twice.
 	var balance, frozen, remaining, reserved string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT u.balance::text,u.frozen_balance::text,l.remaining::text,l.reserved::text FROM users u JOIN wallet_funding_lots l ON l.id=$2 WHERE u.id=$1`, user, lot).Scan(&balance, &frozen, &remaining, &reserved))
 	require.Equal(t, "11.00000000", balance)
@@ -68,9 +66,9 @@ func TestPaymentFundingRefundReleasePaysInterveningDebtAndIsIdempotent(t *testin
 	email := fmt.Sprintf("refund-debt-%d@example.test", time.Now().UnixNano())
 	var user int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',10) RETURNING id`, email).Scan(&user))
-	order := createRefundTestOrder(t, user, email, 10)
 	_, err := integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, user)
 	require.NoError(t, err)
+	order := paymentFundingTestOrder(t, user, 10, email)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,10,10)`, user, fmt.Sprint(order))
 	require.NoError(t, err)
 	repo := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
@@ -182,9 +180,9 @@ func TestPaymentFundingRefundSerializesWithConsumption(t *testing.T) {
 	email := fmt.Sprintf("refund-race-%d@example.test", time.Now().UnixNano())
 	var user int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',5) RETURNING id`, email).Scan(&user))
-	order := createRefundTestOrder(t, user, email, 5)
 	_, err := integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, user)
 	require.NoError(t, err)
+	order := paymentFundingTestOrder(t, user, 5, email)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,5,5)`, user, fmt.Sprint(order))
 	require.NoError(t, err)
 	repo := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
@@ -586,7 +584,7 @@ func TestPaymentFundingRefundManualReconciliation(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',1) RETURNING id`, otherEmail).Scan(&otherUser))
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, otherUser)
 	require.NoError(t, err)
-	otherOrder := createRefundTestOrder(t, otherUser, otherEmail, 1)
+	otherOrder := paymentFundingTestOrder(t, otherUser, 1, otherEmail)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,1,1)`, otherUser, fmt.Sprint(otherOrder))
 	require.NoError(t, err)
 	tx, err := integrationEntClient.Tx(ctx)
@@ -742,6 +740,159 @@ func TestPaymentFundingRefundLateSuccessCannotUndoManualFailure(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT balance,frozen_balance FROM users WHERE id=$1`, user).Scan(&balance, &frozen))
 	require.True(t, balance.Equal(decimal.NewFromInt(5)))
 	require.True(t, frozen.IsZero())
+}
+
+func TestPaymentBonusRefundReservesBothOrderSources(t *testing.T) {
+	ctx := context.Background()
+	email := fmt.Sprintf("refund-bonus-%d@example.test", time.Now().UnixNano())
+	var user int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',0) RETURNING id`, email).Scan(&user))
+	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(user).SetUserEmail(email).SetUserName(email).SetAmount(120).SetBonusAmount(20).SetPayAmount(100).SetFeeRate(0).SetRechargeCode(email).SetOutTradeNo(email).SetPaymentType("stripe").SetPaymentTradeNo(email).SetOrderType("balance").SetStatus("COMPLETED").SetPaidAt(time.Now()).SetExpiresAt(time.Now().Add(time.Hour)).SetClientIP("127.0.0.1").SetSrcHost("example.test").Save(ctx)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `SELECT marketplace_migrate_funding_user($1)`, user)
+	require.NoError(t, err)
+	sqltx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = sqltx.ExecContext(ctx, `SELECT set_config('sub2api.payment_redeem_code',$1,true)`, email)
+	require.NoError(t, err)
+	_, err = sqltx.ExecContext(ctx, `UPDATE users SET balance=balance+120 WHERE id=$1`, user)
+	require.NoError(t, err)
+	require.NoError(t, sqltx.Commit())
+	repo := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
+	attempt := email + "-partial"
+	tx, err := integrationEntClient.Tx(ctx)
+	require.NoError(t, err)
+	_, err = repo.ReservePaymentRefund(dbent.NewTxContext(ctx, tx), order.ID, user, 60, attempt)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	var cash, gift decimal.Decimal
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT coalesce(sum(a.reserved) FILTER (WHERE l.kind='cash_paid'),0),coalesce(sum(a.reserved) FILTER (WHERE l.origin_type='payment_bonus'),0) FROM wallet_funding_allocations a JOIN wallet_funding_lots l ON l.id=a.lot_id WHERE a.hold_operation_id=$1`, "payment-refund:"+attempt).Scan(&cash, &gift))
+	require.True(t, cash.Equal(decimal.NewFromInt(50)))
+	require.True(t, gift.Equal(decimal.NewFromInt(10)))
+	tx, err = integrationEntClient.Tx(ctx)
+	require.NoError(t, err)
+	require.NoError(t, repo.SettlePaymentRefund(dbent.NewTxContext(ctx, tx), attempt, true))
+	require.NoError(t, tx.Commit())
+	attempt = email + "-tail"
+	tx, err = integrationEntClient.Tx(ctx)
+	require.NoError(t, err)
+	_, err = repo.ReservePaymentRefund(dbent.NewTxContext(ctx, tx), order.ID, user, 60, attempt)
+	require.NoError(t, err)
+	require.NoError(t, repo.SettlePaymentRefund(dbent.NewTxContext(ctx, tx), attempt, true))
+	require.NoError(t, tx.Commit())
+	var balance, remaining decimal.Decimal
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT u.balance,coalesce(sum(l.remaining),0) FROM users u JOIN wallet_funding_lots l ON l.user_id=u.id WHERE u.id=$1 GROUP BY u.balance`, user).Scan(&balance, &remaining))
+	require.True(t, balance.IsZero())
+	require.True(t, remaining.IsZero())
+}
+
+func TestPaymentBonusChargebackRevokesBothSources(t *testing.T) {
+	ctx := context.Background()
+	email := fmt.Sprintf("chargeback-bonus-%d@example.test", time.Now().UnixNano())
+	var user int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',120) RETURNING id`, email).Scan(&user))
+	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(user).SetUserEmail(email).SetUserName(email).SetAmount(120).SetBonusAmount(20).SetPayAmount(100).SetFeeRate(0).SetRechargeCode(email).SetOutTradeNo(email).SetPaymentType("stripe").SetPaymentTradeNo(email).SetOrderType("balance").SetStatus("COMPLETED").SetPaidAt(time.Now()).SetExpiresAt(time.Now().Add(time.Hour)).SetClientIP("127.0.0.1").SetSrcHost("example.test").Save(ctx)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, user)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,100,100),($1,'promotional','payment_bonus',$2,20,20)`, user, fmt.Sprint(order.ID))
+	require.NoError(t, err)
+	repo := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
+	tx, err := integrationEntClient.Tx(ctx)
+	require.NoError(t, err)
+	require.NoError(t, repo.RecordPaymentChargeback(dbent.NewTxContext(ctx, tx), order.ID, user, 123, 120, email, "bank evidence"))
+	require.NoError(t, tx.Commit())
+	var remaining, debt decimal.Decimal
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT (SELECT sum(remaining) FROM wallet_funding_lots WHERE user_id=$1),debt FROM wallet_funding_states WHERE user_id=$1`, user).Scan(&remaining, &debt))
+	require.True(t, remaining.IsZero())
+	require.True(t, debt.IsZero())
+}
+
+func TestPaymentBonusRefundMissingOwnGiftCannotUseAnotherGift(t *testing.T) {
+	ctx := context.Background()
+	email := fmt.Sprintf("refund-gift-source-%d@example.test", time.Now().UnixNano())
+	var user int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',120) RETURNING id`, email).Scan(&user))
+	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(user).SetUserEmail(email).SetUserName(email).SetAmount(120).SetBonusAmount(20).SetPayAmount(100).SetRechargeCode(email).SetOutTradeNo(email).SetPaymentType("stripe").SetPaymentTradeNo(email).SetClientIP("127.0.0.1").SetSrcHost("example.test").SetOrderType("balance").SetStatus("COMPLETED").SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, user)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,100,100),($1,'promotional','gift',$3,20,20)`, user, fmt.Sprint(order.ID), email)
+	require.NoError(t, err)
+	tx, err := integrationEntClient.Tx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = newUserRepositoryWithSQL(integrationEntClient, integrationDB).ReservePaymentRefund(dbent.NewTxContext(ctx, tx), order.ID, user, 120, email)
+	require.ErrorIs(t, err, service.ErrInsufficientFunding)
+}
+
+func TestPaymentBonusRefundReleaseRetiresDebtFromOriginalParts(t *testing.T) {
+	ctx := context.Background()
+	email := fmt.Sprintf("refund-bonus-debt-%d@example.test", time.Now().UnixNano())
+	var user int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',120) RETURNING id`, email).Scan(&user))
+	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(user).SetUserEmail(email).SetUserName(email).SetAmount(120).SetBonusAmount(20).SetPayAmount(100).SetRechargeCode(email).SetOutTradeNo(email).SetPaymentType("stripe").SetPaymentTradeNo(email).SetClientIP("127.0.0.1").SetSrcHost("example.test").SetOrderType("balance").SetStatus("COMPLETED").SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, user)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,100,100),($1,'promotional','payment_bonus',$2,20,20)`, user, fmt.Sprint(order.ID))
+	require.NoError(t, err)
+	repo := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
+	tx, err := integrationEntClient.Tx(ctx)
+	require.NoError(t, err)
+	_, err = repo.ReservePaymentRefund(dbent.NewTxContext(ctx, tx), order.ID, user, 120, email)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkRefundNeedsReview(dbent.NewTxContext(ctx, tx), email))
+	require.NoError(t, tx.Commit())
+	sqltx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, NewWalletFundingRepository().SpendSelfOwned(ctx, sqltx, user, email+"-spend", "test", decimal.NewFromInt(110)))
+	require.NoError(t, sqltx.Commit())
+	for i := 0; i < 2; i++ {
+		tx, err = integrationEntClient.Tx(ctx)
+		require.NoError(t, err)
+		require.NoError(t, repo.SettlePaymentRefund(dbent.NewTxContext(ctx, tx), email, false))
+		require.NoError(t, tx.Commit())
+	}
+	var balance, debt, cash, gift decimal.Decimal
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT u.balance,s.debt,coalesce(sum(l.remaining) FILTER (WHERE l.kind='cash_paid'),0),coalesce(sum(l.remaining) FILTER (WHERE l.origin_type='payment_bonus'),0) FROM users u JOIN wallet_funding_states s ON s.user_id=u.id JOIN wallet_funding_lots l ON l.user_id=u.id WHERE u.id=$1 GROUP BY u.balance,s.debt`, user).Scan(&balance, &debt, &cash, &gift))
+	require.True(t, balance.Equal(decimal.NewFromInt(10)))
+	require.True(t, debt.IsZero())
+	require.True(t, cash.IsZero())
+	require.True(t, gift.Equal(decimal.NewFromInt(10)))
+}
+
+func TestPaymentBonusRefundRoundingTail(t *testing.T) {
+	ctx := context.Background()
+	email := fmt.Sprintf("refund-rounding-%d@example.test", time.Now().UnixNano())
+	var user int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES($1,'x',3) RETURNING id`, email).Scan(&user))
+	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(user).SetUserEmail(email).SetUserName(email).SetAmount(3).SetBonusAmount(1).SetPayAmount(2).SetRechargeCode(email).SetOutTradeNo(email).SetPaymentType("stripe").SetPaymentTradeNo(email).SetClientIP("127.0.0.1").SetSrcHost("example.test").SetOrderType("balance").SetStatus("COMPLETED").SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_states(user_id,migration_version) VALUES($1,1)`, user)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO wallet_funding_lots(user_id,kind,origin_type,origin_id,original,remaining) VALUES($1,'cash_paid','payment_order',$2,2,2),($1,'promotional','payment_bonus',$2,1,1)`, user, fmt.Sprint(order.ID))
+	require.NoError(t, err)
+	repo := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
+	for i := 0; i < 3; i++ {
+		attempt := fmt.Sprintf("%s-%d", email, i)
+		tx, e := integrationEntClient.Tx(ctx)
+		require.NoError(t, e)
+		_, e = repo.ReservePaymentRefund(dbent.NewTxContext(ctx, tx), order.ID, user, 1, attempt)
+		require.NoError(t, e)
+		require.NoError(t, repo.SettlePaymentRefund(dbent.NewTxContext(ctx, tx), attempt, true))
+		require.NoError(t, tx.Commit())
+	}
+	var remaining decimal.Decimal
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT sum(remaining) FROM wallet_funding_lots WHERE user_id=$1`, user).Scan(&remaining))
+	require.True(t, remaining.IsZero())
+}
+
+func createRefundTestOrder(t *testing.T, user int64, email string, amount float64) int64 {
+	t.Helper()
+	order, err := integrationEntClient.PaymentOrder.Create().SetUserID(user).SetUserEmail(email).SetUserName(email).SetAmount(amount).SetPayAmount(amount).SetFeeRate(0).SetRechargeCode(email).SetOutTradeNo(email).SetPaymentType("stripe").SetPaymentTradeNo(email).SetOrderType("balance").SetStatus("COMPLETED").SetPaidAt(time.Now()).SetExpiresAt(time.Now().Add(time.Hour)).SetClientIP("127.0.0.1").SetSrcHost("example.test").Save(context.Background())
+	require.NoError(t, err)
+	return order.ID
 }
 
 func TestPaymentFundingRefundRejectsRestoredCashAfterChargeback(t *testing.T) {

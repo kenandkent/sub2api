@@ -135,7 +135,10 @@ type RefundPlan struct {
 	SubDaysToDeduct int
 	SubscriptionID  int64
 	// deductionHeld 表示扣减已在进入 REFUND_PENDING 前执行并保留，终态收敛时不再重复扣减。
-	deductionHeld bool
+	deductionHeld       bool
+	fundingAttemptID    string
+	providerRefundID    string
+	legacyDeductionHeld bool
 }
 
 type RefundResult struct {
@@ -201,12 +204,19 @@ type PaymentService struct {
 	resumeService            *PaymentResumeService
 	affiliateService         *AffiliateService
 	notificationEmailService *NotificationEmailService
+	refundProviderResolver   func(context.Context, *dbent.PaymentOrder) (payment.Provider, error)
 }
 
 func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService) *PaymentService {
 	svc := &PaymentService{entClient: entClient, registry: registry, loadBalancer: newVisibleMethodLoadBalancer(loadBalancer, configService), redeemService: redeemService, subscriptionSvc: subscriptionSvc, configService: configService, userRepo: userRepo, groupRepo: groupRepo, affiliateService: affiliateService}
 	svc.resumeService = psNewPaymentResumeService(configService)
 	return svc
+}
+
+// SetRefundProviderResolver supplies the provider lookup dependency, for example
+// when running with an isolated gateway. Configure it before serving requests.
+func (s *PaymentService) SetRefundProviderResolver(resolve func(context.Context, *dbent.PaymentOrder) (payment.Provider, error)) {
+	s.refundProviderResolver = resolve
 }
 
 func (s *PaymentService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {

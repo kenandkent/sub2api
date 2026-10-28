@@ -708,3 +708,7 @@ func (p *refundQueryProviderTestDouble) QueryRefund(_ context.Context, req payme
 	p.lastQuery = req
 	return p.refundResponse, nil
 }
+
+func TestValidateRefundProviderResponseKeepsUnknownPending(t *testing.T) {
+	require.NoError(t, validateRefundProviderResponse(&payment.RefundResponse{Status: "UNKNOWN"}))
+}

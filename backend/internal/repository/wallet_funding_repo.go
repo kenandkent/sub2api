@@ -120,6 +120,13 @@ func (*WalletFundingRepository) Hold(ctx context.Context, tx *sql.Tx, user int64
 	if err != nil || replay {
 		return err
 	}
+	var riskBlocked bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM marketplace_payment_risk_flags WHERE user_id=$1)`, user).Scan(&riskBlocked); err != nil {
+		return err
+	}
+	if riskBlocked {
+		return service.ErrInsufficientFunding
+	}
 	if debt.IsPositive() || b.LessThan(amount) {
 		return service.ErrInsufficientFunding
 	}

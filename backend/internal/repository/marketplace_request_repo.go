@@ -100,6 +100,9 @@ func (r *marketplaceRequestRepository) Reserve(ctx context.Context, tx *sql.Tx, 
 	return err
 }
 func (r *marketplaceRequestRepository) CreateAttempt(ctx context.Context, tx *sql.Tx, id string, q service.QuoteSnapshot) (*service.MarketplaceAttempt, error) {
+	if q.AccountRateMultiplier == nil || q.AccountRateMultiplier.IsNegative() {
+		return nil, service.ErrMarketplacePriceUnavailable
+	}
 	digest, err := service.MarketplaceQuoteDigest(q)
 	if err != nil {
 		return nil, err

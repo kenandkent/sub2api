@@ -415,7 +415,7 @@ func userExistsForBilling(ctx context.Context, tx *sql.Tx, userID int64) (bool, 
 	return true, nil
 }
 
-func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
+func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount any) (bool, error) {
 	var exhausted bool
 	err := tx.QueryRowContext(ctx, `
 		UPDATE api_keys
@@ -441,7 +441,7 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 	return exhausted, nil
 }
 
-func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKeyID int64, cost float64) error {
+func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKeyID int64, cost any) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
@@ -575,6 +575,11 @@ func buildAccountQuotaIncrementSQLs() [4]string {
 // incrementUsageBillingAccountQuota 累加账号配额并返回累加后的状态。hasDaily/hasWeekly 是调用方所见的
 // 账号日/周上限设置，只决定先执行哪条语句；该语句的附加条件不成立而命中 0 行时，再执行同时包含日、周维度的语句。
 func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountID int64, amount float64, hasDaily, hasWeekly bool) (*service.AccountQuotaState, error) {
+	return incrementUsageBillingAccountQuotaExact(ctx, tx, accountID, amount, amount, hasDaily, hasWeekly)
+}
+
+// incrementUsageBillingAccountQuotaExact accepts an exact SQL numeric argument.
+func incrementUsageBillingAccountQuotaExact(ctx context.Context, tx *sql.Tx, accountID int64, amount any, crossingAmount float64, hasDaily, hasWeekly bool) (*service.AccountQuotaState, error) {
 	index := accountQuotaIncrementSQLIndex(hasDaily, hasWeekly)
 	fullIndex := accountQuotaIncrementSQLIndex(true, true)
 	state, err := execAccountQuotaIncrement(ctx, tx, accountQuotaIncrementSQLs[index], accountID, amount)
@@ -595,9 +600,9 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 	// 最终观察到 daily_used / weekly_used 大幅超过配置的 limit。
 	// 对于日/周额度，即使本次触发了周期重置（pre=0、post=amount），
 	// 判定式 (post-amount) < limit 同样成立，逻辑与总额度保持一致。
-	crossedTotal := state.TotalLimit > 0 && state.TotalUsed >= state.TotalLimit && (state.TotalUsed-amount) < state.TotalLimit
-	crossedDaily := state.DailyLimit > 0 && state.DailyUsed >= state.DailyLimit && (state.DailyUsed-amount) < state.DailyLimit
-	crossedWeekly := state.WeeklyLimit > 0 && state.WeeklyUsed >= state.WeeklyLimit && (state.WeeklyUsed-amount) < state.WeeklyLimit
+	crossedTotal := state.TotalLimit > 0 && state.TotalUsed >= state.TotalLimit && (state.TotalUsed-crossingAmount) < state.TotalLimit
+	crossedDaily := state.DailyLimit > 0 && state.DailyUsed >= state.DailyLimit && (state.DailyUsed-crossingAmount) < state.DailyLimit
+	crossedWeekly := state.WeeklyLimit > 0 && state.WeeklyUsed >= state.WeeklyLimit && (state.WeeklyUsed-crossingAmount) < state.WeeklyLimit
 	if crossedTotal || crossedDaily || crossedWeekly {
 		if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.usage_billing", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", accountID, err)
@@ -608,7 +613,7 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 }
 
 // execAccountQuotaIncrement 执行一条账号配额累加语句，未命中任何行时返回 nil 状态。
-func execAccountQuotaIncrement(ctx context.Context, tx *sql.Tx, query string, accountID int64, amount float64) (*service.AccountQuotaState, error) {
+func execAccountQuotaIncrement(ctx context.Context, tx *sql.Tx, query string, accountID int64, amount any) (*service.AccountQuotaState, error) {
 	rows, err := tx.QueryContext(ctx, query, amount, accountID)
 	if err != nil {
 		return nil, err

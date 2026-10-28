@@ -18,7 +18,7 @@ import (
 func TestMarketplaceRequestIdempotency(t *testing.T) {
 	ctx := context.Background()
 	suffix := uuid.NewString()
-	var user, key, group, account int64
+	var user, key, group, account, offer int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, suffix+"@example.test").Scan(&user))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups(name) VALUES($1) RETURNING id`, suffix).Scan(&group))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'test') RETURNING id`, user, suffix).Scan(&key))
@@ -26,6 +26,7 @@ func TestMarketplaceRequestIdempotency(t *testing.T) {
 		_, _ = integrationDB.ExecContext(ctx, `UPDATE marketplace_requests SET billable_attempt_id=NULL WHERE buyer_user_id=$1`, user)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM marketplace_attempts WHERE receipt_id IN (SELECT id FROM marketplace_requests WHERE buyer_user_id=$1)`, user)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM marketplace_requests WHERE buyer_user_id=$1`, user)
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM sharing_offers WHERE id=$1`, offer)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, account)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM api_keys WHERE user_id=$1`, user)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, user)
@@ -78,9 +79,10 @@ func TestMarketplaceRequestIdempotency(t *testing.T) {
 
 	// A failed zero-cost attempt may be retried, but an uncertain dispatch may not.
 	repo := NewMarketplaceRequestRepository(integrationDB)
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type) VALUES($1,'openai','apikey') RETURNING id`, suffix).Scan(&account))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type,owner_user_id) VALUES($1,'openai','apikey',$2) RETURNING id`, suffix, user).Scan(&account))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO sharing_offers(account_id,owner_user_id) VALUES($1,$2) RETURNING id`, account, user).Scan(&offer))
 	price := service.Money{Decimal: decimal.NewFromInt(1)}
-	q := service.QuoteSnapshot{Currency: "USD", PublicModel: "model", ActualModel: "model", Protocol: "responses", PriceVersion: 1, PolicyVersion: 1, RateMultiplier: marketplaceRequestRate(), Tiers: []service.MarketplacePriceTier{{InputPerMillion: &price, OutputPerMillion: &price, CacheReadPerMillion: &price, CacheWritePerMillion: &price}}, AccountID: account, OfferID: 1, OwnerUserID: user, SnapshotAt: time.Now().UTC()}
+	q := service.QuoteSnapshot{Currency: "USD", PublicModel: "model", ActualModel: "model", Protocol: "responses", PriceVersion: 1, PolicyVersion: 1, RateMultiplier: marketplaceRequestRate(), AccountRateMultiplier: marketplaceRequestRate(), Tiers: []service.MarketplacePriceTier{{InputPerMillion: &price, OutputPerMillion: &price, CacheReadPerMillion: &price, CacheWritePerMillion: &price}}, AccountID: account, OfferID: offer, OwnerUserID: user, SnapshotAt: time.Now().UTC()}
 	transact := func(fn func(*sql.Tx)) {
 		tx, e := integrationDB.BeginTx(ctx, nil)
 		require.NoError(t, e)
@@ -98,6 +100,13 @@ func TestMarketplaceRequestIdempotency(t *testing.T) {
 	require.Equal(t, "prepared", rolledBack.Status)
 	transact(func(tx *sql.Tx) { require.NoError(t, repo.Reserve(ctx, tx, receipts[0].ID, price)) })
 	var a *service.MarketplaceAttempt
+	missingRate := q
+	missingRate.AccountRateMultiplier = nil
+	txMissing, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = repo.CreateAttempt(ctx, txMissing, receipts[0].ID, missingRate)
+	require.NoError(t, txMissing.Rollback())
+	require.ErrorIs(t, err, service.ErrMarketplacePriceUnavailable)
 	transact(func(tx *sql.Tx) {
 		var e error
 		a, e = repo.CreateAttempt(ctx, tx, receipts[0].ID, q)

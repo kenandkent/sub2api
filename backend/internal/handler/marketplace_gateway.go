@@ -159,7 +159,8 @@ func (s *marketplaceRequestState) dispatch(ctx context.Context, a *service.Accou
 	}
 	prepared, err := s.gateway.Runtime.Prepare(ctx, a)
 	if err != nil {
-		return nil, err
+		// No attempt has been dispatched yet, so another supplier is safe to try.
+		return nil, errors.Join(service.ErrMarketplaceAccountIneligible, err)
 	}
 	// Mapping is request-local and makes the published actual model authoritative
 	// while retaining the public name for the existing response adapters.

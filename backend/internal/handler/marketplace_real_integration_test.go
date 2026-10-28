@@ -67,6 +67,27 @@ func (s pauseAfterQualification) Qualify(ctx context.Context, account, buyer, gr
 	return offer, err
 }
 
+// dispatchCommitError models a lost commit acknowledgement after the real dispatch.
+type dispatchCommitError struct {
+	service.MarketplaceGatewayStore
+}
+
+func (s dispatchCommitError) Dispatch(ctx context.Context, receipt string, q service.QuoteSnapshot) (*service.MarketplaceAttempt, error) {
+	_, err := s.MarketplaceGatewayStore.Dispatch(ctx, receipt, q)
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("commit acknowledgement lost")
+}
+
+type qualificationError struct {
+	service.MarketplaceGatewayStore
+}
+
+func (s qualificationError) Qualify(context.Context, int64, int64, int64, string) (int64, error) {
+	return 0, fmt.Errorf("qualification database unavailable")
+}
+
 type realGatewayUpstream struct {
 	service.HTTPUpstream
 	mu                sync.Mutex
@@ -170,6 +191,30 @@ func newRealGatewayFixture(t *testing.T, db *sql.DB, rdb *redis.Client, caps ...
 	account := service.Account{ID: f.account, OwnerUserID: &f.owner, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{f.group}, Credentials: map[string]any{"_supplier_envelope": sealed}, Extra: map[string]any{"openai_responses_supported": true}}
 	f.repo = &grokCredentialHandlerRepo{accounts: []service.Account{account}, missingOnGet: map[int64]bool{}}
 	return f
+}
+
+// addRealGatewaySupplier adds a lower-priority eligible supplier to the pool.
+func addRealGatewaySupplier(t *testing.T, f *realGatewayFixture) (int64, int64) {
+	t.Helper()
+	suffix := uuid.NewString()
+	var owner, account int64
+	require.NoError(t, f.db.QueryRow(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, suffix+"-owner@example.test").Scan(&owner))
+	_, err := f.db.Exec(`INSERT INTO supplier_profiles(user_id,status) VALUES($1,'active')`, owner)
+	require.NoError(t, err)
+	require.NoError(t, f.db.QueryRow(`INSERT INTO accounts(name,platform,type,owner_user_id,concurrency) VALUES($1,'openai','apikey',$2,1) RETURNING id`, suffix, owner).Scan(&account))
+	_, err = f.db.Exec(`INSERT INTO sharing_offers(account_id,owner_user_id,review_status,enabled,allowed_models) VALUES($1,$2,'approved',true,'["gpt-5.4"]')`, account, owner)
+	require.NoError(t, err)
+	_, err = f.db.Exec(`INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, account, f.group)
+	require.NoError(t, err)
+	sealed, err := f.env.Seal("openai", owner, account, []byte(`{"api_key":"fake-upstream-key"}`))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(sealed)
+	require.NoError(t, err)
+	_, err = f.db.Exec(`UPDATE accounts SET credentials=jsonb_build_object('_supplier_envelope',$1::jsonb) WHERE id=$2`, string(encoded), account)
+	require.NoError(t, err)
+	f.repo.accounts[0].Priority = 0
+	f.repo.accounts = append(f.repo.accounts, service.Account{ID: account, OwnerUserID: &owner, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, GroupIDs: []int64{f.group}, Credentials: map[string]any{"_supplier_envelope": sealed}, Extra: map[string]any{"openai_responses_supported": true}})
+	return owner, account
 }
 
 type realBuyer struct{ id, key int64 }
@@ -361,6 +406,90 @@ func TestMarketplaceGatewayRealInfrastructure(t *testing.T) {
 				require.Equal(t, "settled", status)
 				require.NoError(t, db.QueryRow(`SELECT count(*) FROM marketplace_captures WHERE owner_user_id=$1`, f.owner).Scan(&captures))
 				require.Equal(t, 1, captures)
+			})
+		}
+	})
+	t.Run("unavailable credentials fail over before dispatch", func(t *testing.T) {
+		for _, tc := range []struct{ name, path, request, reply, contentType string }{
+			{"responses", "/v1/responses", `{"model":"public","input":"hi"}`, `{"id":"resp","object":"response","model":"gpt-5.4","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":4}}`, "application/json"},
+			{"chat", "/v1/chat/completions", `{"model":"public","messages":[{"role":"user","content":"hi"}]}`, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"object\":\"response\",\"model\":\"gpt-5.4\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}}\n\n", "text/event-stream"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				f := newRealGatewayFixture(t, db, rdb)
+				ownerB, accountB := addRealGatewaySupplier(t, f)
+				// A remains schedulable and qualified, but its sealed credential cannot be opened.
+				_, err := db.Exec(`UPDATE accounts SET credentials='{"_supplier_envelope":{}}'::jsonb WHERE id=$1`, f.account)
+				require.NoError(t, err)
+				up := &realGatewayUpstream{status: 200, body: tc.reply, contentType: tc.contentType}
+				rec := sendReal(f.router(t, up), tc.path, tc.request, "")
+				require.Equal(t, 200, rec.Code, rec.Body.String())
+				require.Equal(t, 1, up.count())
+				var state string
+				var billable int64
+				var frozen, pending decimal.Decimal
+				require.NoError(t, db.QueryRow(`SELECT r.status,a.account_id,u.frozen_balance FROM marketplace_requests r JOIN marketplace_attempts a ON a.id=r.billable_attempt_id JOIN users u ON u.id=r.buyer_user_id WHERE r.buyer_user_id=$1`, f.buyer).Scan(&state, &billable, &frozen))
+				require.Equal(t, "settled", state)
+				require.Equal(t, accountB, billable)
+				require.True(t, frozen.IsZero(), frozen)
+				var requests, attempts, holds, capturesA, capturesB int
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM marketplace_requests WHERE buyer_user_id=$1`, f.buyer).Scan(&requests))
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM marketplace_attempts a JOIN marketplace_requests r ON r.id=a.receipt_id WHERE r.buyer_user_id=$1`, f.buyer).Scan(&attempts))
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM wallet_funding_operations WHERE user_id=$1 AND operation_type='hold'`, f.buyer).Scan(&holds))
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM marketplace_captures WHERE owner_user_id=$1`, f.owner).Scan(&capturesA))
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM marketplace_captures WHERE owner_user_id=$1`, ownerB).Scan(&capturesB))
+				require.NoError(t, db.QueryRow(`SELECT pending FROM supplier_wallets WHERE user_id=$1`, ownerB).Scan(&pending))
+				require.Equal(t, 1, requests)
+				require.Equal(t, 1, attempts)
+				require.Equal(t, 1, holds)
+				require.Zero(t, capturesA)
+				require.Equal(t, 1, capturesB)
+				require.True(t, pending.IsPositive(), pending)
+			})
+		}
+	})
+	t.Run("uncertain two supplier outcome does not replay", func(t *testing.T) {
+		f := newRealGatewayFixture(t, db, rdb)
+		_, _ = addRealGatewaySupplier(t, f)
+		up := &realGatewayUpstream{err: fmt.Errorf("connection reset")}
+		sendReal(f.router(t, up), "/v1/responses", `{"model":"public","input":"hi"}`, "")
+		require.Equal(t, 1, up.count())
+		var state string
+		var account int64
+		var frozen decimal.Decimal
+		require.NoError(t, db.QueryRow(`SELECT r.status,a.account_id,u.frozen_balance FROM marketplace_requests r JOIN marketplace_attempts a ON a.receipt_id=r.id JOIN users u ON u.id=r.buyer_user_id WHERE r.buyer_user_id=$1`, f.buyer).Scan(&state, &account, &frozen))
+		require.Equal(t, "needs_review", state)
+		require.Equal(t, f.account, account)
+		require.True(t, frozen.IsPositive(), frozen)
+	})
+	t.Run("database errors do not fail over", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			wrap     func(service.MarketplaceGatewayStore) service.MarketplaceGatewayStore
+			attempts int
+		}{
+			{"qualification", func(s service.MarketplaceGatewayStore) service.MarketplaceGatewayStore { return qualificationError{s} }, 0},
+			{"dispatch commit acknowledgement", func(s service.MarketplaceGatewayStore) service.MarketplaceGatewayStore { return dispatchCommitError{s} }, 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				f := newRealGatewayFixture(t, db, rdb)
+				_, _ = addRealGatewaySupplier(t, f)
+				f.store = tc.wrap(repository.NewMarketplaceGatewayRepository(db, f.cfg))
+				up := &realGatewayUpstream{status: 200, body: `{}`}
+				rec := sendReal(f.router(t, up), "/v1/responses", `{"model":"public","input":"hi"}`, "")
+				require.Equal(t, 503, rec.Code, rec.Body.String())
+				require.Zero(t, up.count())
+				var count int
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM marketplace_attempts a JOIN marketplace_requests r ON r.id=a.receipt_id WHERE r.buyer_user_id=$1`, f.buyer).Scan(&count))
+				require.Equal(t, tc.attempts, count)
+				if tc.attempts == 1 {
+					var account int64
+					var state string
+					var frozen decimal.Decimal
+					require.NoError(t, db.QueryRow(`SELECT a.account_id,a.status,u.frozen_balance FROM marketplace_attempts a JOIN marketplace_requests r ON r.id=a.receipt_id JOIN users u ON u.id=r.buyer_user_id WHERE r.buyer_user_id=$1`, f.buyer).Scan(&account, &state, &frozen))
+					require.Equal(t, f.account, account)
+					require.Equal(t, "possibly_executed", state)
+					require.True(t, frozen.IsPositive(), frozen)
+				}
 			})
 		}
 	})

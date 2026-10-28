@@ -323,7 +323,7 @@ func TestBulkUpdateProbeEligibilityMismatchRollsBack(t *testing.T) {
 
 	enabled := true
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts SET extra = .* WHERE id = ANY\(\$2\) AND deleted_at IS NULL AND type = \$3`).
+	mock.ExpectExec(`(?s)UPDATE accounts SET extra = .* WHERE id = ANY\(\$2\) AND deleted_at IS NULL AND owner_user_id IS NULL AND type = \$3`).
 		WithArgs(sqlmock.AnyArg(), `{27,28}`, service.AccountTypeAPIKey).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectRollback()
@@ -334,6 +334,28 @@ func TestBulkUpdateProbeEligibilityMismatchRollsBack(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, service.ErrUpstreamBillingProbeAccountInvalid)
+	require.Zero(t, rows)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestBulkUpdateExcludesOwnerAccounts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	name := "renamed"
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)UPDATE accounts SET name = \$1, updated_at = NOW\(\) WHERE id = ANY\(\$2\) AND deleted_at IS NULL AND owner_user_id IS NULL`).
+		WithArgs(name, `{27}`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+	rows, err := repo.BulkUpdate(context.Background(), []int64{27}, service.AccountBulkUpdate{Name: &name})
+
+	require.NoError(t, err)
 	require.Zero(t, rows)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -475,7 +497,7 @@ func TestBulkUpdateRollsBackWhenOutboxFails(t *testing.T) {
 func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
 	now := time.Now()
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
-		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
+		id, now, now, nil, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
 		[]byte(`{"api_key":"sk-test"}`), []byte(extra), nil, nil, 1, nil, 1, 1.0,
 		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,

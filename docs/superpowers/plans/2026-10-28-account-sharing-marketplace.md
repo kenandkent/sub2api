@@ -8,7 +8,20 @@
 
 **Tech Stack:** Go / Gin / Ent / PostgreSQL / Redis / shopspring decimal；Vue 3 / TypeScript / Pinia / Vue Router / Tailwind / Vitest；沿用现有 Docker Compose 和 CI。
 
-**Spec:** [账号共享市场完整设计](../specs/2026-10-28-account-sharing-marketplace-design.md)。基线 `mysubapi @ dc8cdf597`，2026-10-28。状态：可执行开发计划，尚未实施；本次产出只包含文档。
+**Spec:** [账号共享市场完整设计](../specs/2026-10-28-account-sharing-marketplace-design.md)。基线 `mysubapi @ dc8cdf597`，2026-10-28。状态：已进入实现与本地验收。下表记录实际交付状态；后续逐项任务文本保留最初的开发顺序，规划文件名可能已由实际文件替代。证据以 deploy/MARKETPLACE_ACCEPTANCE.md 为准。
+
+## 当前交付进度（2026-10-28）
+
+| 任务 | 状态 | 实际证据 / 限制 |
+| --- | --- | --- |
+| T01–T08 | 实现并完成自动化回归 | 配置/权限/凭据/并发/来源账/兼容迁移/报价/原子分账；后端 unit + integration；资金精度与两处漏洞专项回归 |
+| T09 | 实现并完成本地验证 | 真实应用进程、缓存预热、Chat/Responses、流与工具；滞留扫描及审计释放；不确定执行不重发 |
+| T10–T11 | 实现并完成隔离财务回归 | 成熟、账单、消费退款、充值退款、拒付、手动提现；不包含真实银行转账 |
+| T12–T15 | 实现并完成前端回归 | 模式切换、账号向导、价格/资金、收益/提现/管理页面；复用原主题与组件 |
+| T16 | 本地自动化及真实进程验证 | 多账号/买方竞争、故障/未知结果、资金守恒；异常解冻后执行按本次用户决定只登记证据、人工核定补偿 |
+| T17 | 本地代表性界面检查及运行手册完成；运营验收待执行 | 360/768/1440、明暗主题代表页面已观察；完整截图矩阵、生产数据/密钥恢复、人工付款和商业条款确认未执行 |
+
+说明：以下复选框是最初的逐步 TDD 操作清单，未批量勾选以避免把历史执行顺序、规划测试名或运营演练误写为已验证。实际覆盖、命令、版本和未执行项见验收证据。
 
 ## Global Constraints
 
@@ -230,7 +243,7 @@
 
 - [ ] 普通链路：同用户既供又买（调用其他供应者资源），上架→Key 选组→流式／非流式→缓存用量计费→S/F 分账→成熟→提现登记→账单。
 - [ ] 竞争链路：10 用户、10 账号、并发 1 与 N；多实例请求不能超账号槽位，不引入一用户一账号分配；变更／暂停／粘性／故障切换全部经过资格校验。
-- [ ] 故障链路：pre-dispatch DB 失败、派发后进程退出、usage 缺失、捕获提交结果未知、队列溢出、重复事件、客户端取消、Redis 故障；验证无重复收入／无凭空解冻／无不确定执行后的再次派发；伪“零执行”事后纠正仅走平台损失处理，不二次扣消费者。
+- [ ] 故障链路：pre-dispatch DB 失败、派发后进程退出、usage 缺失、捕获提交结果未知、队列溢出、重复事件、客户端取消、Redis 故障；验证无重复收入／无凭空解冻／无不确定执行后的再次派发；误判“零执行”后按用户于 2026-10-28 的修订只登记异常和证据，由人工核定补偿金额；不二次扣消费者，不自动入供应收益。
 - [ ] 财务链路：赠送／旧余额、价格发布中请求、实际费用超预算、三次部分退款、已支付后退款债务、外部拒付、提现未知、退款与提现竞争。
 - [ ] 关闭开关、simple mode、自营原路由及旧普通计费完整回归；检查共享所有者在 DTO／日志／导出中的隐私边界。
 - [ ] 按 R01–R12 记录测试名称、命令、结果与证据；提交测试和必要修复。
@@ -247,7 +260,7 @@
 
 ## 4. 验证命令与测试环境
 
-以下在实施阶段执行，本次文档编写不运行产品测试。新测试文件命名为计划名，实施时保持与命令一致，不能因为 `-run` 没匹配用例而误报成功；保存测试数量和实际测试名。
+以下是可复跑的验证入口；实际本地执行使用项目内 Go wrapper 和已安装的 Node 工具。不可用没有匹配用例的命令作为通过证据；测试数量和结果见验收记录。
 
 ```sh
 # backend 目录：生成代码与核心单元测试
@@ -257,7 +270,10 @@ go test -tags=unit ./internal/service ./internal/repository ./internal/handler/.
 
 # backend 目录：使用项目既有集成测试的隔离数据库/Redis fixture
 go test -tags=integration ./internal/repository -run 'TestSupplier|TestMarketplace|TestWalletFunding'
-go test -tags=e2e -v -timeout=300s ./internal/integration -run TestE2EMarketplace
+go test -tags='unit integration' -v -timeout=300s ./internal/handler -run '^TestMarketplaceGatewayRealInfrastructure$'
+# macOS 上可选：真实应用进程 + 仅回环网络沙箱
+go build -o ../.superpowers/live-e2e/sub2api ./cmd/server
+go test -tags='unit integration local_e2e' -v ./cmd/server -run '^TestMarketplaceLocalServerE2E$' -count=1
 
 # 项目根：完整已有后端检查与前端检查
 make test-backend

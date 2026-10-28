@@ -1319,6 +1319,11 @@ image_storage:
 # marketplace:
 #   enabled: false
 #   onboarding_enabled: false
+#   dispatch_enabled: false
+#   payouts_enabled: false
+#   credential_key_id: ""
+#   credential_keys_json: "" # JSON object: key ID -> base64 of a stable random 32-byte key
+#   oauth_proxy_url: "" # Trusted operator configuration; never supplier input
 #   agreement_version: 1
 #   agreement_text: ""
 #   agreement_url: ""
@@ -1327,3 +1332,10 @@ image_storage:
 #   hold_hours: 0
 #   max_supplier_concurrency: 1
 #   minimum_payout_usd: "0.00"
+#   providers: # Config-file-only structured whitelist; one entry per platform.
+#     - platform: openai
+#       label: OpenAI
+#       base_url: https://api.openai.com/v1
+#       account_types: [apikey, oauth]
+#       models: [] # Explicit actual models supported by this deployment
+#       # proxy_id: 123 # Optional existing, operator-managed proxy

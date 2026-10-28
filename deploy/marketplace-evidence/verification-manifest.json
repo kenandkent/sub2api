@@ -1,0 +1,155 @@
+{
+  "date": "2026-10-28",
+  "branch": "mysubapi",
+  "code_commit": "71fc9c3bc5467cabd008ff93d9f9d247bfdd2e36",
+  "method": "Full suites plus final targeted amendment checks; scope is explicitly recorded for each run. Package counts are not test counts.",
+  "online_deployment": false,
+  "real_model_calls": false,
+  "real_bank_calls": false,
+  "checks": [
+    {
+      "log": ".superpowers/backend-unit-release.log",
+      "scope": "Full backend unit-tag suite; followed by final default and amendment regression",
+      "exit_code": 0,
+      "sha256": "f6d5a941fe8278f1462f5db9ebc4eb424bc0074abf222f5a92fe0768b4d39eea",
+      "bytes": 8162,
+      "go_packages_passed": 58
+    },
+    {
+      "log": ".superpowers/backend-integration-release.log",
+      "scope": "Full backend integration-tag suite; followed by final repository run with migration 271",
+      "exit_code": 0,
+      "sha256": "1b945c53abe83067f28053fb65069d22e8edd9865e2b128558377fa40cb7cc9d",
+      "bytes": 8286,
+      "go_packages_passed": 52
+    },
+    {
+      "log": ".superpowers/backend-default-complete.log",
+      "scope": "Final default backend suite after all code amendments",
+      "exit_code": 0,
+      "sha256": "aa4d54d10a8516bf2216a2dd7b3ea4561033fdb0f6441a398376b3eff01461db",
+      "bytes": 8242,
+      "go_packages_passed": 51
+    },
+    {
+      "log": ".superpowers/repository-final-all-migrations.log",
+      "scope": "Final repository integration suite, all migrations and isolated committed fixtures",
+      "exit_code": 0,
+      "sha256": "d5770ceb245cdb5d3e30da54e27dcd8b486779e0351cbf8b51e4da418265bd79",
+      "bytes": 61,
+      "go_packages_passed": 1
+    },
+    {
+      "log": ".superpowers/marketplace-handler-e2e-verified.log",
+      "scope": "Real PG/Redis handler gateway suite, fake upstream, 27 passing subcases",
+      "exit_code": 0,
+      "sha256": "d46716969aabd2cf23b4a01f863e09f5ff78abf606838a9806f6207dfd8ce8d1",
+      "bytes": 23920,
+      "go_packages_passed": 1
+    },
+    {
+      "log": ".superpowers/marketplace-server-e2e-tools-first.log",
+      "scope": "Full server, six calls, tools-first order",
+      "exit_code": 0,
+      "sha256": "55ef54ea4f02be08b9d3da57f700fb9ee893255c85616bb1a20c6514213a78fc",
+      "bytes": 2958,
+      "go_packages_passed": 1
+    },
+    {
+      "log": ".superpowers/marketplace-server-e2e-normal-first.log",
+      "scope": "Full server, six calls, nonstream-first order",
+      "exit_code": 0,
+      "sha256": "bf92b54e9510ae59b0d54ea72a58eec37745935d6aade6b3cdecc30aef03fa19",
+      "bytes": 2958,
+      "go_packages_passed": 1
+    },
+    {
+      "log": ".superpowers/marketplace-server-e2e-complete.log",
+      "scope": "Latest server binary after incident migration, six calls",
+      "exit_code": 0,
+      "sha256": "2c2f6ba43809efc7eaab6b8972632fa5ed0ba4b826b3952f461cada8081642a2",
+      "bytes": 2959,
+      "go_packages_passed": 1
+    },
+    {
+      "log": ".superpowers/scheduler-ownership-verified.log",
+      "scope": "Scheduler ownership snapshot and plugin privacy focused regression",
+      "exit_code": 0,
+      "sha256": "ca4ea2a63652eb3112ccb3dcf0992f881dd7aa9f79fee863c69efeb5ff0bc1a9",
+      "bytes": 117,
+      "go_packages_passed": 2
+    },
+    {
+      "log": ".superpowers/incident-and-chargeback-verified.log",
+      "scope": "Final exact credited_amount, incident, auth and audit regression; migration package reports no matched tests and is excluded",
+      "exit_code": 0,
+      "sha256": "6edc9dd7d9cbccbf0c264e6d583ad299ffc454d992bec2a135054892ea579b70",
+      "bytes": 316,
+      "go_packages_passed": 5
+    },
+    {
+      "log": ".superpowers/backend-lint-complete.log",
+      "scope": "Full default backend lint, unlimited findings",
+      "exit_code": 0,
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "bytes": 10,
+      "go_packages_passed": 0
+    },
+    {
+      "log": ".superpowers/local-e2e-lint-complete.log",
+      "scope": "Local e2e-tag server lint, unlimited findings",
+      "exit_code": 0,
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "bytes": 10,
+      "go_packages_passed": 0
+    },
+    {
+      "log": ".superpowers/frontend-tests-complete.log",
+      "scope": "397 frontend files / 3015 tests",
+      "exit_code": 0,
+      "sha256": "7968b7635f518ee7a8266feff149e8a8b971c5d30906991ba8dd97a564bb9d0a",
+      "bytes": 230037,
+      "go_packages_passed": 0
+    },
+    {
+      "log": ".superpowers/frontend-amendment-final.log",
+      "scope": "12 final policy/incident/reconciliation/i18n amendment tests",
+      "exit_code": 0,
+      "sha256": "0aadf94f378c4ae6fda6e9b33d21fbab8bad23d9f35704edd22fc1e351516c57",
+      "bytes": 757,
+      "go_packages_passed": 0
+    },
+    {
+      "log": ".superpowers/frontend-typecheck-final-amendment.log",
+      "scope": "Final frontend typecheck",
+      "exit_code": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "go_packages_passed": 0
+    },
+    {
+      "log": ".superpowers/frontend-build-final-amendment.log",
+      "scope": "Final frontend production build",
+      "exit_code": 0,
+      "sha256": "7fc4dd89c9b6e3ff7e42497d430026284b14a2ed9b7d82b488f22217035550c4",
+      "bytes": 44562,
+      "go_packages_passed": 0
+    },
+    {
+      "log": ".superpowers/frontend-lint-final-amendment.log",
+      "scope": "Final frontend ESLint",
+      "exit_code": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "go_packages_passed": 0
+    },
+    {
+      "log": ".superpowers/deploy-ci-final.log",
+      "scope": "8 deploy and 11 development Python tests plus complete CI shell deployment checks",
+      "exit_code": 0,
+      "sha256": "0fb053ef6a13e6338fbbe4353073cb872d81d9e7148d46b8a3c3f6076394f50b",
+      "bytes": 2049,
+      "go_packages_passed": 0
+    }
+  ]
+}

@@ -95,14 +95,23 @@ class DevEnvironmentTests(unittest.TestCase):
         marker = self.root / "installer.pid"
         command = ["/usr/bin/python3", "-c",
                    "import os,time,signal; signal.signal(signal.SIGINT, signal.SIG_DFL); open(" + repr(str(marker)) + ", 'w').write(str(os.getpid())); time.sleep(60)"]
-        timer = threading.Timer(0.3, DEV.CANCEL.set)
-        timer.start()
+        # Wait for the child to start before cancelling. Under a busy CI host,
+        # a fixed 300 ms timer can fire before Python creates the PID marker.
+        def cancel_started_child():
+            deadline = time.monotonic() + 10
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            DEV.CANCEL.set()
+
+        canceller = threading.Thread(target=cancel_started_child)
+        canceller.start()
         try:
             with self.assertRaises(InterruptedError):
                 DEV.retry_run(command, dict(os.environ), self.root, 30)
+            self.assertTrue(marker.exists(), "fixture child did not start")
             self.assertEqual(DEV.process_start(int(marker.read_text())), "")
         finally:
-            timer.join()
+            canceller.join()
             DEV.CANCEL.clear()
 
     def test_cleanup_stops_group_members_after_leader_has_exited(self):

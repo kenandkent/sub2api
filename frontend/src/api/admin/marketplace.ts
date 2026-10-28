@@ -12,6 +12,7 @@ export interface PolicyResult { version: number; published_at: string; policy: P
 export interface Payout { id: number; supplier_id: number; status: string; amount: string; currency: string; paid_at?: string; external_reference?: string; evidence?: string; created_at?: string }
 export interface Destination { id: number; supplier_id: number; verified: boolean; masked_label: string; version: number; verified_by?: number; verified_at?: string; verification_evidence?: string }
 export interface Receipt { kind: string; id: string; status: string; age_seconds: number; difference?: string }
+export interface ExecutionIncident { operation_id: string; receipt_id: string; attempt_id: number; release_operation_id: string; actor_user_id: number; quote_digest: string; evidence: string; created_at: string; status: 'recorded_manual_review' }
 export interface ReconciliationTotals { receipt_statuses: Record<string, number>; unbalanced_transactions: number; wallet_differences: number; funding_differences: number; aged_outbox: number; uncertain_payouts: number }
 export interface ReconciliationPage extends Page<Receipt> { totals: ReconciliationTotals }
 export async function reconciliation(page: number, status: string): Promise<ReconciliationPage> { return (await apiClient.get<ReconciliationPage>(`${base}/reconciliation`, { params: { page, page_size: 20, status: status || undefined } })).data }

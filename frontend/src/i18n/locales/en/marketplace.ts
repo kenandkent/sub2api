@@ -4,7 +4,7 @@ export default { marketplace: {
   onboarding: 'Supplier application', overview: 'Supplier overview',
   onboardingDescription: 'Review your supplier application status here.',
   overviewDescription: 'Your supplier workspace is ready.',
-  status: 'Application status', unavailable: 'Supplier information is unavailable. Please try again.',
+  status: 'Status', unavailable: 'Supplier information is unavailable. Please try again.',
   retry: 'Try again', withdrawable: 'Withdrawable earnings', admin: 'Admin console',
   not_applied: 'Not applied', pending: 'Pending review', active: 'Active', rejected: 'Rejected', suspended: 'Suspended',
   accounts: "Shared accounts",

@@ -1,4 +1,18 @@
 export default {
+  incidentReceipt: 'Request receipt ID (UUID)',
+  executionIncident: "Record execution incident",
+  incidentRecordOnly: "Record the incident and evidence here. Compensation is determined manually. The consumer is never charged again and no supplier earnings are created automatically.",
+  incidentAttempt: "Upstream attempt ID",
+  incidentRelease: "Original release operation ID",
+  incidentEvidence: "Verified evidence or controlled evidence reference",
+  incidentAssociation: "The association is reported by an administrator. Recording it does not verify model usage. Do not include account secrets, unmasked payout details, or full conversations.",
+  incidentUnknown: "The recording outcome is unconfirmed. Check records or retry with the same operation ID and evidence.",
+  incidentRecorded: "Incident recorded for manual compensation review. Funds and earnings were not changed automatically.",
+  incidentRecords: "Check incident records",
+  incidentEmpty: "No execution incidents recorded for this receipt.",
+  incidentNew: "New record",
+  incidentRegister: "Record incident",
+
   freezePayouts: 'Freeze payouts', unfreezePayouts: 'Unfreeze payouts', freezeHint: 'Provide a reason. Unfreezing requires the supplier to have no outstanding debt.',
 
   title: 'Marketplace', kind: 'Kind', difference: 'Difference', statusFilter: 'Status filter', filter: 'Filter', receiptStatuses: 'Receipt states', unbalanced_transactions: 'Unbalanced transactions', wallet_differences: 'Wallet differences', funding_differences: 'Funding differences', aged_outbox: 'Aged outbox', uncertain_payouts: 'Uncertain payouts', migrateConfirm: 'Migrate and reconcile this user’s wallet? Review the resulting balances before proceeding.', eligible_available: 'Eligible available', reserved: 'Reserved', excluded_available: 'Excluded available', debt: 'Debt', migrated: 'Migrated', reconciled: 'Reconciled',

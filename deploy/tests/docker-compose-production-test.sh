@@ -148,5 +148,34 @@ with tempfile.TemporaryDirectory(prefix="compose-production-", dir=repo_root / "
         "production failure must identify the required image variable"
     print("PASS production Compose rejects a missing SUB2API_IMAGE")
 
+
+    # An opt-in runtime must deploy from immutable images without requiring
+    # a server checkout, and keep the worker private in the app namespace.
+    worker_file = release / "docker-compose.opencode-free.production.yml"
+    shutil.copyfile(repo_root / "deploy" / worker_file.name, worker_file)
+    worker_env = dict(env, OPENCODE_FREE_WORKER_IMAGE="ghcr.io/kenandkent/sub2api-opencode-free-worker@sha256:" + "b" * 64,
+                      OPENCODE_FREE_BUN_TOKEN="fixture-worker-token-" + "x" * 32)
+    enabled = json.loads(render(deployment_root, files + [worker_file], environment=worker_env).stdout)
+    assert set(enabled["services"]) == {"sub2api", "postgres", "redis", "opencode-free-worker"}
+    worker = enabled["services"]["opencode-free-worker"]
+    enabled_app = enabled["services"]["sub2api"]
+    assert worker["image"] == worker_env["OPENCODE_FREE_WORKER_IMAGE"]
+    assert "build" not in worker and not worker.get("ports") and not worker.get("volumes")
+    assert worker["network_mode"] == "service:sub2api"
+    assert worker["read_only"] is True and worker["cap_drop"] == ["ALL"]
+    assert worker["security_opt"] == ["no-new-privileges:true"]
+    assert worker["environment"]["LISTEN_HOST"] == "127.0.0.1"
+    assert worker["environment"]["PORT"] == "19090"
+    assert worker["environment"]["OPENCODE_FREE_BUN_TOKEN"] == enabled_app["environment"]["OPENCODE_FREE_BUN_TOKEN"] == worker_env["OPENCODE_FREE_BUN_TOKEN"]
+    assert enabled_app["environment"]["OPENCODE_FREE_BUN_ENABLED"] == "true"
+    assert enabled_app["environment"]["OPENCODE_FREE_BUN_WORKER_ENDPOINT"] == "http://127.0.0.1:19090"
+    assert "POSTGRES_PASSWORD" not in worker["environment"] and "JWT_SECRET" not in worker["environment"]
+    assert "build" not in enabled_app
+    no_token = dict(worker_env); no_token.pop("OPENCODE_FREE_BUN_TOKEN")
+    assert render(deployment_root, files + [worker_file], environment=no_token, check=False).returncode != 0
+    no_worker_image = dict(worker_env); no_worker_image.pop("OPENCODE_FREE_WORKER_IMAGE")
+    assert render(deployment_root, files + [worker_file], environment=no_worker_image, check=False).returncode != 0
+    print("PASS opt-in worker uses an immutable private runtime with a shared token and no server build")
+
 print("docker compose production test passed")
 PY

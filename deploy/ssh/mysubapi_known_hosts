@@ -1,0 +1,3 @@
+# Public server identity copied from the operator's previously trusted known_hosts.
+# Replace only after independently verifying a server host-key rotation.
+167.114.210.84 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMONZgqNy57ieNZv63VyKfb1NrMWZGVwFXu0AhADM3GK

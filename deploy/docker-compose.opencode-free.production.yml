@@ -1,0 +1,38 @@
+# Optional third file, after local + production, for an immutable Bun worker.
+# The deployment helper loads this only when given a worker image digest.
+services:
+  sub2api:
+    environment:
+      - OPENCODE_FREE_BUN_ENABLED=true
+      - OPENCODE_FREE_BUN_WORKER_ENDPOINT=http://127.0.0.1:19090
+      - OPENCODE_FREE_BUN_TOKEN=${OPENCODE_FREE_BUN_TOKEN:?OPENCODE_FREE_BUN_TOKEN is required}
+      - OPENCODE_FREE_BUN_REQUEST_TIMEOUT_SECONDS=${OPENCODE_FREE_BUN_REQUEST_TIMEOUT_SECONDS:-120}
+      - OPENCODE_FREE_BUN_MAX_RESPONSE_BYTES=${OPENCODE_FREE_BUN_MAX_RESPONSE_BYTES:-8388608}
+      - OPENCODE_FREE_BUN_MAX_EVENT_BYTES=${OPENCODE_FREE_BUN_MAX_EVENT_BYTES:-262144}
+
+  opencode-free-worker:
+    image: ${OPENCODE_FREE_WORKER_IMAGE:?OPENCODE_FREE_WORKER_IMAGE is required}
+    pull_policy: missing
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    network_mode: service:sub2api
+    depends_on:
+      sub2api:
+        condition: service_started
+    environment:
+      - OPENCODE_FREE_BUN_TOKEN=${OPENCODE_FREE_BUN_TOKEN:?OPENCODE_FREE_BUN_TOKEN is required}
+      - LISTEN_HOST=127.0.0.1
+      - PORT=19090
+      - BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:19090/health/ready', {signal: AbortSignal.timeout(4000)}).then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true

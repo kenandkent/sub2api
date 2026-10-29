@@ -29,7 +29,7 @@ jobs:
           export TMPDIR="$GITHUB_WORKSPACE/.cache/tmp"
           export PYTHONDONTWRITEBYTECODE=1
           bash -n deploy/deploy-mysubapi.sh
-          python3 -B -m unittest discover -s deploy/tests -p 'test_mysubapi_deploy.py'
+          python3 -B -m unittest discover -s deploy/tests -p 'test_mysubapi_*.py'
           python3 -B -m unittest discover -s deploy/tests -p 'test_dev_environment.py'
           sh deploy/tests/docker-compose-dependencies-test.sh
           sh deploy/tests/docker-compose-production-test.sh
@@ -94,6 +94,7 @@ jobs:
       DOCKER_CONFIG: ${{ github.workspace }}/.cache/docker-auth
     outputs:
       image: ${{ steps.result.outputs.image }}
+      worker_image: ${{ steps.result.outputs.worker_image }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -134,14 +135,38 @@ jobs:
             GOSUMDB=sum.golang.org
           cache-from: type=gha,scope=mysubapi
           cache-to: type=gha,mode=max,scope=mysubapi
+      - name: Build and publish OpenCode worker from the same commit
+        id: worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/opencode/worker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.metadata.outputs.repository }}-opencode-free-worker:sha-${{ github.sha }}
+            ${{ steps.metadata.outputs.repository }}-opencode-free-worker:mysubapi
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
+          cache-from: type=gha,scope=mysubapi-opencode-free-worker
+          cache-to: type=gha,mode=max,scope=mysubapi-opencode-free-worker
+      - name: Verify worker authentication in a private network namespace
+        env:
+          WORKER_SMOKE_IMAGE: ${{ steps.metadata.outputs.repository }}-opencode-free-worker@${{ steps.worker.outputs.digest }}
+        run: python3 -B deploy/tests/opencode_worker_smoke.py
       - name: Record immutable deployment image
         id: result
         env:
           REPOSITORY: ${{ steps.metadata.outputs.repository }}
           DIGEST: ${{ steps.build.outputs.digest }}
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
         run: |
           echo "image=$REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "worker_image=$REPOSITORY-opencode-free-worker@$WORKER_DIGEST" >> "$GITHUB_OUTPUT"
           echo "Published image: $REPOSITORY@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published optional worker: $REPOSITORY-opencode-free-worker@$WORKER_DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     needs: image
@@ -165,6 +190,7 @@ jobs:
       DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/home/workspace/subapi' }}
       DEPLOY_IMAGE: ${{ needs.image.outputs.image }}
+      DEPLOY_WORKER_IMAGE: ${{ vars.MYSUBAPI_OPENCODE_FREE_ENABLED == 'true' && needs.image.outputs.worker_image || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -184,14 +210,14 @@ jobs:
       - name: Upload release and deploy by digest
         if: steps.current.outputs.deploy == 'true'
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.DEPLOY_SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" ]] || {
-            echo "Configure DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS in mysubapi-production." >&2
+          [[ -n "$SSH_PRIVATE_KEY" ]] || {
+            echo "Configure the repository SSH_PRIVATE_KEY secret." >&2
             exit 1
           }
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
@@ -200,14 +226,23 @@ jobs:
           [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ && "$DEPLOY_PATH" != / ]]
           case "/$DEPLOY_PATH/" in */../*|*/./*) exit 1;; esac
           [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
+          [[ -z "$DEPLOY_WORKER_IMAGE" || "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
           umask 077
           mkdir -p "$GITHUB_WORKSPACE/.cache"
           ssh_dir=$(mktemp -d "$GITHUB_WORKSPACE/.cache/ssh.XXXXXX")
           trap 'rm -rf -- "$ssh_dir"' EXIT
           printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          options=(-i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes
+          if [[ -n "$SSH_KNOWN_HOSTS" ]]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          elif [[ "$DEPLOY_HOST" == 167.114.210.84 && "$DEPLOY_PORT" == 22 ]]; then
+            cp deploy/ssh/mysubapi_known_hosts "$ssh_dir/known_hosts"
+          else
+            echo "Configure DEPLOY_KNOWN_HOSTS for the overridden SSH host/port." >&2
+            exit 1
+          fi
+          options=(-F /dev/null -i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes
             -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null
             -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4)
           server="$DEPLOY_USER@$DEPLOY_HOST"
           release_id="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -217,9 +252,10 @@ jobs:
             "umask 077; test -s '$DEPLOY_PATH/.env' || { echo 'Configure the private server .env first.' >&2; exit 1; }; mkdir -p -- '$DEPLOY_PATH/releases' '$DEPLOY_PATH/incoming'; test ! -e '$release_path' && mkdir -- '$incoming_path'"
           scp "${options[@]}" -P "$DEPLOY_PORT" \
             deploy/docker-compose.local.yml deploy/docker-compose.production.yml \
-            deploy/deploy-mysubapi.sh deploy/.env.example "$server:$incoming_path/"
+            deploy/docker-compose.opencode-free.production.yml \
+            deploy/deploy-mysubapi.sh deploy/.env.example deploy/.env.mysubapi.production.example "$server:$incoming_path/"
           ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
             "test ! -e '$release_path' && mv -T -- '$incoming_path' '$release_path'"
           printf '%s\n' "$GHCR_TOKEN" | ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
-            "bash '$release_path/deploy-mysubapi.sh' '$DEPLOY_PATH' '$release_id' '$DEPLOY_IMAGE' '$GITHUB_ACTOR'"
+            "bash '$release_path/deploy-mysubapi.sh' '$DEPLOY_PATH' '$release_id' '$DEPLOY_IMAGE' '$GITHUB_ACTOR' '$DEPLOY_WORKER_IMAGE'"
           echo "Deployed $DEPLOY_IMAGE to $DEPLOY_HOST ($release_id)." >> "$GITHUB_STEP_SUMMARY"

@@ -1,13 +1,13 @@
 # OpenCode 免费模型 Bun 上游接入设计
 
-状态：v2 已在 `mysubapi` 实现，并于 2026-10-27 完成本地完整 Docker Compose、离线端到端及两次真实上游验收；未部署线上服务器，未修改线上 OmniRoute。本文所说的实验均为特定时间和环境的观测，生产准入矩阵仍需单独验收。相关证据见 [本地接入说明](opencode/LOCAL_FREE.md)、[OpenCode 接入记录](OPENCODE.md)、[调用链报告](OPENCODE_CALL_CHAIN.md) 和 [诊断脚本](opencode/probe-free-chat.mjs)。
+状态：v2 已在 `mysubapi` 实现，并于 2026-10-27 完成本地完整 Docker Compose、离线端到端及两次真实上游验收；2026-10-30 新增动态适配与 agent 模式（任意可接纳 `-free` 模型、调用方工具透传、profiles 目录 + `manifest.generated.ts` 校验），已通过全量 Go 单测与 24 个 Bun worker 测试；同日晚间完成真实上游逐模型验证（5 个抽样模型的文本/流式与计费对账全部通过，agent 请求带 tools 到达上游但被上游 `FreeUsageLimitError` 免费配额 429 拦截、待配额重置后复测），验证过程中修复 worker `chatBody.ts` 数组遍历、parser `finalEvents` 缺失 `data: ` 前缀、上游错误响应被 handler 追加第二帧三处缺陷。本轮未部署线上服务器，未修改线上 OmniRoute。本文所说的实验均为特定时间和环境的观测，生产准入矩阵仍需单独验收。相关证据见 [本地接入说明](opencode/LOCAL_FREE.md)、[兼容性核查](opencode/COMPATIBILITY.md)、[OpenCode 接入记录](OPENCODE.md)、[调用链报告](OPENCODE_CALL_CHAIN.md) 和 [诊断脚本](opencode/probe-free-chat.mjs)。
 
 ## 已实现的接口与本地验证
 
 下文保留设计论证；实际文件和字段以本节及源码为准。全局配置为 `opencode_free_bun`，环境变量前缀为 `OPENCODE_FREE_BUN_`，默认关闭。账号凭据使用 `opencode_free_transport: bun` 和 `opencode_free_profile: opencode-big-pickle-text-balanced-20261027-v2`，仅允许 Zen、API Key `public`、官方 Console Chat 地址及 `adaptive`/`chat_completions` 协议。普通付费 Zen/Go、ChatGPT 及其他平台不会进入此路径。
 
-- Go 实现位于 `backend/internal/service/opencode_free_bun_{request,parser,gateway,account_validation}.go`；只有明确选择免费 Bun 接入的账号使用新分支。首期限定 `big-pickle` 纯文本 Chat，支持模型别名、流式和非流式；非空调用方工具、媒体、其他协议、非零 temperature 和未验证参数会在请求发送前拒绝。
-- `deploy/opencode/worker/` 运行固定 Bun 1.4.2 和固定 hash 的 v2 profile；可选 Compose overlay 增加一个 worker，与应用共用网络命名空间且只监听 loopback，不公开 worker 端口。普通 Compose 仍为三个服务。
+- Go 实现位于 `backend/internal/service/opencode_free_bun_{request,parser,gateway,account_validation,dynamic}.go`；只有明确选择免费 Bun 接入的账号使用新分支。2026-10-30 起支持动态适配：接受固定注册表模型与任意 `^[a-z0-9][a-z0-9.-]*-free$`（≤64 字符，`jev-`/`gemini-` 除外）模型，按纯文本/agent 契约选择模式与 profile，agent 模式支持调用方工具透传、`tool_choice` 与工具结果续接；媒体、其他协议、非零 temperature 和白名单外参数仍在发送前拒绝。非固定模型的 profile 由嵌入的 `big-pickle` text/agent 模板按 `gen_profiles.py` 同源字节替换推导，固定 profile（`big-pickle`、`mimo-v2.6-flash-free`）优先且不可被推导覆盖。
+- `deploy/opencode/worker/` 运行固定 Bun 1.4.2，通过 `PROFILES_DIR` 加载 `deploy/opencode/profiles/` 全部 profile，并用源码固定的 `manifest.generated.ts` 在启动时校验各文件 SHA-256；固定模型只匹配固定 profile，其余可接纳模型按同源规则推导并校验 hash，envelope 身份绑定 `body.model`。可选 Compose overlay 增加一个 worker，与应用共用网络命名空间且只监听 loopback，不公开 worker 端口。普通 Compose 仍为三个服务。
 - 迁移 249 仅新增免费请求记录和会话表。`opencode_free_usage.go` 的专用仓储扩展复用现有价格和扣费 SQL，将冻结费用、幂等扣款、usage log 与 settled 状态纳入同一事务；恢复不重发模型请求。缺失或不完整 usage、取消、明确写入失败记为 unknown，不估算扣费。
 - 真实上游 usage 源为 `usage.opencode.billing_source` 和 `usage.opencode.tokens`。缓存读取从 prompt 总量中拆分计价；reasoning 已包含在 completion 总量中，不另加一次。
 

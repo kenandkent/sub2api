@@ -16,8 +16,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 type freeWorkerProxy struct {
@@ -45,6 +47,7 @@ func freeReject(c *gin.Context, status int, message string) error {
 		b, _ := json.Marshal(gin.H{"error": gin.H{"type": "api_error", "message": message}})
 		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", b)
 		c.Writer.Flush()
+		MarkResponseCommitted(c)
 	}
 	return errors.New(message)
 }
@@ -89,10 +92,11 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 		displayModel = original
 	}
 	mapped := resolveOpenAIForwardModel(a, model, defaultModel)
-	normalized, stream, err := normalizeOpenCodeFreeRequest(body, mapped)
+	reqNorm, err := normalizeOpenCodeFreeRequest(body, mapped)
 	if err != nil {
 		return nil, freeReject(c, http.StatusBadRequest, err.Error())
 	}
+	stream := reqNorm.Stream
 	keyID := getAPIKeyIDFromContext(c)
 	if keyID <= 0 {
 		return nil, freeReject(c, http.StatusServiceUnavailable, "OpenCode free identity unavailable")
@@ -122,7 +126,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 	timeout := time.Duration(cfg.RequestTimeoutSeconds) * time.Second
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	meta, err := s.BeginOpenCodeFreeAttempt(requestCtx, keyID, a.ID, openCodeFreeProfileHash, HashUsageRequestPayload(body), timeout)
+	meta, err := s.BeginOpenCodeFreeAttempt(requestCtx, keyID, a.ID, reqNorm.Profile.SHA256, HashUsageRequestPayload(body), timeout)
 	if err != nil {
 		return nil, freeReject(c, http.StatusServiceUnavailable, "OpenCode free accounting unavailable")
 	}
@@ -135,7 +139,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 		}
 	}()
 	deadline, _ := requestCtx.Deadline()
-	env := freeWorkerEnvelope{Version: 1, RequestID: meta.RequestID, ProfileID: openCodeFreeProfile, ProfileSHA256: openCodeFreeProfileHash, Target: "console", AccountID: a.ID, SessionID: session, DeadlineUnixMS: deadline.UnixMilli(), Proxy: proxy, Body: normalized}
+	env := freeWorkerEnvelope{Version: 1, RequestID: meta.RequestID, ProfileID: reqNorm.Profile.ID, ProfileSHA256: reqNorm.Profile.SHA256, Target: "console", AccountID: a.ID, SessionID: session, DeadlineUnixMS: deadline.UnixMilli(), Proxy: proxy, Body: reqNorm.Body}
 	payload, err := json.Marshal(env)
 	if err != nil {
 		return nil, freeReject(c, http.StatusBadGateway, "cannot encode transport request")
@@ -170,11 +174,13 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 			}
 			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", compact.Bytes())
 			c.Writer.Flush()
+			MarkResponseCommitted(c)
 		} else {
 			if retry := resp.Header.Get("Retry-After"); retry != "" {
 				c.Header("Retry-After", retry)
 			}
 			c.Data(resp.StatusCode, "application/json", data)
+			MarkResponseCommitted(c)
 		}
 		return nil, errors.New("OpenCode free upstream error")
 	}
@@ -187,15 +193,38 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 		c.Header("Cache-Control", "no-cache")
 		out = c.Writer
 	}
-	parsed, err := parseOpenCodeFreeSSE(requestCtx, resp.Body, out, cfg.MaxResponseBytes, cfg.MaxEventBytes, displayModel)
+	parsed, err := parseOpenCodeFreeSSE(requestCtx, resp.Body, out, cfg.MaxResponseBytes, cfg.MaxEventBytes, displayModel, &openCodeFreeSSEOptions{ToolNames: reqNorm.ToolNames, ToolChoice: reqNorm.ToolChoice})
 	if err != nil || requestCtx.Err() != nil || parsed.BillingSource != "free" {
+		logger.L().Warn("opencode free: incomplete upstream stream",
+			zap.String("request_id", meta.RequestID),
+			zap.String("model", model),
+			zap.String("profile_id", reqNorm.Profile.ID),
+			zap.String("billing_source", func() string {
+				if parsed == nil {
+					return ""
+				}
+				return parsed.BillingSource
+			}()),
+			zap.NamedError("context", requestCtx.Err()),
+			zap.Error(err),
+		)
 		return nil, freeReject(c, http.StatusBadGateway, "incomplete OpenCode free response")
 	}
 	meta.RawUsage = freeSafeUsage(parsed)
 	meta.BillingSource = parsed.BillingSource
 	meta.Complete = true
 	if !stream {
-		response, err := json.Marshal(gin.H{"id": parsed.ID, "object": "chat.completion", "created": time.Now().Unix(), "model": displayModel, "choices": []any{gin.H{"index": 0, "message": gin.H{"role": "assistant", "content": parsed.Text}, "finish_reason": parsed.Finish}}, "usage": json.RawMessage(parsed.RawUsage)})
+		message := gin.H{"role": "assistant", "content": parsed.Text}
+		if parsed.Reasoning != "" {
+			message["reasoning_content"] = parsed.Reasoning
+		}
+		if len(parsed.ToolCalls) > 0 {
+			if parsed.Text == "" {
+				message["content"] = nil
+			}
+			message["tool_calls"] = parsed.ToolCalls
+		}
+		response, err := json.Marshal(gin.H{"id": parsed.ID, "object": "chat.completion", "created": time.Now().Unix(), "model": displayModel, "choices": []any{gin.H{"index": 0, "message": message, "finish_reason": parsed.Finish}}, "usage": json.RawMessage(parsed.RawUsage)})
 		if err != nil {
 			return nil, freeReject(c, http.StatusBadGateway, "cannot encode OpenCode free response")
 		}

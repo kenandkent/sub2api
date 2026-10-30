@@ -11,6 +11,7 @@ import secrets
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -132,6 +133,23 @@ def development_env(root, settings):
         "VITE_API_BASE_URL": "/api/v1", "VITE_DEV_PORT": ports["DEV_FRONTEND_PORT"],
         "VITE_DEV_PROXY_TARGET": "http://127.0.0.1:" + ports["DEV_BACKEND_PORT"],
     })
+    # Opt-in OpenCode free transport: merge the strict private file created by
+    # deploy/opencode/local.py so `make dev` and native local.py backends share
+    # the same worker endpoint and token. Missing file keeps the feature off.
+    free_env = root / ".dev" / "opencode-free.env"
+    if free_env.exists():
+        info = free_env.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise ValueError("Private environment file must be regular and mode 600")
+        parsed = {}
+        for line in free_env.read_text().splitlines():
+            key, sep, value = line.partition("=")
+            if not sep or key not in ("OPENCODE_FREE_BUN_ENABLED", "OPENCODE_FREE_BUN_TOKEN") or key in parsed:
+                raise ValueError("Invalid OpenCode environment file")
+            parsed[key] = value
+        if parsed.get("OPENCODE_FREE_BUN_ENABLED") != "true" or not re.fullmatch(r"[0-9a-f]{64}", parsed.get("OPENCODE_FREE_BUN_TOKEN", "")):
+            raise ValueError("Invalid OpenCode environment file")
+        env.update(parsed)
     for key in ("GOCACHE", "GOMODCACHE", "GOPATH", "GOBIN", "TMPDIR", "COREPACK_HOME",
                 "XDG_CACHE_HOME", "XDG_DATA_HOME", "PNPM_HOME", "npm_config_store_dir",
                 "npm_config_cache", "GOTELEMETRYDIR"):

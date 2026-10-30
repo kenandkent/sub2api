@@ -1,0 +1,57 @@
+{
+  "id": "opencode-glm-5.3-flash-free-text-balanced-20261027-v1",
+  "status": "candidate-unvalidated",
+  "runtime": "bun-1.4.2",
+  "source_client": "opencode-2.0.10",
+  "model": "glm-5.3-flash-free",
+  "endpoint": "https://opencode.ai/inference/openai/v1/chat/completions",
+  "headers": {
+    "user-agent": "opencode/latest/2.0.10/cli",
+    "x-session-id": "__OPENCODE_SESSION_ID__"
+  },
+  "fetch_options": {
+    "keepalive": false
+  },
+  "body": {
+    "model": "glm-5.3-flash-free",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.\n\nFollow the user's instructions faithfully. Copy identifiers exactly when requested.\n\n<env>\n  Working directory: /workspace/opencode-diagnostic\n</env>\n"
+      },
+      {
+        "role": "user",
+        "content": "Copy the identifier exactly. Return only the identifier, without punctuation, quotes, Markdown, or explanations.\nIdentifier: __OPENCODE_NONCE__"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read"
+        }
+      }
+    ],
+    "tool_choice": "none",
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "temperature": 0
+  },
+  "capabilities": {
+    "text_only": true,
+    "caller_tools": false,
+    "tool_execution": false,
+    "native_responses": false,
+    "native_anthropic": false
+  },
+  "logical_directory": "Synthetic compatibility context; no filesystem access is provided.",
+  "generation_contract": {
+    "default_temperature": 0,
+    "validated_temperature_values": [
+      0
+    ],
+    "explicit_other_temperatures": "unsupported until separately validated; never silently overwrite caller values"
+  }
+}

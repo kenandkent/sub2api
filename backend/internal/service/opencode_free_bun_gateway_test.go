@@ -36,11 +36,13 @@ func TestOpenCodeFreeMarkedAccountDoesNotFallBackWhenDisabled(t *testing.T) {
 
 type freeGatewayRepo struct {
 	UsageBillingRepository
-	unknown  int
-	sessions map[string]string
+	unknown     int
+	profileHash string
+	sessions    map[string]string
 }
 
-func (r *freeGatewayRepo) BeginOpenCodeFreeAttempt(context.Context, *OpenCodeFreeUsageMeta, int64, int64, string, string, time.Duration) error {
+func (r *freeGatewayRepo) BeginOpenCodeFreeAttempt(_ context.Context, _ *OpenCodeFreeUsageMeta, _, _ int64, profileHash, _ string, _ time.Duration) error {
+	r.profileHash = profileHash
 	return nil
 }
 func (r *freeGatewayRepo) MarkOpenCodeFreeUnknown(context.Context, *OpenCodeFreeUsageMeta, string) error {
@@ -95,7 +97,8 @@ func TestOpenCodeFreeUpstreamStatusDoesNotFailOver(t *testing.T) {
 	require.NotErrorAs(t, err, &f)
 	require.Equal(t, 429, w.Code)
 	require.Equal(t, "12", w.Header().Get("Retry-After"))
-	require.Contains(t, w.Body.String(), "rate_limit")
+	require.Equal(t, `{"error":{"code":"rate_limit","message":"try later"}}`, w.Body.String())
+	require.True(t, IsResponseCommitted(c), "upstream error passthrough must mark the response committed")
 	require.Equal(t, 1, repo.unknown)
 }
 
@@ -136,6 +139,14 @@ func TestOpenCodeFreeSocketCompletesStreamingAndBufferedWithAlias(t *testing.T) 
 			require.Contains(t, w.Body.String(), "hello")
 			if stream {
 				require.Contains(t, w.Body.String(), "[DONE]")
+				for _, line := range strings.Split(w.Body.String(), "\n") {
+					if line == "" {
+						continue
+					}
+					require.True(t, strings.HasPrefix(line, "data: "), "client line missing data prefix: %q", line)
+				}
+				require.Contains(t, w.Body.String(), `"finish_reason":"stop"`)
+				require.Contains(t, w.Body.String(), `"usage":{"prompt_tokens":10`)
 			} else {
 				require.Equal(t, "hello", gjson.Get(w.Body.String(), "choices.0.message.content").String())
 			}
@@ -380,4 +391,89 @@ func TestOpenCodeFreeUpstreamErrorAfterKeepaliveIsSSE(t *testing.T) {
 	require.Contains(t, w.Body.String(), "rate_limit")
 	require.True(t, strings.HasSuffix(w.Body.String(), "\n\n"))
 	require.NotContains(t, w.Body.String(), "[DONE]")
+}
+
+// A newly admitted official free model reaches the worker with its derived
+// profile identity in both modes, and accounting records the profile actually
+// dispatched rather than the pinned big-pickle marker.
+func TestOpenCodeFreeDynamicModelDispatchesDerivedProfile(t *testing.T) {
+	const (
+		textProfileID  = "opencode-foo-free-text-balanced-20261027-v1"
+		textProfile    = "dbf2692e129e259fdc39b912a0df94bd65b3c485492ec4d4edd8fff734126886"
+		agentProfile   = "3f364c46161820efa4a0bbec645d1f9d83a4b0a04e023f29c10645d1c6b77ed3"
+		agentProfileID = "opencode-foo-free-agent-balanced-20261027-v1"
+	)
+	var gotID, gotSHA, gotModel string
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var env freeWorkerEnvelope
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&env))
+		gotID, gotSHA, gotModel = env.ProfileID, env.ProfileSHA256, gjson.GetBytes(env.Body, "model").String()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Sub2api-Transport-Result", "upstream")
+		w.Header().Set("X-Sub2api-Dispatched", "true")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"billing_source\":\"free\"}}\n\ndata: [DONE]\n\n"))
+	}))
+	defer worker.Close()
+	for _, tc := range []struct {
+		name  string
+		body  string
+		id    string
+		sha   string
+		mode  string
+		tools []string
+	}{
+		{
+			name: "text",
+			body: `{"model":"foo-free","messages":[{"role":"user","content":"hi"}]}`,
+			id:   textProfileID, sha: textProfile, mode: openCodeFreeModeText,
+		},
+		{
+			name: "agent",
+			body: `{"model":"foo-free","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"lookup"}}]}`,
+			id:   agentProfileID, sha: agentProfile, mode: openCodeFreeModeAgent,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &freeGatewayRepo{}
+			svc := &OpenAIGatewayService{usageBillingRepo: repo, cfg: &config.Config{OpenCodeFreeBun: config.OpenCodeFreeBunConfig{Enabled: true, WorkerEndpoint: worker.URL, Token: "12345678901234567890123456789012", RequestTimeoutSeconds: 30, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}}}
+			a := &Account{ID: 1, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{"account_mode": AccountModeZen, "api_key": "public", "opencode_free_transport": "bun", "opencode_free_profile": openCodeFreeProfile}}
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			c.Set("api_key", &APIKey{ID: 4})
+			result, err := svc.ForwardAsChatCompletions(context.Background(), c, a, []byte(tc.body), "", "")
+			require.NoError(t, err)
+			require.Equal(t, tc.id, gotID)
+			require.Equal(t, tc.sha, gotSHA)
+			require.Equal(t, "foo-free", gotModel)
+			require.Equal(t, tc.sha, repo.profileHash)
+			require.Equal(t, "foo-free", result.Model)
+			require.Equal(t, "foo-free", result.BillingModel)
+			require.Equal(t, 0, repo.unknown)
+			require.Equal(t, "ok", gjson.Get(w.Body.String(), "choices.0.message.content").String())
+		})
+	}
+}
+
+// Inadmissible models must be rejected before any worker dispatch.
+func TestOpenCodeFreeRejectsInadmissibleModelsBeforeDispatch(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("worker must not be called for an inadmissible model")
+	}))
+	defer worker.Close()
+	repo := &freeGatewayRepo{}
+	svc := &OpenAIGatewayService{usageBillingRepo: repo, cfg: &config.Config{OpenCodeFreeBun: config.OpenCodeFreeBunConfig{Enabled: true, WorkerEndpoint: worker.URL, Token: "12345678901234567890123456789012", RequestTimeoutSeconds: 30, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}}}
+	a := &Account{ID: 1, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{"account_mode": AccountModeZen, "api_key": "public", "opencode_free_transport": "bun", "opencode_free_profile": openCodeFreeProfile}}
+	for _, model := range []string{"gpt-4o", "jev-1.13-free", "gemini-2.5-pro-free"} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		c.Set("api_key", &APIKey{ID: 4})
+		result, err := svc.ForwardAsChatCompletions(context.Background(), c, a, []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, model)), "", "")
+		require.Nil(t, result, model)
+		require.Error(t, err, model)
+		require.Equal(t, 400, w.Code, model)
+		require.Contains(t, w.Body.String(), "unsupported model", model)
+		require.Equal(t, "", repo.profileHash, model)
+	}
 }

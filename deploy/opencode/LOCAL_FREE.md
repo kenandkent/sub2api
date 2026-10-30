@@ -52,8 +52,103 @@ another egress IP.
 
 The free transport is disabled unless both the global option and an account's
 explicit free marker are enabled. The normal Compose file still starts the
-original three services. This worker handles only the fixed OpenCode Console
-`big-pickle` text profile.
+original three services. As of this record the worker handled only the fixed
+OpenCode Console `big-pickle` text profile; see the 2026-10-30 update below.
+
+## Dynamic adaptation and agent mode: 2026-10-30
+
+The backend and worker no longer fix a single `big-pickle` text profile. The
+Go side admits the pinned profiles plus any model matching the `-free` suffix
+rule (System One `jev-`/`gemini-` ids stay rejected), selects text or agent
+mode from the request body, and derives each request's profile by mirroring
+`gen_profiles.py` byte substitution over embedded `big-pickle` text and agent
+templates. The worker loads the whole `deploy/opencode/profiles/` directory,
+verifies every file against the source-pinned
+`worker/manifest.generated.ts`, keeps pinned profiles authoritative, and
+derives profiles for admissible models it does not pin; the envelope identity
+must match `body.model`. Agent mode passes caller tools, `tool_choice` and
+tool-result history through, and the SSE parser validates real `tool_calls`
+streams. Bodies outside the audited allowlist are still rejected locally.
+
+Offline checks after this change: the full backend unit suite
+(`make test-unit`) and 24 Bun worker tests / 128 assertions, with Go-side
+golden profile hashes matching `deploy/opencode/profiles/` byte for byte. No
+real upstream free-model request was made in that offline round; the real
+upstream verification happened later the same day and is recorded below.
+Per-model production acceptance still has to run as described in
+[OpenCode 接入兼容性核查](COMPATIBILITY.md).
+
+## Real free-model verification: 2026-10-30 (later round)
+
+Modification logic fixed by this round's real-call testing (each with a
+regression test):
+
+- `deploy/opencode/worker/chatBody.ts`: `validToolParameters` now checks the
+  Array branch before the prototype-key guard, mirroring Go's
+  `openCodeFreeWalkToolValue`. Any JSON array inside tool `parameters`
+  (for example `required: ["city"]`) was previously rejected as
+  `unsupported_request`, so every agent request surfaced as gateway 502.
+  `worker.test.ts` agent-dispatch fixtures now carry `required` / `enum` /
+  `anyOf` / `additionalProperties` arrays.
+- `backend/internal/service/opencode_free_bun_parser.go`: `finalEvents`
+  terminal frames (tool calls, `finish_reason`, usage) are now emitted with
+  the `data: ` SSE prefix. They were bare JSON lines, which SSE consumers
+  silently drop, so clients saw only content and `[DONE]` while the server
+  settled normally. Parser and gateway tests now assert every client line
+  starts with `data: `.
+- `backend/internal/service/opencode_free_bun_gateway.go`: the free path
+  calls `MarkResponseCommitted` after writing a terminal error response
+  (upstream-status passthrough and the already-written `freeReject`
+  branch). Previously the chat handler appended its generic
+  `event: error` fallback after the already-complete body, corrupting
+  upstream error responses into JSON+SSE mixtures.
+- `deploy/dev.py`: `development_env` merges the strict private
+  `.dev/opencode-free.env` when present, so `make dev` and `local.py`
+  backends share the worker endpoint and token. A missing file keeps the
+  transport disabled.
+
+Verification method:
+
+```sh
+make dev                                   # backend 18080 + frontend 3000
+python3 -B deploy/opencode/local.py worker # native worker on 19090
+python3 -B deploy/opencode/e2e/probe_real_models.py --env dev \
+  --models big-pickle,glm-5.3-flash-free,mimo-v2.6-flash-free,deepseek-v4.1-flash-free,nemotron-3.5-lightning-free
+```
+
+The probe creates isolated group/account/channel/user/key objects, exercises
+non-stream, stream and agent requests per model, checks local admission
+guards and reconciles usage rows against the balance delta. The sanitized
+report is `.cache/opencode-free-implementation/real-models-report.json`.
+
+Verification results (2026-10-30):
+
+- `REAL MODEL PROBE PASSED`, 23/23 checks. Five models returned
+  content + `finish_reason` + usage non-stream and content + terminal
+  frames + `[DONE]` on streams. Usage rows = charged = settled = 10, and
+  the balance delta equals the cost sum exactly.
+- Local guards: `gemini-` alias rejected locally with 400; an unknown
+  `-free` model reaches upstream (not locally rejected) and returns the
+  upstream `Model is unavailable.` message; unknown aliases return 404.
+- Agent requests reached the upstream with tools intact, but opencode
+  returned HTTP 429 `FreeUsageLimitError` (`Retry-After` ≈ 17 h, free
+  agent quota reset pending). The gateway forwards that error cleanly, so
+  agent transport is verified; per-model agent acceptance must be re-run
+  with this probe after the quota resets.
+- `nemotron-3-ultra-free` returns upstream HTTP 400
+  `Model is unavailable.` (same message as unknown models); treat it as an
+  upstream availability issue, not a local rejection.
+- Upstream burst limiting was observed: short windows where every request
+  returns the same 429, recovering within minutes. Re-run the probe when
+  that happens instead of treating it as a regression.
+- Full unit suite `make test-unit` (58 packages, 0 fail), `go build` /
+  `go vet` clean, `gofmt` clean on touched files, and `bun test
+  deploy/opencode/worker/worker.test.ts` (24 pass / 128 assertions) all
+  ran green after these fixes.
+- Per user instruction the final round samples 5 of the 9 official models;
+  `beam-free`, `flint-40b-free` and `nemotron-3.5-super-vl-free` passed
+  non-stream in the earlier compose round but were not part of this
+  sample.
 
 ## Native worker and backend
 
@@ -76,7 +171,11 @@ python3 -B deploy/opencode/local.py backend
 
 The backend launcher uses the same development settings as `deploy/dev.py`,
 plus `.dev/opencode-free.env`. It does not build, start dependencies, or manage
-other processes. Its usual address is `127.0.0.1:18080`.
+other processes. Its usual address is `127.0.0.1:18080`. `make dev` merges
+the same private file into the air-managed backend environment, so both entry
+points share one worker token; keep the worker running on `127.0.0.1:19090`
+while iterating, and re-run `make dev` after editing Go sources (air reloads
+them automatically).
 
 When an HTTP proxy is configured, any non-200 response through the proxy is
 conservatively reported as a 502 worker error. This includes genuine upstream

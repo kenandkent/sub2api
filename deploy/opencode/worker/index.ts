@@ -13,5 +13,5 @@ const host = process.env.LISTEN_HOST || '127.0.0.1';
 if (host !== '127.0.0.1' && host !== '::1') throw new Error('worker must listen on loopback');
 const port = Number(process.env.PORT || '19090');
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('invalid port');
-const profilePath = process.env.PROFILE_PATH || fileURLToPath(new URL('../balanced-text-profile.v2.json', import.meta.url));
-Bun.serve({hostname:host, port, idleTimeout: 120, fetch:createWorker({token,profilePath})});
+const profilesDir = process.env.PROFILES_DIR || fileURLToPath(new URL('../profiles', import.meta.url));
+Bun.serve({hostname:host, port, idleTimeout: 120, fetch:createWorker({token,profilesDir})});

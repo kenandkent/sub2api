@@ -50,7 +50,7 @@ def main():
             return
         if args.command in ('worker', 'mock-worker'):
             env = dict(os.environ, **config, LISTEN_HOST='127.0.0.1', PORT='19090',
-                       PROFILE_PATH=str(ROOT / 'deploy/opencode/balanced-text-profile.v2.json'),
+                       PROFILES_DIR=str(ROOT / 'deploy/opencode/profiles'),
                        BUN_RUNTIME_TRANSPILER_CACHE_PATH='0')
             script = 'deploy/opencode/worker/index.ts' if args.command == 'worker' else 'deploy/opencode/e2e/mock-worker.ts'
             os.execve(args.bun, [args.bun, str(ROOT / script)], env)

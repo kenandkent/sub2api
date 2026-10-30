@@ -1,5 +1,6 @@
-# Optional third file, after local + production, for an immutable Bun worker.
-# The deployment helper loads this only when given a worker image digest.
+# Third file, after local + production, for an immutable Bun worker.
+# The mysubapi branch production workflow requires a same-commit worker digest.
+# The generic deployment helper loads this only when given a worker image digest.
 services:
   sub2api:
     environment:

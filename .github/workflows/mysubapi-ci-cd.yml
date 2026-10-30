@@ -10,13 +10,11 @@ on:
 permissions:
   contents: read
 
-# Serialize branch pipelines; do not interrupt an in-progress deployment.
-concurrency:
-  group: mysubapi-${{ github.event.pull_request.number || 'branch' }}
-  cancel-in-progress: false
-
 jobs:
   deployment-checks:
+    concurrency:
+      group: mysubapi-deployment-checks-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -40,7 +38,10 @@ jobs:
           sh deploy/tests/docker-runtime-resources-test.sh
           sh deploy/test-caddyfile-cache.sh
 
-  backend:
+  backend-unit:
+    concurrency:
+      group: mysubapi-backend-unit-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -51,14 +52,34 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Unit and integration tests
+      - name: Unit tests
+        working-directory: backend
+        run: make test-unit
+
+  backend-integration:
+    concurrency:
+      group: mysubapi-backend-integration-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Integration tests and real gateway verification
         working-directory: backend
         run: |
-          make test-unit
-          make test-integration
+          go test -tags=integration -count=1 ./...
           go test -tags='unit integration' -v ./internal/handler -run '^TestMarketplaceGatewayRealInfrastructure$' -count=1 -timeout=5m
 
   frontend:
+    concurrency:
+      group: mysubapi-frontend-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -75,12 +96,15 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      - run: make test-frontend
+      - run: pnpm --dir frontend run lint:check
+      - run: pnpm --dir frontend run typecheck
       - name: Run all frontend regression tests
         run: pnpm --dir frontend run test:run
 
   image:
-    needs: [deployment-checks, backend, frontend]
+    concurrency:
+      group: mysubapi-image-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     if: >-
       github.repository == 'kenandkent/sub2api' &&
       github.ref == 'refs/heads/mysubapi' &&
@@ -105,7 +129,6 @@ jobs:
           echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           echo "version=$(tr -d '\r\n' < backend/cmd/server/VERSION)-mysubapi.${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -118,11 +141,10 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ steps.metadata.outputs.repository }}:sha-${{ github.sha }}
-            ${{ steps.metadata.outputs.repository }}:mysubapi
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -141,11 +163,10 @@ jobs:
         with:
           context: .
           file: deploy/opencode/worker/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ steps.metadata.outputs.repository }}-opencode-free-worker:sha-${{ github.sha }}
-            ${{ steps.metadata.outputs.repository }}-opencode-free-worker:mysubapi
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -166,31 +187,31 @@ jobs:
           echo "image=$REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
           echo "worker_image=$REPOSITORY-opencode-free-worker@$WORKER_DIGEST" >> "$GITHUB_OUTPUT"
           echo "Published image: $REPOSITORY@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
-          echo "Published optional worker: $REPOSITORY-opencode-free-worker@$WORKER_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published worker: $REPOSITORY-opencode-free-worker@$WORKER_DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
-    needs: image
+    needs: [deployment-checks, backend-unit, backend-integration, frontend, image]
     if: >-
       github.repository == 'kenandkent/sub2api' &&
       github.ref == 'refs/heads/mysubapi' &&
-      github.event_name != 'pull_request' &&
-      vars.MYSUBAPI_DEPLOY_ENABLED == 'true'
+      github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment: mysubapi-production
     permissions:
       contents: read
-      packages: read
+      packages: write
     concurrency:
       group: mysubapi-production
       cancel-in-progress: false
     env:
+      DOCKER_CONFIG: ${{ github.workspace }}/.cache/docker-auth
       DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '167.114.210.84' }}
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
       DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/home/workspace/subapi' }}
       DEPLOY_IMAGE: ${{ needs.image.outputs.image }}
-      DEPLOY_WORKER_IMAGE: ${{ vars.MYSUBAPI_OPENCODE_FREE_ENABLED == 'true' && needs.image.outputs.worker_image || '' }}
+      DEPLOY_WORKER_IMAGE: ${{ needs.image.outputs.worker_image }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -226,7 +247,7 @@ jobs:
           [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ && "$DEPLOY_PATH" != / ]]
           case "/$DEPLOY_PATH/" in */../*|*/./*) exit 1;; esac
           [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
-          [[ -z "$DEPLOY_WORKER_IMAGE" || "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
+          [[ "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
           umask 077
           mkdir -p "$GITHUB_WORKSPACE/.cache"
           ssh_dir=$(mktemp -d "$GITHUB_WORKSPACE/.cache/ssh.XXXXXX")
@@ -259,3 +280,39 @@ jobs:
           printf '%s\n' "$GHCR_TOKEN" | ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
             "bash '$release_path/deploy-mysubapi.sh' '$DEPLOY_PATH' '$release_id' '$DEPLOY_IMAGE' '$GITHUB_ACTOR' '$DEPLOY_WORKER_IMAGE'"
           echo "Deployed $DEPLOY_IMAGE to $DEPLOY_HOST ($release_id)." >> "$GITHUB_STEP_SUMMARY"
+      - name: Check current commit before promotion
+        id: promotion_current
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          current_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/mysubapi" --jq .object.sha)
+          if [[ "$current_sha" == "$GITHUB_SHA" ]]; then
+            echo "promote=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            echo "Skipped tag promotion: this commit has been superseded." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Validate promotion images
+        if: steps.current.outputs.deploy == 'true' && steps.promotion_current.outputs.promote == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
+          [[ "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
+      - name: Log in for promotion
+        if: steps.current.outputs.deploy == 'true' && steps.promotion_current.outputs.promote == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote deployed images
+        if: steps.current.outputs.deploy == 'true' && steps.promotion_current.outputs.promote == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
+          [[ "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools create --tag ghcr.io/kenandkent/sub2api:mysubapi "$DEPLOY_IMAGE"
+          docker buildx imagetools create --tag ghcr.io/kenandkent/sub2api-opencode-free-worker:mysubapi "$DEPLOY_WORKER_IMAGE"

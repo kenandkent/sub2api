@@ -48,23 +48,25 @@ npm install -g pnpm
 
 ### 当前分支状态
 
-`mysubapi` 是独立开发分支，已移除继承的 `backend-ci.yml`、`security-scan.yml`、`cla.yml` 和 `release.yml`，改用专用的 `.github/workflows/mysubapi-ci-cd.yml`。工作流仅针对本分支执行检查和镜像发布；服务器部署需要显式启用。
+`mysubapi` 是独立开发分支，已移除继承的 `backend-ci.yml`、`security-scan.yml`、`cla.yml` 和 `release.yml`，改用专用的 `.github/workflows/mysubapi-ci-cd.yml`。可信分支推送后并行执行检查和候选镜像构建，全部通过后部署应用与 OpenCode Bun worker；PR 只执行检查。
 
 本地构建、部署脚本、GoReleaser 配置、发布辅助工具和安全检查工具继续保留，供手动使用和后续编写专用流水线时参考。它们不会自行触发自动化任务。
 
 ### 专用 CI/CD 的约定
 
-- 目标环境为 `root@167.114.210.84:22`，部署根目录 `/home/workspace/subapi`；只允许可信 `mysubapi` 分支推送或手动运行进行发布。默认不执行部署，仓库变量 `MYSUBAPI_DEPLOY_ENABLED=true` 后才启用。
+- 目标环境为 `root@167.114.210.84:22`，部署根目录 `/home/workspace/subapi`；只允许原仓库可信 `mysubapi` 分支推送或手动运行进行发布和部署。默认部署应用、PostgreSQL、Redis 和 OpenCode Bun worker 四个容器，并使用同一提交的应用及 worker 镜像摘要。
 - 三份常规 Compose 从当前检出的完整仓库和根 `Dockerfile` 构建本地镜像 `sub2api:mysubapi`，通过 `pull_policy: build` 在启动时重新构建。服务器结合 `docker-compose.production.yml` 覆盖配置后，移除 build 并使用 GHCR 的不可变镜像 digest，无需上传源码。
+- 该服务器为 `x86_64`，分支 CI 默认只构建 `linux/amd64`；根 Dockerfile 保留手动交叉编译其他架构的能力。构建阶段只发布提交专用标签，成功部署后复查分支 HEAD 再更新 `mysubapi` 标签。
 - Go 版本以 `backend/go.mod` 为准，当前声明为 **1.27.3**；根 `Dockerfile` 已使用相同版本。`deploy/Dockerfile` 和 `backend/Dockerfile` 仍使用 **1.27.2**，若要采用这些入口，需先统一构建工具链。
 - 前端使用 pnpm 9 和 `pnpm install --frozen-lockfile`，必须提交 `frontend/pnpm-lock.yaml`；根镜像使用 Node.js 24。
-- 流水线应先执行后端单元/集成测试、前端检查和部署脚本检查，再构建镜像。部署时等待健康检查，并验证登录和实际网关请求；`/health` 只返回应用存活状态，不检查运行期间的数据库或 Redis 连接。
+- 后端单元测试、集成及真实网关测试、前端 lint/typecheck/全量测试、部署配置检查和候选镜像构建并行执行。集成测试每轮实际运行，前端关键集在 CI 中不再重复执行；所有检查通过才部署。部署时等待健康检查，并验证登录和实际网关请求；`/health` 只返回应用存活状态，不检查运行期间的数据库或 Redis 连接。
+- 新提交会取消同分支/PR 的旧 CI 检查或候选构建；生产部署独立串行执行，不中断已开始的 SSH 部署。
 - 数据库迁移随服务启动执行，更新前需备份数据库并记录可回退的镜像版本；镜像回退不会自动回退数据库结构。
 - 服务器连接、镜像仓库认证和运行密钥通过部署环境或 GitHub Secrets 配置，不写入仓库。
-- 首次部署固定 `JWT_SECRET` 和 `TOTP_ENCRYPTION_KEY`，将运行配置、密钥和数据一同备份。JWT 已在数据库中持久化，后续修改环境变量不等于轮换数据库中的现有密钥。
+- 首次部署固定 `JWT_SECRET`、`TOTP_ENCRYPTION_KEY` 和独立的 `OPENCODE_FREE_BUN_TOKEN`，将运行配置、密钥和数据一同备份。JWT 已在数据库中持久化，后续修改环境变量不等于轮换数据库中的现有密钥。
 - `deploy/docker-deploy.sh`、二进制安装脚本和后台更新服务仍面向上游仓库；定制版本接入专用 CI/CD 后应统一通过自有镜像升级，避免这些入口覆盖分支修改。
 
-完整配置、首次服务器准备和应用恢复边界见 [mysubapi CI/CD](deploy/CICD_MYSUBAPI.md)。本轮只准备工作流与配置，不连接服务器或执行远程部署。
+完整配置、首次服务器准备和应用恢复边界见 [mysubapi CI/CD](deploy/CICD_MYSUBAPI.md)。服务器私有 `.env` 必须在首次部署前准备好；环境审批和跳过过期提交的检查仍然生效。
 
 ### 本地测试命令
 

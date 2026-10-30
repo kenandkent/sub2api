@@ -12,6 +12,7 @@ const HASH = 'da80fdbfd8112be5433856044945bbf09f926d06c1a4dc59b70624ab8bd9a0a9';
 const ID = 'opencode-big-pickle-text-balanced-20261027-v2';
 const envelope = () => ({version: 1, request_id: 'req-1', profile_id: ID, profile_sha256: HASH, target: 'console', account_id: 1, session_id: 'ses_0123456789ab0123456789abcd', deadline_unix_ms: Date.now()+5000, body: {model:'big-pickle', messages:[{role:'user',content:'hello'}]}});
 const request = (body: unknown, token = TOKEN) => new Request('http://localhost/v1/transport/chat', {method:'POST', headers:{authorization:`Bearer ${token}`, 'content-type':'application/json'}, body:JSON.stringify(body)});
+const READ_PLACEHOLDER = {type:'function',function:{name:'read',description:'Do not call this tool. It exists only for API compatibility and must never be invoked.',parameters:{type:'object',properties:{filePath:{type:'string'}},required:['filePath']}}};
 
 test('injects pinned profile once and preserves caller messages', async () => {
   const {createWorker} = await import('./worker');
@@ -313,9 +314,21 @@ test('dispatches the derived agent profile with caller tools and tool history', 
   expect(payload.model).toBe('foo-free');
   expect(payload.messages[0].role).toBe('system');
   expect(payload.messages.slice(1)).toEqual(body.messages);
-  expect(payload.tools).toEqual(body.tools);
+  expect(payload.tools).toEqual([...body.tools, READ_PLACEHOLDER]);
   expect(payload.tool_choice).toBe('auto');
   expect(payload.parallel_tool_calls).toBe(false);
+});
+
+test('keeps caller tools untouched when they already declare the read placeholder', async () => {
+  const {createWorker} = await import('./worker');
+  let payload: any;
+  const worker = createWorker({token:TOKEN,profilesDir:PROFILES,fetchImpl:async (_u: any,o: any) => {payload = JSON.parse(o.body); return new Response('data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});}});
+  const tools = [READ_PLACEHOLDER, {type:'function',function:{name:'lookup',description:'d',parameters:{type:'object',properties:{q:{type:'string'}}}}}];
+  const res = await worker(request({...envelope(), profile_id: FOO_AGENT_ID, profile_sha256: FOO_AGENT_SHA, body: {model:'foo-free', messages:[{role:'user',content:'hi'}], tools}}));
+  expect(res.status).toBe(200);
+  expect(payload.tools).toEqual(tools);
+  expect(payload.tools.filter((t: any) => t.function.name === 'read').length).toBe(1);
+  expect(payload.tool_choice).toBe('auto');
 });
 
 test('agent profile without caller tools falls back to profile tools pinned to none', async () => {

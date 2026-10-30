@@ -47,6 +47,35 @@
 - 观察到上游突发限流：短暂窗口内全部请求返回同型 429，数分钟内恢复；遇到时应重跑而非记为回归。
 - 未在本轮抽样：`beam-free`、`flint-40b-free`、`nemotron-3.5-super-vl-free`（按用户要求抽 3-5 个；三者在更早的 compose 轮非流式已通过）。
 
+## 2026-10-30 更新：agent 429 根因（工具名门禁）与占位 read 修复
+
+背景：生产三方测试中所有 agent（tools）请求返回 429 `FreeUsageLimitError`，text 请求全部通过。
+
+诊断（修复前的隔离实验，均在配额充足窗口）：
+
+- 同一时刻 text 200；agent 声明任意不含 `read` 的工具集（`lookup`、`get_weather`、五工具组合等）→ 429 `FreeUsageLimitError` + `Retry-After` ≈ 10 小时；工具集含官方占位名 `read`（`[read]`、`[read,bash,edit,grep,glob]`）→ 200；`[read,get_weather]` 混合 → 200 且模型成功调用 `get_weather`（n=1）。
+- 跨模型复现（3/3）：`big-pickle`、`glm-5.3-flash-free`、`mimo-v2.6-flash-free` 各 `[lookup]`→429、`[read]`→200。
+- `tool_choice: none` 不能豁免；prompt、工具数量（1~5）、stream 模式、工具描述/参数均不影响判定。直连 curl（即使 system+read+stream:true）始终 429——另有客户端指纹层，Bun worker 的 fetch 已满足该层。
+- OmniRoute `open-sse/executors/opencodeFreeTierContract.ts`（release/v3.8.53）契约佐证：非空 `tools`、`stream:true`、session 头、UA `opencode/<version>`，且 “the upstream inspects WHICH names a request declares”；官方客户端的占位工具名就是 `read`（`PLACEHOLDER_TOOL_NAME`），其 `applyFreeTierRequestContract` 会为调用方 tools 合并占位 `read`。
+- 根因：移植时 `deploy/opencode/worker/worker.ts` 第 71 行把调用方 tools 整体替换（`hasCallerTools ? b.tools : profile.body.tools`），丢掉了占位 `read`。text 因 profile 模板恒带 `[read]` 全部通过，agent 因此被上游以 429 拒绝——上一节“agent 429 = 配额待重置”的归因不准确（同窗口 text 200 即可排除配额）。
+
+修改逻辑（每处均补了回归测试）：
+
+- `deploy/opencode/worker/worker.ts`：agent 请求且调用方 tools 不含 `read` 时，向出站 tools 合并官方占位 `read`（描述 “Do not call this tool. It exists only for API compatibility and must never be invoked.” + `{filePath}` schema）；调用方已声明 `read` 则原样不动；text/无工具路径不变。
+- `backend/internal/service/opencode_free_bun_request.go`：新增 `openCodeFreeRequest.InjectedTools` 与 `openCodeFreeInjectedTools`，与 worker 同规则（非空调用方 tools 且无 `read` → `["read"]`），两条规则必须保持一致。
+- `backend/internal/service/opencode_free_bun_parser.go`：`openCodeFreeSSEOptions.InjectedTools` + 校验器 injected 集合。累积期允许占位名（含 `rea`/`d` 前缀分片）；finish 时把占位调用从结果中剔除并把剩余调用重排回 0..n-1；若全部调用都是占位（客户端没有任何调用方工具），`finish_reason=tool_calls` 降级为 `stop`（`v.finishReason` 给客户端、`v.upstreamFinish` 供上游重复终止帧原值比较）。`tool_choice=none` 仍拒绝任何调用、required/forced 缺调用方调用仍报错、未配置 `InjectedTools` 时行为与原实现完全一致。
+- `backend/internal/service/opencode_free_bun_gateway.go`：构造 SSE options 时传入 `reqNorm.InjectedTools`。
+- `deploy/opencode/e2e/probe_real_models.py`：`test_agent` 计费口径修正——agent 请求本身（HTTP 200 即产生 usage 行）与续接请求分别计入 `charged`；此前只计续接，agent 成功后 usage 行数必然对不上账。
+
+验证方法：`bun test deploy/opencode/`（65 通过/175 断言）、`cd backend && make test-unit`（58 包 0 失败）、`go build ./... && go vet -tags=unit ./...`、gofmt 无新增偏差；`make dev` + 重启原生 worker 加载新代码后，严格断言脚本 9/9 HTTP 200，并跑 `probe_real_models.py --env dev --models big-pickle,glm-5.3-flash-free,deepseek-v4.1-flash-free,mimo-v2.6-flash-free`。
+
+验证结果（2026-10-30 晚）：
+
+- 严格断言 9/9 HTTP 200：agent 非流式/流式 `[lookup]`、`[search_weather,get_info]`（修复前必 429 的无 read 工具集）、诱导模型调用注入 `read` 的场景（200、`finish=stop`、响应中无 `read` 泄漏——模型按占位描述拒绝调用）、text 非流/流式回归、glm/mimo 跨模型 agent、tool 结果续接（200 + stop + content）。
+- probe 首轮：4 模型 ×（非流式+流式+agent+续接）= 16/16 HTTP 200；计费对账修正后 `usage 行数 = 计费请求数 = 已结算数`（2==2 单独复核通过，首轮全量为 16==16 口径），余额差额与成本合计相等。
+- 首轮之后的第二轮复测撞上真实上游免费配额耗尽（text 也 429 “Free usage limit reached”，`Retry-After` 指向次日 ~08:15 +0800 重置），按已知上游行为记录为环境事件而非回归；agent 门禁修复的判定以首轮 16/16 与 9/9 为准。
+- 三方生产验收需部署本修复后在配额窗口内用实际客户端复测。
+
 ## 官方公开能力与授权边界
 
 [官方模型文档](https://dev.opencode.ai/v2/docs/console/models) 当前列出九个免费聊天模型：`big-pickle`、`glm-5.3-flash-free`、`deepseek-v4.1-flash-free`、`beam-free`、`flint-40b-free`、`mimo-v2.6-flash-free`、`nemotron-3-ultra-free`、`nemotron-3.5-lightning-free`、`nemotron-3.5-super-vl-free`。同页明确要求免费聊天模型通过 OpenCode 使用，其他客户端采用付费 Console 或 Go。

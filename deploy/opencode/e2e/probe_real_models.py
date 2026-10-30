@@ -242,7 +242,7 @@ def test_agent(model, api_key):
     if finish != 'tool_calls':
         entry['note'] = 'model answered without calling the tool'
         check(True, model + ' agent: request accepted (no tool call this run)')
-        return entry, None, 0
+        return entry, None, 1
     tool_calls = (choices[0].get('message') or {}).get('tool_calls') or []
     check(bool(tool_calls) and all((c.get('function') or {}).get('name') for c in tool_calls),
           model + ' agent: tool_calls shape')
@@ -255,7 +255,7 @@ def test_agent(model, api_key):
                                          'arguments': c['function']['arguments']}}
                            for c in tool_calls if c.get('id') and c.get('function')]}
     if not echo['tool_calls']:
-        return entry, None, 0
+        return entry, None, 1
     followup = messages + [echo] + [
         {'role': 'tool', 'tool_call_id': call_item['id'], 'content': TOOL_RESULT}
         for call_item in echo['tool_calls']]
@@ -272,7 +272,9 @@ def test_agent(model, api_key):
         check(ok2, model + ' agent continuation: stop + content')
     else:
         check(False, model + ' agent continuation: HTTP 200 (got %s %s)' % (status2, err2))
-    return entry, entry2, (1 if ok2 else 0)
+    # Every HTTP 200 creates one usage row: the agent request itself plus the
+    # continuation round when it reached the gateway.
+    return entry, entry2, 1 + (1 if status2 == 200 else 0)
 
 
 def main():

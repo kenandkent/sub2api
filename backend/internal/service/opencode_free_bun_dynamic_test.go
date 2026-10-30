@@ -170,6 +170,7 @@ func TestNormalizeOpenCodeFreeRequestDynamicModel(t *testing.T) {
 	require.Equal(t, "opencode-foo-free-agent-balanced-20261027-v1", req.Profile.ID)
 	require.Equal(t, "3f364c46161820efa4a0bbec645d1f9d83a4b0a04e023f29c10645d1c6b77ed3", req.Profile.SHA256)
 	require.Equal(t, []string{"lookup"}, req.ToolNames)
+	require.Equal(t, []string{"read"}, req.InjectedTools)
 
 	// The gateway maps the requested model; both the original and mapped name
 	// must admit, otherwise the request is rejected before dispatch.

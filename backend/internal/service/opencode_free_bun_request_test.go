@@ -18,11 +18,13 @@ func TestOpenCodeFreeRequestCapabilities(t *testing.T) {
 		require.NoError(t, json.Unmarshal(req.Body, &got))
 		require.Equal(t, "big-pickle", got["model"])
 		require.Empty(t, req.ToolNames)
+		require.Empty(t, req.InjectedTools, body)
 	}
 	contentParts := `{"model":"alias","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`
 	req, err := normalizeOpenCodeFreeRequest([]byte(contentParts), "big-pickle")
 	require.NoError(t, err)
 	require.Equal(t, openCodeFreeModeAgent, req.Mode)
+	require.Empty(t, req.InjectedTools)
 	for _, body := range []string{
 		`{"model":"alias","messages":[{"role":"user","content":"x"}],"temperature":0.1}`,
 		`{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{}]}`,
@@ -44,6 +46,13 @@ func TestOpenCodeFreeRequestAgentMode(t *testing.T) {
 	require.Equal(t, openCodeFreeModeAgent, req.Mode)
 	require.Equal(t, []string{"lookup"}, req.ToolNames)
 	require.Equal(t, openCodeFreeToolChoice{Kind: "auto"}, req.ToolChoice)
+	require.Equal(t, []string{"read"}, req.InjectedTools)
+
+	readDeclared := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read"}}]}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(readDeclared), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, []string{"read"}, req.ToolNames)
+	require.Empty(t, req.InjectedTools)
 
 	forced := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"lookup"}}],"tool_choice":{"type":"function","function":{"name":"lookup"}}}`
 	req, err = normalizeOpenCodeFreeRequest([]byte(forced), "big-pickle")

@@ -21,6 +21,11 @@ import (
 type openCodeFreeSSEOptions struct {
 	ToolNames  []string
 	ToolChoice openCodeFreeToolChoice
+	// InjectedTools are placeholder tool names the worker merged into the
+	// upstream body (the free tier refuses tool sets without the official
+	// `read` placeholder). The caller never declared them, so their calls are
+	// allowed through validation and stripped from the client stream.
+	InjectedTools []string
 }
 
 type openCodeFreeToolCallResult struct {
@@ -52,6 +57,7 @@ type openCodeFreeSSEValidator struct {
 	clientModel string
 	model       string
 	names       map[string]struct{}
+	injected    map[string]struct{}
 	forcedName  string
 	forced      bool
 	required    bool
@@ -62,6 +68,7 @@ type openCodeFreeSSEValidator struct {
 	reasoning      string
 	finished       bool
 	finishReason   string
+	upstreamFinish string
 	usage          json.RawMessage
 	rawUsageResult OpenAIUsage
 	billingResult  string
@@ -76,6 +83,7 @@ func newOpenCodeFreeSSEValidator(clientModel string, opts *openCodeFreeSSEOption
 		clientModel: clientModel,
 		model:       clientModel,
 		names:       map[string]struct{}{},
+		injected:    map[string]struct{}{},
 		calls:       map[int]*openCodeFreeToolCallResult{},
 		started:     time.Now().Unix(),
 	}
@@ -92,6 +100,18 @@ func newOpenCodeFreeSSEValidator(clientModel string, opts *openCodeFreeSSEOption
 			}
 			seen[name] = struct{}{}
 			v.names[name] = struct{}{}
+		}
+		for _, name := range opts.InjectedTools {
+			if !openCodeFreeValidToolName(name) {
+				return nil, errors.New("invalid injected tool")
+			}
+			if _, dup := v.injected[name]; dup {
+				return nil, errors.New("duplicate injected tools")
+			}
+			if _, clash := v.names[name]; clash {
+				return nil, errors.New("injected tool already declared")
+			}
+			v.injected[name] = struct{}{}
 		}
 	}
 	switch choice.Kind {
@@ -111,6 +131,13 @@ func newOpenCodeFreeSSEValidator(clientModel string, opts *openCodeFreeSSEOption
 		return nil, errors.New("invalid tool choice")
 	}
 	return v, nil
+}
+
+// isInjected reports whether the name belongs to a placeholder tool the worker
+// merged upstream. Those calls are valid to receive but never reach the caller.
+func (v *openCodeFreeSSEValidator) isInjected(name string) bool {
+	_, ok := v.injected[name]
+	return ok
 }
 
 // inspectTools ports the audited OpenCode free SSE tool delta rules: declared
@@ -156,10 +183,10 @@ func (v *openCodeFreeSSEValidator) inspectTools(raw json.RawMessage, calls map[i
 			if json.Unmarshal(item, &call) != nil || call.Index != nil || call.ID == "" || !openCodeFreeToolCallIDPattern.MatchString(call.ID) || call.Type != "function" || call.Function.Arguments == nil || !openCodeFreeValidToolName(call.Function.Name) {
 				return errors.New("invalid tool calls")
 			}
-			if _, ok := v.names[call.Function.Name]; !ok {
+			if _, ok := v.names[call.Function.Name]; !ok && !v.isInjected(call.Function.Name) {
 				return errors.New("undeclared tool")
 			}
-			if v.forced && call.Function.Name != v.forcedName {
+			if v.forced && !v.isInjected(call.Function.Name) && call.Function.Name != v.forcedName {
 				return errors.New("forced tool mismatch")
 			}
 			if !json.Valid([]byte(*call.Function.Arguments)) {
@@ -262,9 +289,17 @@ func (v *openCodeFreeSSEValidator) inspectTools(raw json.RawMessage, calls map[i
 
 func openCodeFreeToolNameAllowed(name string, v *openCodeFreeSSEValidator) bool {
 	if v.forced {
-		return strings.HasPrefix(v.forcedName, name)
+		if strings.HasPrefix(v.forcedName, name) {
+			return true
+		}
+	} else {
+		for candidate := range v.names {
+			if strings.HasPrefix(candidate, name) {
+				return true
+			}
+		}
 	}
-	for candidate := range v.names {
+	for candidate := range v.injected {
 		if strings.HasPrefix(candidate, name) {
 			return true
 		}
@@ -275,41 +310,82 @@ func openCodeFreeToolNameAllowed(name string, v *openCodeFreeSSEValidator) bool 
 // inspectFinish enforces the audited terminal invariants: declared finish
 // reasons only, tool_calls finish iff calls exist, required/forced choice needs
 // calls, and every finished call is complete, contiguous, unique and declared.
-func (v *openCodeFreeSSEValidator) inspectFinish(reason string, calls map[int]*openCodeFreeToolCallResult) error {
+// It returns the finish reason the client should observe: when the upstream
+// only called injected placeholder tools, the tool_calls finish degrades to
+// stop and the placeholder calls are removed (and the remaining client calls
+// reindexed) so the caller never sees a tool it never declared.
+func (v *openCodeFreeSSEValidator) inspectFinish(reason string, calls map[int]*openCodeFreeToolCallResult) (string, error) {
 	switch reason {
 	case "":
-		return nil
+		return "", nil
 	case "stop", "length", "content_filter", "tool_calls":
 	default:
-		return errors.New("unsupported finish reason")
+		return "", errors.New("unsupported finish reason")
 	}
-	if (reason == "tool_calls") != (len(calls) > 0) {
-		return errors.New("finish reason mismatch")
+	clientCalls, injectedCalls := 0, 0
+	for _, call := range calls {
+		if call != nil && v.isInjected(call.Function.Name) {
+			injectedCalls++
+			continue
+		}
+		clientCalls++
 	}
-	if (v.required || v.forced) && len(calls) == 0 {
-		return errors.New("required tool calls missing")
+	if reason == "tool_calls" && clientCalls == 0 && injectedCalls > 0 {
+		// Only placeholder calls: the caller declared no tool call at all, so
+		// present the turn as an ordinary text stop.
+		reason = "stop"
+	}
+	if (reason == "tool_calls") != (clientCalls > 0) {
+		return "", errors.New("finish reason mismatch")
+	}
+	if (v.required || v.forced) && clientCalls == 0 {
+		return "", errors.New("required tool calls missing")
 	}
 	ids := map[string]struct{}{}
 	for index := 0; index < len(calls); index++ {
 		call, ok := calls[index]
 		if !ok || !openCodeFreeToolCallIDPattern.MatchString(call.ID) {
-			return errors.New("incomplete tool call")
+			return "", errors.New("incomplete tool call")
 		}
 		if _, dup := ids[call.ID]; dup {
-			return errors.New("duplicate tool call id")
+			return "", errors.New("duplicate tool call id")
 		}
 		ids[call.ID] = struct{}{}
+		if v.isInjected(call.Function.Name) {
+			if !json.Valid([]byte(call.Function.Arguments)) {
+				return "", errors.New("invalid tool arguments")
+			}
+			continue
+		}
 		if _, ok := v.names[call.Function.Name]; !ok {
-			return errors.New("undeclared tool")
+			return "", errors.New("undeclared tool")
 		}
 		if v.forced && call.Function.Name != v.forcedName {
-			return errors.New("forced tool mismatch")
+			return "", errors.New("forced tool mismatch")
 		}
 		if !json.Valid([]byte(call.Function.Arguments)) {
-			return errors.New("invalid tool arguments")
+			return "", errors.New("invalid tool arguments")
 		}
 	}
-	return nil
+	if injectedCalls > 0 {
+		compacted := make(map[int]*openCodeFreeToolCallResult, clientCalls)
+		next := 0
+		for index := 0; index < len(calls); index++ {
+			call := calls[index]
+			if v.isInjected(call.Function.Name) {
+				continue
+			}
+			compacted[next] = call
+			next++
+		}
+		for index := range calls {
+			delete(calls, index)
+		}
+		for index, call := range compacted {
+			calls[index] = call
+		}
+	}
+	return reason, nil
 }
 
 func (v *openCodeFreeSSEValidator) validateUsage(raw json.RawMessage) error {
@@ -466,6 +542,7 @@ func (v *openCodeFreeSSEValidator) parse(payload string) (string, bool, error) {
 		calls[index] = &clone
 	}
 	finish := ""
+	upstreamFinish := ""
 	sawFinish := false
 	var deltas []map[string]json.RawMessage
 	for _, fields := range choiceFields {
@@ -496,7 +573,7 @@ func (v *openCodeFreeSSEValidator) parse(payload string) (string, bool, error) {
 		if v.finished {
 			// Mimo may repeat the same finish alongside its usage-only frame.
 			// Accept it once only when it contains no new output or tool semantics.
-			if !v.haveUsage || reason != v.finishReason || len(delta) > 2 {
+			if !v.haveUsage || reason != v.upstreamFinish || len(delta) > 2 {
 				return "", false, errors.New("unexpected event after finish")
 			}
 			for key, val := range delta {
@@ -553,11 +630,13 @@ func (v *openCodeFreeSSEValidator) parse(payload string) (string, bool, error) {
 				return "", false, fmt.Errorf("unsupported delta field %q", key)
 			}
 		}
-		if err := v.inspectFinish(reason, calls); err != nil {
+		finalReason, err := v.inspectFinish(reason, calls)
+		if err != nil {
 			return "", false, err
 		}
 		if reason != "" {
-			finish = reason
+			finish = finalReason
+			upstreamFinish = reason
 			sawFinish = true
 		}
 		deltas = append(deltas, delta)
@@ -603,6 +682,7 @@ func (v *openCodeFreeSSEValidator) parse(payload string) (string, bool, error) {
 	if sawFinish {
 		v.finished = true
 		v.finishReason = finish
+		v.upstreamFinish = upstreamFinish
 	}
 	frame, err := v.rewrite(payload, delta)
 	if err != nil {
@@ -711,7 +791,7 @@ func (v *openCodeFreeSSEValidator) rewrite(payload string, delta map[string]json
 				callsReady = false
 				break
 			}
-			if _, declared := v.names[call.Function.Name]; !declared {
+			if _, declared := v.names[call.Function.Name]; !declared && !v.isInjected(call.Function.Name) {
 				callsReady = false
 				break
 			}

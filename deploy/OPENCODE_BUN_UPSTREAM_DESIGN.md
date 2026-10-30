@@ -102,6 +102,8 @@ Profile 是不可变、受版本控制的文件，不接受下游传入任意模
 
 首期接受纯文本 Chat，`tools` 缺省或空数组均允许并规范化为无调用方工具；非空 `tools`、非 `none` 的 `tool_choice`、历史 tool 消息或 tool calls、多模态、Responses/Anthropic、未知或未验证参数均在发送前明确拒绝；不能静默丢字段。首期向上游发送 `tool_choice: none`；当前最终组合在本机完成联合实测，但尚须通过语义、部署环境及安全等完整准入矩阵。即使设置了 none，仍必须检测和拦截所有意外 tool-call delta。不能把注入工具回传为用户声明的工具，亦不做隐式覆盖/改名。原生诊断模式若未来支持工具，需独立验证工具名称、schema、增量参数、ID、结果与历史关联，禁止自动执行；未经验证保持关闭。
 
+2026-10-30 补充（agent 模式与工具名门禁）：agent 模式现已支持调用方 `tools` 透传与 tool 结果续接，经真实上游隔离实验证实上游免费层会**检查请求声明的工具名集合**：非空 `tools` 中缺少官方占位名 `read` 即返回 429 `FreeUsageLimitError`（`tool_choice: none` 不豁免），含 `read` 则 200；3/3 模型复现。因此 worker 对非空调用方工具集合**合并占位 `read`**（描述声明禁止调用，schema 为 `{filePath}`），网关侧 `openCodeFreeInjectedTools` 与之保持同规则；注入调用在累积期允许（含前缀分片），finish 时从结果剔除并重排剩余调用，全部为注入调用时 `tool_calls` 降级为 `stop`，`none`/forced/required 语义不变，注入名绝不回传给客户端。`InjectedTools` 未配置时行为与原实现完全一致。详见 `deploy/opencode/COMPATIBILITY.md` 对应小节。
+
 首期 `n` 缺省或为 1，其他值发送前拒绝；旧式 `functions` / `function_call` 请求字段明确列为未支持，不静默转换。上游意外返回非零 choice index 属协议不匹配，必须检查所有 choices 后拒绝，不能只选择 choice 0 而漏过其他 choice 的工具事件。诊断器只取 choice 0 是研究聚合规则，不代表生产验收可以跳过其他 choice。
 
 温度参数采用明确契约：调用方未提供时发送 `temperature: 0`，显式 0 原样保留；任何非 0 值在发起上游请求前返回 `unsupported_parameter`，绝不静默覆盖。0 仅为本轮观察有效的请求条件，不保证确定性。

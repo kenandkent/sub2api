@@ -200,3 +200,128 @@ func TestOpenCodeFreeSSEAcceptsNullRoleDeltas(t *testing.T) {
 	require.Contains(t, out.String(), "Hello")
 	require.Contains(t, out.String(), " OK")
 }
+
+func openCodeFreeUsageTail() string {
+	return "data: {\"id\":\"x\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1,\"billing_source\":\"free\"}}\n\n" +
+		"data: [DONE]\n\n"
+}
+
+// Mixed stream: the worker injected placeholder `read` at index 0 (name split
+// across frames) and the model called the caller-declared `lookup` at index 1.
+func openCodeFreeInjectedMixedFixture() string {
+	return "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_r\",\"type\":\"function\",\"function\":{\"name\":\"rea\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"d\",\"arguments\":\"{\\\"p\\\":1}\"}}]},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_l\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		openCodeFreeUsageTail()
+}
+
+func openCodeFreeInjectedOnlyFixture() string {
+	return "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_r\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		openCodeFreeUsageTail()
+}
+
+func openCodeFreeInjectedOpts(choice openCodeFreeToolChoice) *openCodeFreeSSEOptions {
+	return &openCodeFreeSSEOptions{ToolNames: []string{"lookup"}, ToolChoice: choice, InjectedTools: []string{"read"}}
+}
+
+func TestOpenCodeFreeSSEStripsInjectedPlaceholderAndKeepsClientCall(t *testing.T) {
+	opts := openCodeFreeInjectedOpts(openCodeFreeToolChoice{Kind: "auto"})
+	var out bytes.Buffer
+	parsed, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(openCodeFreeInjectedMixedFixture()), &out, 1<<20, 1<<16, "alias", opts)
+	require.NoError(t, err)
+	require.Equal(t, "tool_calls", parsed.Finish)
+	require.Len(t, parsed.ToolCalls, 1)
+	require.Equal(t, "call_l", parsed.ToolCalls[0].ID)
+	require.Equal(t, "lookup", parsed.ToolCalls[0].Function.Name)
+	stream := out.String()
+	require.Contains(t, stream, `"tool_calls":[{"id":"call_l","type":"function","function":{"name":"lookup","arguments":"{}"}}]`)
+	require.Contains(t, stream, `"finish_reason":"tool_calls"`)
+	require.NotContains(t, stream, "call_r")
+	require.NotContains(t, stream, `"read"`)
+	require.Contains(t, stream, "[DONE]")
+}
+
+func TestOpenCodeFreeSSEInjectedOnlyCallDegradesToStop(t *testing.T) {
+	opts := openCodeFreeInjectedOpts(openCodeFreeToolChoice{Kind: "auto"})
+	var out bytes.Buffer
+	parsed, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(openCodeFreeInjectedOnlyFixture()), &out, 1<<20, 1<<16, "alias", opts)
+	require.NoError(t, err)
+	require.Equal(t, "stop", parsed.Finish)
+	require.Empty(t, parsed.ToolCalls)
+	stream := out.String()
+	require.Contains(t, stream, `"finish_reason":"stop"`)
+	require.NotContains(t, stream, `"finish_reason":"tool_calls"`)
+	require.NotContains(t, stream, `"tool_calls"`)
+	require.NotContains(t, stream, "call_r")
+	require.Contains(t, stream, "[DONE]")
+}
+
+func TestOpenCodeFreeSSECompleteTerminalFrameStripsInjectedPlaceholder(t *testing.T) {
+	opts := openCodeFreeInjectedOpts(openCodeFreeToolChoice{Kind: "auto"})
+	fixture := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_r\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}},{\"id\":\"call_l\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		openCodeFreeUsageTail()
+	var out bytes.Buffer
+	parsed, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(fixture), &out, 1<<20, 1<<16, "alias", opts)
+	require.NoError(t, err)
+	require.Equal(t, "tool_calls", parsed.Finish)
+	require.Len(t, parsed.ToolCalls, 1)
+	require.Equal(t, "call_l", parsed.ToolCalls[0].ID)
+	require.NotContains(t, out.String(), "call_r")
+}
+
+func TestOpenCodeFreeSSERejectsInjectedNameWithoutInjectionFlag(t *testing.T) {
+	opts := &openCodeFreeSSEOptions{ToolNames: []string{"lookup"}, ToolChoice: openCodeFreeToolChoice{Kind: "auto"}}
+	fixture := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\",\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n"
+	var out bytes.Buffer
+	_, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(fixture), &out, 1<<20, 1<<16, "", opts)
+	require.Error(t, err)
+	require.NotContains(t, out.String(), "partial")
+	require.NotContains(t, out.String(), "call")
+}
+
+func TestOpenCodeFreeSSERejectsInjectedCallWhenToolChoiceNone(t *testing.T) {
+	opts := openCodeFreeInjectedOpts(openCodeFreeToolChoice{Kind: "none"})
+	_, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(openCodeFreeInjectedOnlyFixture()), nil, 1<<20, 1<<16, "", opts)
+	require.Error(t, err)
+}
+
+func TestOpenCodeFreeSSEForcedChoiceStripsExtraInjectedCall(t *testing.T) {
+	opts := &openCodeFreeSSEOptions{ToolNames: []string{"lookup", "other"}, ToolChoice: openCodeFreeToolChoice{Kind: "function", Name: "lookup"}, InjectedTools: []string{"read"}}
+	var out bytes.Buffer
+	parsed, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(openCodeFreeInjectedMixedFixture()), &out, 1<<20, 1<<16, "", opts)
+	require.NoError(t, err)
+	require.Equal(t, "tool_calls", parsed.Finish)
+	require.Len(t, parsed.ToolCalls, 1)
+	require.Equal(t, "lookup", parsed.ToolCalls[0].Function.Name)
+	require.NotContains(t, out.String(), "call_r")
+}
+
+func TestOpenCodeFreeSSERejectsInjectedOnlyCallUnderRequiredChoice(t *testing.T) {
+	opts := openCodeFreeInjectedOpts(openCodeFreeToolChoice{Kind: "required"})
+	_, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(openCodeFreeInjectedOnlyFixture()), nil, 1<<20, 1<<16, "", opts)
+	require.Error(t, err)
+}
+
+func TestOpenCodeFreeSSEInjectedOnlyCallAcceptsRepeatedUpstreamFinish(t *testing.T) {
+	opts := openCodeFreeInjectedOpts(openCodeFreeToolChoice{Kind: "auto"})
+	fixture := "data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_r\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n" +
+		"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1,\"billing_source\":\"free\"}}\n\n" +
+		"data: [DONE]\n\n"
+	parsed, err := parseOpenCodeFreeSSE(context.Background(), strings.NewReader(fixture), nil, 1<<20, 1<<16, "", opts)
+	require.NoError(t, err)
+	require.Equal(t, "stop", parsed.Finish)
+	require.Empty(t, parsed.ToolCalls)
+	require.Equal(t, "free", parsed.BillingSource)
+}
+
+func TestOpenCodeFreeSSEValidatorRejectsInjectedToolMisuse(t *testing.T) {
+	_, err := newOpenCodeFreeSSEValidator("", &openCodeFreeSSEOptions{ToolNames: []string{"read"}, InjectedTools: []string{"read"}})
+	require.Error(t, err)
+	_, err = newOpenCodeFreeSSEValidator("", &openCodeFreeSSEOptions{InjectedTools: []string{"read", "read"}})
+	require.Error(t, err)
+	_, err = newOpenCodeFreeSSEValidator("", &openCodeFreeSSEOptions{InjectedTools: []string{"bad name"}})
+	require.Error(t, err)
+}

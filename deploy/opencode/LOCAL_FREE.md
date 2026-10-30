@@ -150,6 +150,71 @@ Verification results (2026-10-30):
   non-stream in the earlier compose round but were not part of this
   sample.
 
+## Agent 429 root cause (tool-name gate) and placeholder read fix:
+2026-10-30 (final round)
+
+Every agent (tools) request in production returned 429
+`FreeUsageLimitError` while text requests passed. Isolation tests in a
+quota-healthy window proved the upstream free tier inspects the declared
+tool NAME set: any set lacking the official client's placeholder `read`
+gets 429 (`lookup`, `get_weather`, five-tool sets, `tool_choice: none` —
+none exempt), while `[read]`, `[read,bash,edit,grep,glob]` and
+`[read,get_weather]` returned 200, including a clean `get_weather` call.
+Reproduced on 3/3 models (`big-pickle`, `glm-5.3-flash-free`,
+`mimo-v2.6-flash-free`). OmniRoute's `opencodeFreeTierContract.ts`
+documents the same rule and merges the placeholder for callers. The port
+gap was `worker.ts` replacing caller tools wholesale instead of merging
+the placeholder; the previous round's "agent quota pending" attribution
+was wrong (text 200 in the same window rules out quota).
+
+Modification logic (each with a regression test):
+
+- `deploy/opencode/worker/worker.ts` merges the official placeholder
+  `read` (`{filePath}` schema, "Do not call this tool…" description)
+  into agent requests whose caller tools omit it; caller-declared `read`
+  passes through untouched; text/empty-tool paths unchanged.
+- `backend/internal/service/opencode_free_bun_request.go` adds
+  `openCodeFreeRequest.InjectedTools` plus `openCodeFreeInjectedTools`,
+  mirroring the worker rule exactly.
+- `backend/internal/service/opencode_free_bun_parser.go` accepts
+  injected names during accumulation (including split `rea`/`d` deltas),
+  strips injected calls at finish and reindexes the remaining client
+  calls; if every call was injected, degrades `finish_reason` from
+  `tool_calls` to `stop`. `tool_choice=none`, forced/required semantics
+  and the no-`InjectedTools` path behave exactly as before.
+- `backend/internal/service/opencode_free_bun_gateway.go` passes
+  `reqNorm.InjectedTools` into the SSE options.
+- `deploy/opencode/e2e/probe_real_models.py` fixes the agent billing
+  count: the agent request itself (HTTP 200 = one usage row) and the
+  continuation each count toward `charged`; previously only the
+  continuation did, so row counts could never match once agents
+  succeeded.
+
+Verification method: `bun test deploy/opencode/` (65 pass / 175
+assertions), `cd backend && make test-unit` (58 packages, 0 fail),
+`go build ./... && go vet -tags=unit ./...`, gofmt clean on touched
+files; `make dev` + native worker restart, then a strict 9/9 assertion
+script and
+`probe_real_models.py --env dev --models big-pickle,glm-5.3-flash-free,deepseek-v4.1-flash-free,mimo-v2.6-flash-free`.
+
+Verification results (2026-10-30 evening):
+
+- Strict script 9/9 HTTP 200: agent non-stream/stream with `lookup`,
+  the previously-429 no-`read` set `[search_weather,get_info]`, a
+  coax-to-call-injected-`read` scenario (200, `finish=stop`, no `read`
+  leaked to the client — the model refuses per the placeholder
+  description), text non-stream/stream regressions, glm/mimo cross-model
+  agent, and tool-result continuation (200 + stop + content).
+- Probe round 1: 4 models x (non-stream + stream + agent + continuation)
+  = 16/16 HTTP 200; with the accounting fix the reconciliation check
+  passes (usage rows = charged = settled).
+- Probe round 2 hit genuine upstream free-quota exhaustion (text now 429
+  "Free usage limit reached", `Retry-After` points at the next-day
+  ~08:15 +0800 reset) — an environment event, not a regression; the fix
+  verdict rests on round 1 and the strict script.
+- Production acceptance with a real client requires deploying this fix
+  and re-running inside a quota window.
+
 ## Native worker and backend
 
 At the repository root, initialize a private token once (the existing file is

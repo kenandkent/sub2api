@@ -33,6 +33,10 @@ type openCodeFreeRequest struct {
 	Profile    openCodeFreeProfileRef
 	ToolNames  []string
 	ToolChoice openCodeFreeToolChoice
+	// InjectedTools mirrors the placeholder tool the worker merges into the
+	// upstream body; the caller never declared them, so the SSE validator
+	// allows and strips their calls instead of rejecting the stream.
+	InjectedTools []string
 }
 
 var (
@@ -83,13 +87,31 @@ func normalizeOpenCodeFreeRequest(body []byte, mapped string) (*openCodeFreeRequ
 		return nil, errors.New("invalid chat body")
 	}
 	return &openCodeFreeRequest{
-		Body:       out,
-		Stream:     stream,
-		Mode:       mode,
-		Profile:    profile,
-		ToolNames:  toolNames,
-		ToolChoice: toolChoice,
+		Body:          out,
+		Stream:        stream,
+		Mode:          mode,
+		Profile:       profile,
+		ToolNames:     toolNames,
+		ToolChoice:    toolChoice,
+		InjectedTools: openCodeFreeInjectedTools(toolNames),
 	}, nil
+}
+
+// openCodeFreeInjectedTools mirrors the worker placeholder merge: the free
+// upstream refuses any agent request whose declared tool set does not include
+// the official placeholder tool `read`, so the worker appends it whenever the
+// caller's tools lack it. The two rules must stay identical: injection only
+// happens for non-empty caller tool sets without a declared `read`.
+func openCodeFreeInjectedTools(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	for _, name := range names {
+		if name == "read" {
+			return nil
+		}
+	}
+	return []string{"read"}
 }
 
 // openCodeFreeCallerTools mirrors the adapter: the SSE validator only accepts

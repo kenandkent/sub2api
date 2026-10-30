@@ -193,7 +193,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 		c.Header("Cache-Control", "no-cache")
 		out = c.Writer
 	}
-	parsed, err := parseOpenCodeFreeSSE(requestCtx, resp.Body, out, cfg.MaxResponseBytes, cfg.MaxEventBytes, displayModel, &openCodeFreeSSEOptions{ToolNames: reqNorm.ToolNames, ToolChoice: reqNorm.ToolChoice})
+	parsed, err := parseOpenCodeFreeSSE(requestCtx, resp.Body, out, cfg.MaxResponseBytes, cfg.MaxEventBytes, displayModel, &openCodeFreeSSEOptions{ToolNames: reqNorm.ToolNames, ToolChoice: reqNorm.ToolChoice, InjectedTools: reqNorm.InjectedTools})
 	if err != nil || requestCtx.Err() != nil || parsed.BillingSource != "free" {
 		logger.L().Warn("opencode free: incomplete upstream stream",
 			zap.String("request_id", meta.RequestID),

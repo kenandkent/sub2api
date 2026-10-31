@@ -39,6 +39,8 @@ make dev-stop    # 停止本地进程和开发依赖容器，保留数据
 
 开发管理员邮箱默认为 `admin@mysubapi-dev.local`，随机密码在 `.dev/.env` 的 `DEV_ADMIN_PASSWORD` 中。该账号、数据与完整部署的账号和 `deploy/.env` 完全独立。首次进入后台的使用须知仍需管理员本人确认。
 
+用于普通用户和 API 联调的 `ai@hostmails.de` 已在开发、完整 Docker 测试环境分别配置，限定使用 `deepseek-v4.1-flash-free` 分组，各有 1,000 USD 测试余额和独立消费 Key。三套环境的地址、账号 ID、验证结果及私有凭据文档位置见 [三环境联调账号](INTEGRATION_ACCOUNTS.md)。
+
 端口、数据库用户名/库名、密码和工具下载代理可在 `.dev/.env` 修改，然后重新启动开发环境。配置文件是普通 `KEY=VALUE`，不执行 shell 命令。已有数据库中的管理员密码不会因为修改环境文件而改变。
 
 ## 数据、日志与网络

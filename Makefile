@@ -1,5 +1,6 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 .PHONY: dev dev-setup dev-stop dev-status
+.PHONY: local-runtime-report local-runtime-check local-runtime-rebuild test-local-runtime
 
 dev:
 	@python3 -B "$(CURDIR)/deploy/dev.py" up
@@ -12,6 +13,19 @@ dev-stop:
 
 dev-status:
 	@python3 -B "$(CURDIR)/deploy/dev.py" status
+
+# Read-only by default; rebuild explicitly replaces the app and its paired worker.
+local-runtime-report:
+	@python3 -B "$(CURDIR)/deploy/local_runtime.py" report
+
+local-runtime-check:
+	@python3 -B "$(CURDIR)/deploy/local_runtime.py" check
+
+local-runtime-rebuild:
+	@python3 -B "$(CURDIR)/deploy/local_runtime.py" rebuild
+
+test-local-runtime:
+	@python3 -B -m unittest discover -s "$(CURDIR)/deploy/tests" -p test_local_runtime.py
 
 FRONTEND_CRITICAL_VITEST := \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \

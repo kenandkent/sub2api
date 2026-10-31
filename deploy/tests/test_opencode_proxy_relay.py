@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import signal
@@ -9,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'deploy/opencode/proxy_relay.py'
@@ -53,6 +55,44 @@ class RelayTest(unittest.TestCase):
 
     def route(self, local, upstream):
         return {'listen_port': local, 'upstream_host': '::1', 'upstream_port': upstream}
+
+    def load_relay(self):
+        spec = importlib.util.spec_from_file_location('relay_stop_transition', SCRIPT)
+        relay = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(relay)
+        return relay
+
+    def test_stop_waits_passively_when_owned_process_loses_identity_while_exiting(self):
+        relay = self.load_relay()
+        elapsed = [0.0]
+        def advance(delay):
+            elapsed[0] += delay
+        with mock.patch.object(relay, 'owned', side_effect=[True, False]), \
+             mock.patch.object(relay, 'pid_exists', side_effect=[True, True, False]), \
+             mock.patch.object(relay.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             mock.patch.object(relay.time, 'sleep', side_effect=advance), \
+             mock.patch.object(relay.os, 'killpg') as kill:
+            stopped = relay.stop_process({'pid': 12345}, self.config)
+        self.assertTrue(stopped)
+        self.assertGreater(elapsed[0], 0)
+        self.assertLessEqual(elapsed[0], 4.1)
+        kill.assert_called_once_with(12345, signal.SIGTERM)
+
+    def test_stop_bounds_passive_wait_without_signaling_unverified_live_pid(self):
+        relay = self.load_relay()
+        elapsed = [0.0]
+        def advance(delay):
+            elapsed[0] += delay
+        with mock.patch.object(relay, 'owned', side_effect=[True, False]), \
+             mock.patch.object(relay, 'pid_exists', return_value=True), \
+             mock.patch.object(relay.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             mock.patch.object(relay.time, 'sleep', side_effect=advance), \
+             mock.patch.object(relay.os, 'killpg') as kill:
+            stopped = relay.stop_process({'pid': 12345}, self.config)
+        self.assertFalse(stopped)
+        self.assertGreaterEqual(elapsed[0], 4)
+        self.assertLess(elapsed[0], 4.1)
+        kill.assert_called_once_with(12345, signal.SIGTERM)
 
     def test_forwards_bytes_both_ways_and_reuses_running_process(self):
         upstream = socket.socket(socket.AF_INET6)

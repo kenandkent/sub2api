@@ -2,6 +2,8 @@
 
 日常开发使用本机 Vite 和 Go/Air，PostgreSQL、Redis 放在独立 Docker Compose 项目中。现有完整 Docker Compose 部署和 GHCR CI/CD 继续保留。
 
+当前依赖基线是 PostgreSQL 18、Redis 8。Go 以 `backend/go.mod` 为准（当前 1.27.3）；完整镜像使用 Node.js 24 和 pnpm 9。`DEV_GUIDE.md` 中的 PostgreSQL 16/Windows 服务配置是历史记录。
+
 三套环境的配置、网络差异、代理编号和核验记录见 [环境与网络对照](ENVIRONMENT_REFERENCE.md)。
 
 ## 启动与停止
@@ -55,6 +57,44 @@ make dev-stop    # 停止本地进程和开发依赖容器，保留数据
 ## 与其他运行方式并行
 
 当前完整部署可以继续使用 `http://localhost:8080`。日常开发用 `3000/18080` 和独立的 `15433/16380`，两套环境可以同时运行。原有 `docker-compose.dev.yml` 仍是完整镜像构建入口，本次没有把它改成依赖专用配置。
+
+## 完整 Compose 验收与运行版本
+
+日常 HMR 与完整镜像是不同运行进程。以下命令从项目根目录执行，固定检查 `deploy` Compose 项目的 `docker-compose.yml` + `docker-compose.opencode-free.yml` 配对环境，使用现有命名卷及显式 `deploy/.env`：
+
+```bash
+make local-runtime-report   # 只读：源码身份、应用/worker 镜像及运行状态
+make local-runtime-check    # 只读：身份、健康或共享网络不一致则非零退出
+make local-runtime-rebuild  # 构建同一源码的应用和 worker，并替换这两个容器
+# 机器可读报告
+python3 -B deploy/local_runtime.py report --json
+```
+
+重建会短暂中断本机完整镜像服务；它保留数据库/Redis 命名卷和私有配置，不管理原生 Air/Vite 或独立 Bun worker。重建前会核验应用、PostgreSQL、Redis 的项目归属和数据挂载；其他项目或 bind mount 配置不能使用这个入口。运行前准备已有 `deploy/.env` 和依赖服务；需要延长构建后的健康等待时使用 `python3 -B deploy/local_runtime.py rebuild --timeout 600`。远程 Docker daemon 不能用于此重建入口。
+
+报告同时显示当前提交、源码是否有未提交修改、源码指纹、运行容器的镜像 ID/仓库摘要与构建标签。未提交源码构建的版本会带 `-dirty.<指纹前12位>`，不能当作干净提交发布。应用和 worker 必须来自同一源码身份；只有 `/health` 返回成功不能证明运行的是当前代码。私有配置、数据和缓存不属于源码指纹；原生开发进程只报告存在状态，不宣称具备发布身份。
+
+完整镜像定义统一在根 `Dockerfile`；旧 `deploy/Dockerfile` 已移除。从项目根目录手工构建用 `docker build -f Dockerfile -t sub2api:mysubapi .`。后端独立开发镜像用 `docker build -f backend/Dockerfile backend`，不包含前端或完整运行时工具。
+
+## 本地测试与 CI 边界
+
+根 `make test` 的前端部分是 lint、typecheck 和关键 Vitest 集，后端部分是默认 Go 测试与 lint；它没有覆盖 CI 的所有带标签测试或全量前端测试。要执行 CI 对应的主要测试，从根目录分别运行：
+
+```bash
+make -C backend test-unit
+make -C backend test-integration
+(cd backend && go test -tags='unit integration' -v ./internal/handler -run '^TestMarketplaceGatewayRealInfrastructure$' -count=1 -timeout=5m)
+pnpm --dir frontend run lint:check
+pnpm --dir frontend run typecheck
+pnpm --dir frontend run test:run
+python3 -B -m unittest discover -s deploy/tests -p 'test_*.py'
+```
+
+后端集成测试需要可用 Docker/Testcontainers 和测试镜像，测试会建立临时数据库。`TestMarketplaceGatewayRealInfrastructure` 使用真实 PostgreSQL、Redis 与进程内 HTTP handler，但模型上游使用替身；不会验证真实供应商模型或生产网络。CI 还包含 Compose/shell 配置检查、候选镜像构建和隔离 worker smoke，具体列表以工作流为准。当前没有独立常驻 staging；本机完整 Compose 负责集成验收，CI 临时容器负责自动回归，生产部署检查负责运行身份和基础就绪。这些证据不等于真实登录、计费或模型调用验收。
+
+`make -C backend test-e2e` 和兼容别名 `test-e2e-local` 直接运行仓库中 `internal/integration` 的 `e2e` 标签测试，不再引用不存在的脚本。它们要求已启动的**可丢弃测试服务**（`BASE_URL` 默认为 `http://localhost:8080`），用户流程会注册用户、尝试登录并创建 API Key；通过 `ADMIN_EMAIL`/`ADMIN_PASSWORD` 可提供测试管理员。部分场景会跳过或只记录响应，必须审阅 skip/log，不能只看最终 PASS。
+
+网关 E2E 读取 `CLAUDE_API_KEY`、`GEMINI_API_KEY`，以及可选 `ENDPOINT_PREFIX=/antigravity`。这些是目标网关可用的 Key；配置后测试会向所选模型发出真实请求，可能派发上游并计费。当前 `E2E_MOCK` 仅在未被测试调用的辅助函数中定义，没有 mock server 或 HTTP 拦截器，设置 `E2E_MOCK=true` 不能隔离网络或保证免费。自动 CI 没有运行这套 live-server E2E，日常默认验证应使用上述替身上游回归。
 
 ## OpenCode 分组与本地代理入口
 

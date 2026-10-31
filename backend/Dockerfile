@@ -1,4 +1,6 @@
-FROM golang:1.27.2-alpine
+# Backend-only development image; context must be backend/.
+# Build the complete application with the repository-root Dockerfile.
+FROM golang:1.27.3-alpine
 
 WORKDIR /app
 

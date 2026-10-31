@@ -205,6 +205,17 @@ def stop_process(state, config):
     if not owned(state, config):
         return not pid_exists(state.get('pid'))
     pid = state['pid']
+
+    def wait_for_exit(deadline):
+        # An exiting process can lose its inspectable command before kill(0)
+        # reports disappearance. Once ownership is lost, only observe the PID;
+        # never signal it again, since it could also have been reused.
+        while time.monotonic() < deadline:
+            if not pid_exists(pid):
+                return True
+            time.sleep(0.05)
+        return not pid_exists(pid)
+
     try:
         os.killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -214,10 +225,10 @@ def stop_process(state, config):
         if not pid_exists(pid):
             return True
         if not owned(state, config):
-            return not pid_exists(pid)
+            return wait_for_exit(deadline)
         time.sleep(0.05)
     if not owned(state, config):
-        return not pid_exists(pid)
+        return wait_for_exit(time.monotonic() + 1)
     try:
         os.killpg(pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -227,7 +238,7 @@ def stop_process(state, config):
         if not pid_exists(pid):
             return True
         if not owned(state, config):
-            return not pid_exists(pid)
+            return wait_for_exit(deadline)
         time.sleep(0.05)
     return not pid_exists(pid)
 

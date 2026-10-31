@@ -126,6 +126,10 @@ with tempfile.TemporaryDirectory(prefix="compose-production-", dir=repo_root / "
             expected.pop("build")
             expected["image"] = image
             expected["pull_policy"] = "missing"
+        elif name == "postgres":
+            expected["image"] = "postgres:18.6-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5"
+        elif name == "redis":
+            expected["image"] = "redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537"
         assert service == expected, \
             f"production override unexpectedly changes {name} settings or persistent data paths"
     for name, directory, target in (

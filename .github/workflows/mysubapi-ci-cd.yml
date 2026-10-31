@@ -27,8 +27,7 @@ jobs:
           export TMPDIR="$GITHUB_WORKSPACE/.cache/tmp"
           export PYTHONDONTWRITEBYTECODE=1
           bash -n deploy/deploy-mysubapi.sh
-          python3 -B -m unittest discover -s deploy/tests -p 'test_mysubapi_*.py'
-          python3 -B -m unittest discover -s deploy/tests -p 'test_dev_environment.py'
+          python3 -B -m unittest discover -s deploy/tests -p 'test_*.py'
           sh deploy/tests/docker-compose-dependencies-test.sh
           sh deploy/tests/docker-compose-production-test.sh
           sh deploy/tests/docker-compose-security-test.sh
@@ -88,7 +87,7 @@ jobs:
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 9.15.9
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -153,6 +152,7 @@ jobs:
             VERSION=${{ steps.metadata.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.metadata.outputs.date }}
+            SOURCE_DIRTY=false
             GOPROXY=https://proxy.golang.org,direct
             GOSUMDB=sum.golang.org
           cache-from: type=gha,scope=mysubapi
@@ -171,6 +171,11 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.metadata.outputs.date }}
+            SOURCE_DIRTY=false
           cache-from: type=gha,scope=mysubapi-opencode-free-worker
           cache-to: type=gha,mode=max,scope=mysubapi-opencode-free-worker
       - name: Verify worker authentication in a private network namespace
@@ -274,7 +279,7 @@ jobs:
           scp "${options[@]}" -P "$DEPLOY_PORT" \
             deploy/docker-compose.local.yml deploy/docker-compose.production.yml \
             deploy/docker-compose.opencode-free.production.yml \
-            deploy/deploy-mysubapi.sh deploy/.env.example deploy/.env.mysubapi.production.example "$server:$incoming_path/"
+            deploy/deploy-mysubapi.sh deploy/verify-deployment.py deploy/.env.example deploy/.env.mysubapi.production.example "$server:$incoming_path/"
           ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
             "test ! -e '$release_path' && mv -T -- '$incoming_path' '$release_path'"
           printf '%s\n' "$GHCR_TOKEN" | ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \

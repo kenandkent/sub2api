@@ -10,7 +10,7 @@
 ARG NODE_IMAGE=node:24-alpine
 ARG GOLANG_IMAGE=golang:1.27.3-alpine
 ARG ALPINE_IMAGE=alpine:3.21
-ARG POSTGRES_IMAGE=postgres:18-alpine
+ARG POSTGRES_IMAGE=postgres:18.6-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
 ARG NPM_CONFIG_REGISTRY=
@@ -26,7 +26,7 @@ ARG NPM_CONFIG_REGISTRY
 WORKDIR /app/frontend
 
 # Install pnpm (pinned to v9 to match CI and keep builds reproducible)
-RUN corepack enable && corepack prepare pnpm@9 --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
@@ -107,6 +107,19 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 # Stage 4: Final Runtime Image
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
+
+# Identity defaults are explicitly unknown for ad hoc builds. Supported local
+# builds supply a shared source fingerprint and dirty flag for app and worker.
+ARG VERSION=
+ARG COMMIT=docker
+ARG DATE=
+ARG SOURCE_DIGEST=
+ARG SOURCE_DIRTY=unknown
+LABEL org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${DATE}" \
+      io.sub2api.source.digest="${SOURCE_DIGEST}" \
+      io.sub2api.source.dirty="${SOURCE_DIRTY}"
 
 # Labels
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"

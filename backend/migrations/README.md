@@ -71,13 +71,12 @@ Why?
    - If rollback is needed, create a new migration file to revert
 
 3. **Test locally**
-   ```bash
-   # Apply migration
-   make migrate-up
-
-   # Test rollback
-   make migrate-down
-   ```
+   Start the application against an isolated local database; startup applies
+   pending migrations through the custom runner. Verify the resulting schema,
+   migration checksums and application behavior, then restart once to verify
+   replay safety. The repository has no `make migrate-up` or `make migrate-down`
+   targets and the runner has no automatic down-migration command. Test any
+   corrective forward migration and backup restore on disposable databases.
 
 4. **Commit and deploy**
    ```bash
@@ -124,13 +123,13 @@ touch migrations/018_your_new_change.sql
    - One logical change per migration
    - Easier to review and rollback
 
-2. **Write reversible migrations**
-   - Always provide a working Down migration
-   - Test rollback before committing
+2. **Plan recovery for migrations**
+   - Use a new forward-only migration for corrective changes
+   - Test recovery from a backup in an isolated database before deployment
 
-3. **Use transactions**
-   - Wrap DDL statements in transactions when possible
-   - Ensures atomicity
+3. **Use the runner's transaction boundaries**
+   - Regular migration files are already wrapped in a transaction
+   - Keep concurrent index statements in the restricted `_notx.sql` form
 
 4. **Add comments**
    - Explain WHY the change is needed
@@ -139,7 +138,7 @@ touch migrations/018_your_new_change.sql
 5. **Test in development first**
    - Apply migration locally
    - Verify data integrity
-   - Test rollback
+   - Test corrective forward migration and isolated backup restore
 
 ## Example Migration
 
@@ -168,7 +167,7 @@ See "If You Accidentally Modified an Applied Migration" above.
 psql -d sub2api -c "SELECT * FROM schema_migrations ORDER BY applied_at DESC;"
 
 # Manually rollback if needed (use with caution)
-# Better to fix the migration and create a new one
+# Restore the applied file unchanged; make corrective changes in a new migration
 ```
 
 ### Need to Skip a Migration (Emergency Only)

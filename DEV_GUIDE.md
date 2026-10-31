@@ -12,10 +12,12 @@
 | **Fork 仓库** | kenandkent/sub2api |
 | **本地开发分支** | mysubapi |
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
-| **数据库** | PostgreSQL 16 + Redis |
+| **数据库** | 当前 Compose：PostgreSQL 18 + Redis 8 |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
 
-## 二、本地环境配置
+## 二、历史 Windows 手工环境配置
+
+本节仅记录旧 Windows 主机的 PostgreSQL 16 配置与排障方式。当前原生开发依赖和完整 Compose 均使用 PostgreSQL 18、Redis 8；新环境请使用 [本地开发环境](deploy/LOCAL_DEVELOPMENT.md)，不要按本节重建旧版数据库。版本升级必须走备份、兼容性和恢复验证流程，不能直接把 PostgreSQL 16 数据目录挂载到 PostgreSQL 18。
 
 ### PostgreSQL 16 (Windows 服务)
 
@@ -57,9 +59,9 @@ npm install -g pnpm
 - 目标环境为 `root@167.114.210.84:22`，部署根目录 `/home/workspace/subapi`；只允许原仓库可信 `mysubapi` 分支推送或手动运行进行发布和部署。默认部署应用、PostgreSQL、Redis 和 OpenCode Bun worker 四个容器，并使用同一提交的应用及 worker 镜像摘要。
 - 三份常规 Compose 从当前检出的完整仓库和根 `Dockerfile` 构建本地镜像 `sub2api:mysubapi`，通过 `pull_policy: build` 在启动时重新构建。服务器结合 `docker-compose.production.yml` 覆盖配置后，移除 build 并使用 GHCR 的不可变镜像 digest，无需上传源码。
 - 该服务器为 `x86_64`，分支 CI 默认只构建 `linux/amd64`；根 Dockerfile 保留手动交叉编译其他架构的能力。构建阶段只发布提交专用标签，成功部署后复查分支 HEAD 再更新 `mysubapi` 标签。
-- Go 版本以 `backend/go.mod` 为准，当前声明为 **1.27.3**；根 `Dockerfile` 已使用相同版本。`deploy/Dockerfile` 和 `backend/Dockerfile` 仍使用 **1.27.2**，若要采用这些入口，需先统一构建工具链。
-- 前端使用 pnpm 9 和 `pnpm install --frozen-lockfile`，必须提交 `frontend/pnpm-lock.yaml`；根镜像使用 Node.js 24。
-- 后端单元测试、集成及真实网关测试、前端 lint/typecheck/全量测试、部署配置检查和候选镜像构建并行执行。集成测试每轮实际运行，前端关键集在 CI 中不再重复执行；所有检查通过才部署。部署时等待健康检查，并验证登录和实际网关请求；`/health` 只返回应用存活状态，不检查运行期间的数据库或 Redis 连接。
+- Go 版本以 `backend/go.mod` 为准，当前声明为 **1.27.3**；完整镜像统一使用根 `Dockerfile`，`backend/Dockerfile` 是相同 Go 版本的后端开发镜像（构建上下文为 `backend/`），不包含前端与生产运行工具。
+- 前端使用 pnpm **9.15.9** 和 `pnpm install --frozen-lockfile`，必须提交 `frontend/pnpm-lock.yaml`；根镜像使用 Node.js 24。
+- 后端单元测试、集成及真实基础设施网关测试、前端 lint/typecheck/全量测试、部署配置检查和候选镜像构建并行执行。网关测试使用临时 PostgreSQL/Redis 与替身上游；所有检查通过才部署。部署等待容器健康，检查 `/setup/status` 的初始化状态、`/api/v1/settings/public` 的站点名称与 worker 鉴权空请求（400、未派发）。部署不登录、不请求真实模型；`/health` 只表示应用存活，不检查运行期间的数据库或 Redis 连接。
 - 新提交会取消同分支/PR 的旧 CI 检查或候选构建；生产部署独立串行执行，不中断已开始的 SSH 部署。
 - 数据库迁移随服务启动执行，更新前需备份数据库并记录可回退的镜像版本；镜像回退不会自动回退数据库结构。
 - 服务器连接、镜像仓库认证和运行密钥通过部署环境或 GitHub Secrets 配置，不写入仓库。
@@ -68,14 +70,19 @@ npm install -g pnpm
 
 完整配置、首次服务器准备和应用恢复边界见 [mysubapi CI/CD](deploy/CICD_MYSUBAPI.md)。服务器私有 `.env` 必须在首次部署前准备好；环境审批和跳过过期提交的检查仍然生效。
 
+生产环境的每日备份、14 天保留、本项目私有目录中的异机副本及隔离恢复检查见 [生产备份](deploy/PRODUCTION_BACKUP.md)。定时备份只在生产服务器运行，本地副本通过显式 `pull` 获取。
+
 ### 本地测试命令
 
 ```bash
 # 后端单元测试
 cd backend && go test -tags=unit ./...
 
-# 后端集成测试
+# 后端集成测试（需要 Docker，可启动临时依赖容器）
 cd backend && go test -tags=integration ./...
+
+# 与 CI 相同的真实 PostgreSQL/Redis 网关回归；模型上游为替身
+cd backend && go test -tags='unit integration' -v ./internal/handler -run '^TestMarketplaceGatewayRealInfrastructure$' -count=1 -timeout=5m
 
 # 代码质量检查
 cd backend && golangci-lint run ./...
@@ -83,6 +90,8 @@ cd backend && golangci-lint run ./...
 # 前端依赖安装（必须用 pnpm）
 cd frontend && pnpm install
 ```
+
+上面的 `cd` 示例均从项目根目录独立运行。根 `make test` 的前端部分只跑关键集，后端部分运行默认测试与 lint；它不等价于 CI 的带标签测试及前端全量 Vitest。本地完整验收命令和手工 E2E 的限制见 [本地开发环境](deploy/LOCAL_DEVELOPMENT.md)。当前没有独立常驻 staging；CI 临时基础设施和本机完整 Compose 验收各自提供证据，不能替代生产身份核验或真实业务验收。
 
 ## 四、常见坑点 & 解决方案
 

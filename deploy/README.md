@@ -20,6 +20,9 @@ For daily editing with Vite HMR and native Go/Air reload, use `make dev` from th
 | `docker-compose.local.yml` | Build current checkout, with PostgreSQL/Redis and local data directories |
 | `docker-compose.standalone.yml` | Build current checkout, using external PostgreSQL/Redis |
 | `docker-compose.dev.yml` | Source build with development settings |
+| `local_runtime.py` | Inspect or rebuild the paired local application/worker with source identity and preserved named volumes |
+| `verify-deployment.py` | Read-only verification of running production image digests and release identity |
+| `PRODUCTION_BACKUP.md` | Production-only daily backups, private offsite copies and isolated recovery checks |
 | `docker-deploy.sh` | Legacy upstream download script; not used for this branch's source deployment |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
@@ -56,6 +59,8 @@ See [APPLE_CONTAINER.md](./APPLE_CONTAINER.md) for configuration, upgrades, pers
 
 For branch-specific GHCR builds and the opt-in Linux server deployment pipeline, see [mysubapi CI/CD](./CICD_MYSUBAPI.md). The production override uses CI-built images; the local instructions below continue to build the working tree.
 
+Production backup operations use [the production backup guide](./PRODUCTION_BACKUP.md). The daily server snapshot and a local offsite pull are separate operations.
+
 ### Build and Deploy the Current Branch
 
 On `mysubapi`, all three production Compose configurations build the application from the full repository checkout using the root `Dockerfile`. The local image is named `sub2api:mysubapi`; `pull_policy: build` rebuilds it during `docker compose up`, reusing build cache when possible. The build includes the working tree's frontend and backend, including uncommitted source changes.
@@ -90,6 +95,34 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 # Access Web UI
 # http://localhost:8080
 ```
+
+### Supported Build Entrypoints
+
+The repository-root `Dockerfile` is the single full-application image definition,
+using the Go version in `backend/go.mod` (currently 1.27.3), Node.js 24 and pnpm 9.
+The obsolete `deploy/Dockerfile` has been removed. Use the full repository as
+context, including `docs/legal/`:
+
+```bash
+# From the repository root
+docker build -f Dockerfile -t sub2api:mysubapi .
+# Equivalent when the working directory is deploy/
+docker build -f ../Dockerfile -t sub2api:mysubapi ..
+# Validate the Dockerfile and target configuration without compiling the image
+docker buildx build --check --platform linux/amd64 -f ../Dockerfile ..
+```
+
+For paired local application/worker builds with source identity and post-build
+checks, use the [local acceptance commands](LOCAL_DEVELOPMENT.md#完整-compose-验收与运行版本).
+All regular full-stack and dependency-only Compose files use PostgreSQL 18 and
+Redis 8; production overrides pin their images by digest.
+
+`docker build -f backend/Dockerfile backend` is a backend-only development image;
+it has no embedded frontend or production backup utilities. Native commands are
+`make -C backend build` and, after `pnpm --dir frontend run build`,
+`make -C backend build-embed`. The legacy `make -C deploy build`, `build-embed`,
+`wire`, test and coverage targets delegate to `backend/` and put artifacts there.
+These native builds do not create the complete deployment image.
 
 ### Deployment Version Comparison
 

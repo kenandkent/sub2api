@@ -34,6 +34,9 @@ pull_timeout=${DEPLOY_PULL_TIMEOUT_SECONDS:-180}
 [[ $pull_timeout =~ ^[0-9]+$ ]] && (( pull_timeout > 0 && pull_timeout <= 900 )) ||
     die "invalid image download timeout"
 command -v timeout >/dev/null || die "the Linux timeout utility is required"
+command -v python3 >/dev/null || die "Python 3 is required for read-only image identity verification"
+identity_verifier="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/verify-deployment.py"
+[[ -f $identity_verifier ]] || die "release is missing verify-deployment.py"
 mkdir "$deploy_root/.deploy-lock" 2>/dev/null || die "another deployment holds .deploy-lock; inspect it before retrying"
 auth_dir=
 backup_tmp=
@@ -198,10 +201,14 @@ apply_release() {
     local selected_release=$1 selected_image=$2 selected_worker=$3 remove_release=$4 remove_image=$5 remove_image_worker=$6
     apply_app "$selected_release" "$selected_image" "$selected_worker" || return 1
     if [[ $selected_worker != - ]]; then
-        apply_worker "$selected_release" "$selected_image" "$selected_worker"
+        apply_worker "$selected_release" "$selected_image" "$selected_worker" || return 1
     elif [[ $remove_image_worker != - ]]; then
-        remove_worker "$remove_release" "$remove_image" "$remove_image_worker"
+        remove_worker "$remove_release" "$remove_image" "$remove_image_worker" || return 1
     fi
+    # Verify actual running IDs/revisions before accepting a new release or a
+    # restored pair. Health alone does not prove which immutable image is live.
+    python3 -B "$identity_verifier" "$deploy_root" --release "$selected_release" \
+        --image "$selected_image" --worker="$selected_worker"
 }
 
 if ! apply_release "$release" "$image" "$worker" "$previous_release" "$previous_image" "$previous_worker"; then

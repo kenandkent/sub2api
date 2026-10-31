@@ -91,6 +91,7 @@ class WorkflowDeployTests(unittest.TestCase):
         upload = next(r for r in calls if r["tool"] == "scp")
         self.assertIn("deploy/docker-compose.opencode-free.production.yml", upload["args"])
         self.assertIn("deploy/.env.mysubapi.production.example", upload["args"])
+        self.assertIn("deploy/verify-deployment.py", upload["args"])
         self.assertIn("root@167.114.210.84:/home/workspace/subapi/incoming/" + "c" * 40 + "-123-2/", upload["args"])
         final = ssh[-1]
         self.assertTrue(final["token_ok"])

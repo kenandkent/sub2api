@@ -32,6 +32,27 @@ with log.open("a+") as file:
     file.flush()
     fcntl.flock(file, fcntl.LOCK_UN)
 scenario = os.environ.get("SCENARIO", "success")
+if args[0] == "ps":
+    service = args[-1].split("=", 2)[-1]
+    ups = [(i, r) for i, r in enumerate(records) if "up" in r["args"] and r["args"][-1] == service]
+    removals = [i for i, r in enumerate(records) if "rm" in r["args"] and r["args"][-1] == service]
+    if ups and (not removals or ups[-1][0] > removals[-1]): print(service + "-container")
+    sys.exit(0)
+if args[:2] == ["container", "inspect"]:
+    service = args[-1].removesuffix("-container")
+    last = [r for r in records if "up" in r["args"] and r["args"][-1] == service][-1]
+    reference = last["worker" if service == "opencode-free-worker" else "image"]
+    image_id = reference.split("@")[-1]
+    if scenario == "identity-image-mismatch" and reference.endswith("2" * 64): image_id = "sha256:" + "9" * 64
+    print(json.dumps([image_id, True]))
+    sys.exit(0)
+if args[:2] == ["image", "inspect"]:
+    reference = args[-1]
+    new = reference.endswith(("2" * 64, "4" * 64))
+    revision = ("b" if new else "a") * 40
+    if (scenario == "identity-revision-mismatch" and reference.endswith("2" * 64)) or (scenario == "worker-identity-mismatch" and reference.endswith("4" * 64)): revision = "c" * 40
+    print(json.dumps([reference.split("@")[-1], revision, "false", "sha256:" + ("b" if new else "a") * 64]))
+    sys.exit(0)
 if args[:2] == ["context", "show"]:
     print("remote" if scenario == "custom-context" else "default")
     sys.exit(0)
@@ -248,6 +269,18 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(calls[worker]["worker"], NEW_WORKER)
         self.assertTrue(any("exec" in r["args"] and "opencode-free-worker" in r["args"] and "/v1/transport/chat" in " ".join(r["args"]) and "x-sub2api-dispatched" in " ".join(r["args"]) for r in calls[worker:]))
         self.assertTrue(any("pull" in r["args"] and r["args"][-1] == "opencode-free-worker" for r in calls[:app]))
+
+    def test_actual_identity_mismatch_restores_previous_pair_without_committing_state(self):
+        for scenario in ("identity-image-mismatch", "identity-revision-mismatch", "worker-identity-mismatch"):
+            with self.subTest(scenario=scenario):
+                self.log.unlink(missing_ok=True)
+                self.state.write_text(OLD + " " + OLD_IMAGE + " " + OLD_WORKER + "\n")
+                result = self.run_deploy(scenario, worker=NEW_WORKER)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Deployment identity error", result.stderr)
+                self.assertEqual([r["image"] for r in self.app_updates()], [NEW_IMAGE, OLD_IMAGE])
+                self.assertEqual(self.state.read_text().strip(), OLD + " " + OLD_IMAGE + " " + OLD_WORKER)
+                self.assertIn("Previous application restored", result.stderr)
 
     def test_worker_preflight_failure_preserves_app_and_state(self):
         for scenario in ("missing-token", "short-token", "nonascii-token", "worker-pull-fail"):

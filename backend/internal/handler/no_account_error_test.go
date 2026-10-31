@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -185,10 +187,10 @@ func TestClassifyNoAccountError_HasModelSupport_KeepsRoutingMessageGenerationToC
 	require.False(t, cls.ModelNotFound)
 }
 
-func TestClassifyNoAccountError_ModelSupportedOnlyByRateLimitedAccount_Returns503(t *testing.T) {
+func TestClassifyNoAccountError_ModelSupportedRateLimitedWithoutCensus_Stays503(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	// The diagnoser's configured-state lookup still sees the model-supporting
-	// account even though normal scheduling has excluded it during cooldown.
+	// 诊断结果未带限流普查字段（例如保守的旧实现只报配置态）时保持 503 兜底；
+	// 真实诊断会填 ModelCapableRateLimited，全量冷却场景由下方 429 用例覆盖。
 	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
 
@@ -197,6 +199,92 @@ func TestClassifyNoAccountError_ModelSupportedOnlyByRateLimitedAccount_Returns50
 	require.Equal(t, http.StatusServiceUnavailable, cls.Status)
 	require.Equal(t, "api_error", cls.ErrType)
 	require.False(t, cls.ModelNotFound, "temporary account cooldown must remain retryable")
+	require.Zero(t, cls.RetryAfterSeconds)
+	require.Empty(t, c.Writer.Header().Get("Retry-After"))
+}
+
+func TestClassifyNoAccountError_AllModelCapableRateLimited_Returns429WithRetryAfter(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	earliest := time.Now().Add(30 * time.Minute)
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{
+		HasAccountsInPool:        true,
+		HasModelSupport:          true,
+		ModelCapableAccounts:     3,
+		ModelCapableRateLimited:  3,
+		EarliestRateLimitResetAt: earliest,
+	}}
+	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
+
+	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "deepseek-v4.1-flash-free", "deepseek-v4.1-flash-free", service.PlatformOpenCodeGo)
+
+	require.Equal(t, http.StatusTooManyRequests, cls.Status, "整组限流时必须回 429 而不是 503")
+	require.Equal(t, "rate_limit_error", cls.ErrType)
+	require.Contains(t, cls.Message, "rate-limited")
+	require.False(t, cls.ModelNotFound)
+	require.GreaterOrEqual(t, cls.RetryAfterSeconds, 1795)
+	require.LessOrEqual(t, cls.RetryAfterSeconds, 1801)
+	require.Equal(t, strconv.Itoa(cls.RetryAfterSeconds), c.Writer.Header().Get("Retry-After"), "Retry-After 头必须与分类结果一致")
+}
+
+func TestClassifyNoAccountError_PartialRateLimitCensus_Stays503WithoutRetryAfter(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{
+		HasAccountsInPool:       true,
+		HasModelSupport:         true,
+		ModelCapableAccounts:    2,
+		ModelCapableRateLimited: 1,
+	}}
+	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
+
+	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-5", "gpt-5", service.PlatformOpenAI)
+
+	require.Equal(t, http.StatusServiceUnavailable, cls.Status, "仍有健康可服务账号时不得改判 429")
+	require.Zero(t, cls.RetryAfterSeconds)
+	require.Empty(t, c.Writer.Header().Get("Retry-After"))
+}
+
+func TestClassifyNoAccountError_AllRateLimitedButResetUnknown_OmitsRetryAfter(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{
+		HasAccountsInPool:       true,
+		HasModelSupport:         true,
+		ModelCapableAccounts:    1,
+		ModelCapableRateLimited: 1,
+	}}
+	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
+
+	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-5", "gpt-5", service.PlatformOpenAI)
+
+	require.Equal(t, http.StatusTooManyRequests, cls.Status, "即便不知道恢复时间也要给 429")
+	require.Zero(t, cls.RetryAfterSeconds)
+	require.Empty(t, c.Writer.Header().Get("Retry-After"), "未知恢复时间不得编造 Retry-After")
+}
+
+// 生产事故链路：OpenAI 兼容调度器把限流账号在 SQL 层滤出池子，错误串只有
+// "pool=0"（无 model_rate_limited 统计）。分类普查仍然必须给出 429，且在
+// classifySelectionFailureError 叠加后保持 Retry-After 头不丢。
+func TestClassifySelectionFailureError_PoolZeroChainKeeps429AndRetryAfter(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	earliest := time.Now().Add(10 * time.Hour)
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{
+		HasAccountsInPool:        true,
+		HasModelSupport:          true,
+		ModelCapableAccounts:     21,
+		ModelCapableRateLimited:  21,
+		EarliestRateLimitResetAt: earliest,
+	}}
+	apiKey := &service.APIKey{GroupID: ptrInt64(3)}
+
+	cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, fd, apiKey, "deepseek-v4.1-flash-free", "deepseek-v4.1-flash-free")
+	cls = classifySelectionFailureError(
+		fmt.Errorf("no available OpenAI accounts supporting model: deepseek-v4.1-flash-free (pool=0)"),
+		cls,
+	)
+
+	require.Equal(t, http.StatusTooManyRequests, cls.Status)
+	require.Equal(t, "rate_limit_error", cls.ErrType)
+	require.Greater(t, cls.RetryAfterSeconds, 0, "调用链叠加后分类结果不能丢失重试信息")
+	require.NotEmpty(t, c.Writer.Header().Get("Retry-After"), "pool=0 链路也必须带 Retry-After 头")
 }
 
 func TestClassifyNoAccountError_NoAccountsInPool_Stays503(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,16 +23,30 @@ import (
 //     model). Returning 503 here misleads operators and trips reverse-proxy
 //     health checks; 404 lets the client surface the real problem.
 //
+//   - 429 rate_limit_error — every persistently model-capable account exists
+//     but is currently inside a rate-limit window (account-level or
+//     model-level). Retrying after the advertised Retry-After can plausibly
+//     succeed once the earliest window ends. This matches the scheduler-stats
+//     branch in classifySelectionFailureError; it also covers schedulers that
+//     pre-filter rate-limited accounts out of the pool at SQL level (the
+//     OpenAI-compatible loader), where the legacy "pool=0" error carries no
+//     rate-limit statistics and previously fell through to an opaque 503.
+//
 //   - 503 api_error — accounts that could serve the model exist but are
-//     temporarily exhausted (rate limit, quota auto-pause, runtime block) OR
-//     the group has no accounts at all. Both stay on 503 because retrying
-//     after a backoff can plausibly succeed (or, in the empty-pool case, the
-//     operator may be in the middle of adding accounts).
+//     blocked by non-rate transient state (runtime block, quota auto-pause,
+//     overload, temporary unschedulability) OR the group has no accounts at
+//     all. Both stay on 503 because retrying after a backoff can plausibly
+//     succeed (or, in the empty-pool case, the operator may be in the middle
+//     of adding accounts).
 type noAccountErrorClassification struct {
 	Status        int
 	ErrType       string
 	Message       string
 	ModelNotFound bool // true when this is a 404 model_not_found classification
+	// RetryAfterSeconds, when > 0, is emitted as the Retry-After response
+	// header by classifyNoAccountErrorFromGin so clients back off until the
+	// earliest rate-limit window ends instead of hammering the gateway.
+	RetryAfterSeconds int
 }
 
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
@@ -74,18 +89,21 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	}
 }
 
-// classifyNoAccountError decides between 404 model_not_found and 503
-// api_error for "no available accounts" failures.
+// classifyNoAccountError decides between 404 model_not_found, 429
+// rate_limit_error, and 503 api_error for "no available accounts" failures.
 //
 // The classifier intentionally does not consume the original error: the
 // selection layer never tells us *why* the pool came up empty (rate-limited
 // vs. unsupported model are both wrapped as ErrNoAvailableAccounts). Instead
 // we re-check pool composition through DiagnoseModelAvailabilityForPlatform.
 // Its dedicated database query considers only persistent eligibility
-// (active status + schedulable setting) and model_mapping, bypassing scheduler
-// snapshots and transient filters. That guarantees a 404 is only returned
-// when persistent account/group/model configuration must change before the
-// request can succeed.
+// (active status + schedulable setting) and model_mapping, bypassing
+// scheduler snapshots and transient filters. That guarantees a 404 is only
+// returned when persistent account/group/model configuration must change
+// before the request can succeed. The diagnosis additionally reports a
+// rate-limit census over the model-capable candidates; when every one of them
+// is rate-limited the classifier answers 429 (with Retry-After when the
+// earliest reset is known) instead of the generic 503.
 //
 // routingModel is the model name that account selection actually compared
 // against (i.e. after group-level dispatch mapping). displayModel is the
@@ -134,6 +152,25 @@ func classifyNoAccountError(
 			ModelNotFound: true,
 		}
 	}
+	// Configuration supports the model and the pool is non-empty, but every
+	// model-capable candidate is inside a rate-limit window: a transient
+	// capacity verdict, not a configuration one. Answer 429 so standard
+	// clients (Codex, OpenClaw, OpenAI SDKs) apply rate-limit backoff, and
+	// advertise the earliest reset so the retry lands when the first instance
+	// frees up instead of probing blind.
+	if result.ModelCapableAccounts > 0 && result.ModelCapableRateLimited == result.ModelCapableAccounts {
+		cls := noAccountErrorClassification{
+			Status:  http.StatusTooManyRequests,
+			ErrType: "rate_limit_error",
+			Message: "All available accounts are currently rate-limited. Please retry later.",
+		}
+		if !result.EarliestRateLimitResetAt.IsZero() {
+			if remaining := time.Until(result.EarliestRateLimitResetAt); remaining > 0 {
+				cls.RetryAfterSeconds = int((remaining + time.Second - 1) / time.Second)
+			}
+		}
+		return cls
+	}
 	return fallback
 }
 
@@ -155,6 +192,13 @@ func classifyNoAccountErrorFromGin(
 	classification := classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
 	if classification.ModelNotFound {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	}
+	// Surface Retry-After while gin still holds unwritten headers (selection
+	// failures happen before any response byte is flushed). Callers may later
+	// overlay classifySelectionFailureError on top; the header stays valid
+	// because that branch yields the same 429 verdict for rate-limited pools.
+	if c != nil && classification.RetryAfterSeconds > 0 {
+		c.Header("Retry-After", strconv.Itoa(classification.RetryAfterSeconds))
 	}
 	return classification
 }

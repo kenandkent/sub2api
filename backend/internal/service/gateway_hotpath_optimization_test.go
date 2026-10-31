@@ -114,8 +114,15 @@ type modelsListAccountRepoStub struct {
 	all     []Account
 	err     error
 
-	listByGroupCalls atomic.Int64
-	listAllCalls     atomic.Int64
+	// candidatesByGroup, when set, serves ListModelAvailabilityCandidates
+	// directly (persistent-eligibility view). The full-cooldown fallback test
+	// uses it to model "schedulable list empty, config view still populated";
+	// nil keeps the historical delegate-to-byGroup behaviour for other tests.
+	candidatesByGroup map[int64][]Account
+
+	listByGroupCalls    atomic.Int64
+	listAllCalls        atomic.Int64
+	listCandidatesCalls atomic.Int64
 }
 
 type stickyGatewayCacheHotpathStub struct {
@@ -181,7 +188,17 @@ func (s *modelsListAccountRepoStub) ListSchedulableByGroupID(ctx context.Context
 }
 
 func (s *modelsListAccountRepoStub) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, _ []string, _ bool) ([]Account, error) {
-	return s.ListSchedulableByGroupID(ctx, *groupID)
+	s.listCandidatesCalls.Add(1)
+	if s.candidatesByGroup == nil {
+		return s.ListSchedulableByGroupID(ctx, *groupID)
+	}
+	accounts, ok := s.candidatesByGroup[*groupID]
+	if !ok {
+		return nil, nil
+	}
+	out := make([]Account, len(accounts))
+	copy(out, accounts)
+	return out, nil
 }
 
 func (s *modelsListAccountRepoStub) ListSchedulable(ctx context.Context) ([]Account, error) {
@@ -952,4 +969,73 @@ func TestSelectAccountWithLoadAwareness_StickyReadReuse(t *testing.T) {
 		require.Equal(t, account.ID, result.Account.ID)
 		require.Equal(t, int64(1), cache.getCalls.Load())
 	})
+}
+
+// 整组瞬态冷却（例如全部实例被上游免费配额 429 冷却、SQL 可调度查询为空）
+// 时，/v1/models 必须继续按配置视图返回分组模型，而不是塌缩成空列表——
+// 空列表会让 Agent 客户端在配额恢复前就无法发现可调模型。
+func TestGetAvailableModels_FallsBackToPersistentCandidatesWhenGroupFullyTransientBlocked(t *testing.T) {
+	resetGatewayHotpathStatsForTest()
+
+	groupID := int64(21)
+	repo := &modelsListAccountRepoStub{
+		byGroup: map[int64][]Account{groupID: nil}, // 可调度视图为空：整组处于瞬态冷却
+		candidatesByGroup: map[int64][]Account{
+			groupID: {
+				{
+					ID:       21,
+					Platform: PlatformOpenCodeGo,
+					Credentials: map[string]any{
+						"model_mapping": map[string]any{"deepseek-v4.1-flash-free": "deepseek-v4.1-flash-free"},
+					},
+				},
+			},
+		},
+	}
+	svc := &GatewayService{
+		accountRepo:        repo,
+		modelsListCache:    gocache.New(time.Minute, time.Minute),
+		modelsListCacheTTL: time.Minute,
+	}
+
+	models := svc.GetAvailableModels(context.Background(), &groupID, PlatformOpenCodeGo)
+
+	require.Equal(t, []string{"deepseek-v4.1-flash-free"}, models, "冷却空池必须回退到持久配置视图")
+	require.Equal(t, int64(1), repo.listByGroupCalls.Load(), "回退只发生在可调度查询为空时")
+	require.Equal(t, int64(1), repo.listCandidatesCalls.Load())
+
+	hit, miss, store := GatewayModelsListCacheStats()
+	require.Equal(t, int64(0), hit)
+	require.Equal(t, int64(1), miss)
+	require.Equal(t, int64(1), store, "回退结果照常写入缓存")
+}
+
+// 健康路径不受回退影响：可调度查询有数据时不得访问持久候选查询。
+func TestGetAvailableModels_SkipsCandidateFallbackWhenSchedulableAccountsExist(t *testing.T) {
+	resetGatewayHotpathStatsForTest()
+
+	groupID := int64(22)
+	repo := &modelsListAccountRepoStub{
+		byGroup: map[int64][]Account{
+			groupID: {
+				{
+					ID:       22,
+					Platform: PlatformOpenCodeGo,
+					Credentials: map[string]any{
+						"model_mapping": map[string]any{"deepseek-v4.1-flash-free": "deepseek-v4.1-flash-free"},
+					},
+				},
+			},
+		},
+	}
+	svc := &GatewayService{
+		accountRepo:        repo,
+		modelsListCache:    gocache.New(time.Minute, time.Minute),
+		modelsListCacheTTL: time.Minute,
+	}
+
+	models := svc.GetAvailableModels(context.Background(), &groupID, PlatformOpenCodeGo)
+
+	require.Equal(t, []string{"deepseek-v4.1-flash-free"}, models)
+	require.Equal(t, int64(0), repo.listCandidatesCalls.Load(), "健康路径不得触发候选回退")
 }

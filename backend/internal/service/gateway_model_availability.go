@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
@@ -24,6 +25,70 @@ type ModelAvailabilityDiagnosis struct {
 	// HasRetiredSubscriptionModel records a ChatGPT upstream blocked by model
 	// retirement, so an unsupported request can include migration guidance.
 	HasRetiredSubscriptionModel bool
+	// ModelCapableAccounts counts persistently eligible candidates whose model
+	// mapping admits the requested model.
+	ModelCapableAccounts int
+	// ModelCapableRateLimited counts model-capable candidates currently blocked
+	// by an account-level or model-level rate-limit window. When it equals
+	// ModelCapableAccounts on a non-empty pool, selection failed purely because
+	// of transient rate limits and handlers may answer 429 instead of 503.
+	ModelCapableRateLimited int
+	// EarliestRateLimitResetAt is the earliest time at which any rate-limited
+	// model-capable candidate becomes schedulable again; zero when unknown.
+	// Handlers surface it as the Retry-After response header.
+	EarliestRateLimitResetAt time.Time
+}
+
+// accountModelRateLimitState reports whether an otherwise persistently
+// eligible account is currently blocked by a rate-limit window for the
+// requested model, and if so the earliest time it may become schedulable
+// again. Eligibility requires BOTH the account-level window
+// (RateLimitResetAt) and the model-level window to have ended, so the later
+// boundary wins. The Antigravity credit-backed exception mirrors
+// IsSchedulableForModelWithContext: a model-level window does not block when
+// overages credits are still available.
+//
+// Deliberately narrower than IsSchedulableForModelWithContext: expiry,
+// overload, temporary-unschedulability and quota exhaustion are not rate
+// limits, so a pool blocked by those states must keep the 503 classification
+// instead of being misreported as 429.
+func accountModelRateLimitState(ctx context.Context, acc *Account, requestedModel string, now time.Time) (bool, time.Time) {
+	if acc == nil {
+		return false, time.Time{}
+	}
+	limited := false
+	var eligibleAt time.Time
+	if acc.RateLimitResetAt != nil && now.Before(*acc.RateLimitResetAt) {
+		limited = true
+		eligibleAt = *acc.RateLimitResetAt
+	}
+	creditBacked := acc.Platform == PlatformAntigravity && acc.IsOveragesEnabled() && !acc.isCreditsExhausted()
+	if acc.isModelRateLimitedWithContext(ctx, requestedModel) && !creditBacked {
+		limited = true
+		modelEligibleAt := now
+		if remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, requestedModel); remaining > 0 {
+			modelEligibleAt = now.Add(remaining)
+		}
+		if eligibleAt.IsZero() || modelEligibleAt.After(eligibleAt) {
+			eligibleAt = modelEligibleAt
+		}
+	}
+	return limited, eligibleAt
+}
+
+// observeModelRateLimit records one rate-limited model-capable candidate on
+// diag, tracking the earliest reset across the pool.
+func observeModelRateLimit(diag *ModelAvailabilityDiagnosis, limited bool, resetAt time.Time) {
+	if !limited {
+		return
+	}
+	diag.ModelCapableRateLimited++
+	if resetAt.IsZero() {
+		return
+	}
+	if diag.EarliestRateLimitResetAt.IsZero() || resetAt.Before(diag.EarliestRateLimitResetAt) {
+		diag.EarliestRateLimitResetAt = resetAt
+	}
 }
 
 // ModelAvailabilityDiagnoser is implemented by gateway services that can
@@ -100,15 +165,19 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	diag := ModelAvailabilityDiagnosis{}
+	now := time.Now()
 	for i := range accounts {
 		if useMixed && accounts[i].Platform == PlatformAntigravity && !accounts[i].IsMixedSchedulingEnabled() {
 			continue
 		}
 		diag.HasAccountsInPool = true
-		if s.isModelSupportedByAccountWithContext(ctx, &accounts[i], requestedModel) {
-			diag.HasModelSupport = true
-			return diag
+		if !s.isModelSupportedByAccountWithContext(ctx, &accounts[i], requestedModel) {
+			continue
 		}
+		diag.HasModelSupport = true
+		diag.ModelCapableAccounts++
+		limited, resetAt := accountModelRateLimitState(ctx, &accounts[i], requestedModel, now)
+		observeModelRateLimit(&diag, limited, resetAt)
 	}
 	return diag
 }

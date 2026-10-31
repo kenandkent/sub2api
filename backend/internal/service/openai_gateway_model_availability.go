@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
@@ -54,6 +55,7 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	diag := ModelAvailabilityDiagnosis{}
+	now := time.Now()
 	for i := range accounts {
 		diag.HasAccountsInPool = true
 		if isRetiredOpenAISubscriptionModel(&accounts[i], resolveOpenAIAccountUpstreamModelForRequest(&accounts[i], requestedModel, false)) {
@@ -62,11 +64,15 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 		// Mirrors the per-candidate filter used during account selection
 		// (openai_account_scheduler.isAccountRequestCompatible): empty
 		// model_mapping accepts everything; otherwise the explicit / wildcard
-		// mapping must match.
-		if accounts[i].IsModelSupported(requestedModel) {
-			diag.HasModelSupport = true
-			return diag
+		// mapping must match. The full scan (no early return) is required so
+		// every model-capable candidate contributes to the rate-limit census.
+		if !accounts[i].IsModelSupported(requestedModel) {
+			continue
 		}
+		diag.HasModelSupport = true
+		diag.ModelCapableAccounts++
+		limited, resetAt := accountModelRateLimitState(ctx, &accounts[i], requestedModel, now)
+		observeModelRateLimit(&diag, limited, resetAt)
 	}
 	return diag
 }

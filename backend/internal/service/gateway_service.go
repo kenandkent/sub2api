@@ -1417,6 +1417,21 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 
 	if groupID != nil {
 		accounts, err = s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
+		if err == nil && len(accounts) == 0 && platform != "" {
+			// The schedulable query drops accounts whose transient windows
+			// (rate limit, overload, temp-unschedulable, expiry) are active.
+			// When that empties the whole group — e.g. every instance parked
+			// by an upstream free-quota 429 — the advertised model list must
+			// not collapse: listing is a configuration view, not a runtime
+			// availability view. Fall back to the persistent-eligibility
+			// candidates (same source resolveCompositeModelOwnership uses)
+			// so /v1/models keeps serving the group's configured models.
+			candidatePlatforms := []string{platform}
+			if platform == PlatformGemini {
+				candidatePlatforms = append(candidatePlatforms, PlatformAntigravity)
+			}
+			accounts, err = s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, candidatePlatforms, false)
+		}
 	} else {
 		accounts, err = s.accountRepo.ListSchedulable(ctx)
 	}

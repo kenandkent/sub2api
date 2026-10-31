@@ -187,6 +187,9 @@ func TestDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccountRemain
 
 	require.True(t, diag.HasAccountsInPool)
 	require.True(t, diag.HasModelSupport, "a configured model remains supported while every matching account is temporarily cooling down")
+	require.Equal(t, 1, diag.ModelCapableAccounts)
+	require.Equal(t, 1, diag.ModelCapableRateLimited, "the rate-limit census must count the cooling account so handlers can answer 429")
+	require.WithinDuration(t, cooldownUntil, diag.EarliestRateLimitResetAt, time.Second)
 }
 
 func TestOpenAIDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccountRemainsConfigured(t *testing.T) {
@@ -221,6 +224,9 @@ func TestOpenAIDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccount
 
 	require.True(t, diag.HasAccountsInPool)
 	require.True(t, diag.HasModelSupport, "OpenAI-compatible diagnosis must keep transiently limited supporting accounts in the configured pool")
+	require.Equal(t, 1, diag.ModelCapableAccounts)
+	require.Equal(t, 1, diag.ModelCapableRateLimited, "OpenAI-compatible census must count the cooling account so handlers can answer 429")
+	require.WithinDuration(t, cooldownUntil, diag.EarliestRateLimitResetAt, time.Second)
 }
 
 func TestDiagnoseModelAvailabilityForPlatform_WrongPlatformFiltersOut(t *testing.T) {
@@ -248,4 +254,118 @@ func TestDiagnoseModelAvailabilityForPlatform_WrongPlatformFiltersOut(t *testing
 
 	require.False(t, diag.HasAccountsInPool, "OpenAI route must not see Anthropic accounts in pool")
 	require.False(t, diag.HasModelSupport)
+}
+
+func TestDiagnoseModelAvailabilityForPlatform_AllModelCapableRateLimited_ReportsEarliestReset(t *testing.T) {
+	groupID := int64(44)
+	early := time.Now().Add(10 * time.Minute)
+	late := time.Now().Add(2 * time.Hour)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:               1,
+				Platform:         PlatformOpenAI,
+				Status:           StatusActive,
+				Schedulable:      true,
+				RateLimitResetAt: &late,
+				AccountGroups:    []AccountGroup{{GroupID: groupID}},
+				Credentials:      map[string]any{"model_mapping": map[string]any{"gpt-5": "gpt-5"}},
+			},
+			{
+				ID:               2,
+				Platform:         PlatformOpenAI,
+				Status:           StatusActive,
+				Schedulable:      true,
+				RateLimitResetAt: &early,
+				AccountGroups:    []AccountGroup{{GroupID: groupID}},
+				Credentials:      map[string]any{"model_mapping": map[string]any{"gpt-5": "gpt-5"}},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "gpt-5", PlatformOpenAI)
+
+	require.True(t, diag.HasAccountsInPool)
+	require.True(t, diag.HasModelSupport)
+	require.Equal(t, 2, diag.ModelCapableAccounts)
+	require.Equal(t, 2, diag.ModelCapableRateLimited, "every model-capable account is cooling down")
+	require.WithinDuration(t, early, diag.EarliestRateLimitResetAt, time.Second, "Retry-After must advertise the earliest reset, not the latest")
+}
+
+func TestDiagnoseModelAvailabilityForPlatform_PartialRateLimitCensus_StaysNeutral(t *testing.T) {
+	groupID := int64(45)
+	cooldownUntil := time.Now().Add(30 * time.Minute)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:               1,
+				Platform:         PlatformOpenAI,
+				Status:           StatusActive,
+				Schedulable:      true,
+				RateLimitResetAt: &cooldownUntil,
+				AccountGroups:    []AccountGroup{{GroupID: groupID}},
+				Credentials:      map[string]any{"model_mapping": map[string]any{"gpt-5": "gpt-5"}},
+			},
+			{
+				ID:            2,
+				Platform:      PlatformOpenAI,
+				Status:        StatusActive,
+				Schedulable:   true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials:   map[string]any{"model_mapping": map[string]any{"gpt-5": "gpt-5"}},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "gpt-5", PlatformOpenAI)
+
+	require.Equal(t, 2, diag.ModelCapableAccounts)
+	require.Equal(t, 1, diag.ModelCapableRateLimited, "a healthy model-capable account remains — handlers must keep the 503 fallback")
+	require.WithinDuration(t, cooldownUntil, diag.EarliestRateLimitResetAt, time.Second)
+}
+
+func TestDiagnoseModelAvailabilityForPlatform_RateLimitedNonCapableAccountNotCounted(t *testing.T) {
+	groupID := int64(46)
+	cooldownUntil := time.Now().Add(30 * time.Minute)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:               1,
+				Platform:         PlatformOpenAI,
+				Status:           StatusActive,
+				Schedulable:      true,
+				RateLimitResetAt: &cooldownUntil,
+				AccountGroups:    []AccountGroup{{GroupID: groupID}},
+				Credentials:      map[string]any{"model_mapping": map[string]any{"other-model": "other-model"}},
+			},
+			{
+				ID:            2,
+				Platform:      PlatformOpenAI,
+				Status:        StatusActive,
+				Schedulable:   true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials:   map[string]any{"model_mapping": map[string]any{"gpt-5": "gpt-5"}},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "gpt-5", PlatformOpenAI)
+
+	require.Equal(t, 1, diag.ModelCapableAccounts, "only the model-capable account counts")
+	require.Equal(t, 0, diag.ModelCapableRateLimited, "a limited account that cannot serve the model must not flip the verdict to 429")
 }

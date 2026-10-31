@@ -16,8 +16,10 @@ func TestClosedStatementSnapshotsDebtAndCaptureOffset(t *testing.T) {
 	isolateCommittedIntegrationTest(t)
 	ctx := context.Background()
 	s, receipt, _, owner, _, _, captureLedger := marketplaceRefundFixture(t)
-	month := time.Now().UTC().AddDate(0, -1, 0)
-	month = time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+	// Snap to the first of the current month before stepping back: subtracting
+	// a month from e.g. Oct 31 yields Sep 31, which normalizes into the current
+	// month and would make GenerateClosedMonth reject an open statement.
+	month := time.Date(time.Now().UTC().Year(), time.Now().UTC().Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
 	tx, err := integrationDB.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	ledger := NewMarketplaceLedgerRepository()

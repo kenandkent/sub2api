@@ -2,6 +2,8 @@
 
 日常开发使用本机 Vite 和 Go/Air，PostgreSQL、Redis 放在独立 Docker Compose 项目中。现有完整 Docker Compose 部署和 GHCR CI/CD 继续保留。
 
+三套环境的配置、网络差异、代理编号和核验记录见 [环境与网络对照](ENVIRONMENT_REFERENCE.md)。
+
 ## 启动与停止
 
 本机需要 Python 3.9+、Go 1.21+（用于下载项目要求的工具链）、Node.js 20+（建议 24）、Corepack 和正在运行的 Docker Desktop/Engine。脚本不会安装或替换全局工具。
@@ -53,6 +55,38 @@ make dev-stop    # 停止本地进程和开发依赖容器，保留数据
 ## 与其他运行方式并行
 
 当前完整部署可以继续使用 `http://localhost:8080`。日常开发用 `3000/18080` 和独立的 `15433/16380`，两套环境可以同时运行。原有 `docker-compose.dev.yml` 仍是完整镜像构建入口，本次没有把它改成依赖专用配置。
+
+## OpenCode 分组与本地代理入口
+
+2026-10-31 已将生产环境的以下配置分别导入完整 Docker 环境和原生开发环境：
+
+- `deepseek-v4.1-flash-free`、`glm-5.3-flash-free`、`mimo-v2.6-flash-free`、`big-pickle` 四个分组，各自只开放对应模型。
+- 每组 `instance-01` 至 `instance-21`，每个实例并发数为 `1`，使用 Bun 免费模型接入。
+- 每组按相同编号绑定 21 条带认证 HTTP 代理；四组复用同一套固定出口。
+
+两套本地数据库中的分组、账号、代理 ID 各自独立，按名称和节点编号对应。同步保留已有本地账号，不复制生产用户、余额、API Key 或消费记录。代理凭据保存在各自的数据库及 Git 忽略的私有快照中，不写入本文件。
+
+当前 Mac 到代理 IPv4 入口的请求会被重置，而 IPv6 入口可用。因此，原生开发环境直接使用该网关的 IPv6 入口；Docker 使用 `host.docker.internal:23801` 至 `23821`，经 Mac 回环地址上的 TCP 转发连接同一网关的 IPv6 入口。它们仍然对应原来的固定出口 IP。
+
+完整 Docker 环境使用这些代理前，在项目根目录启动本地转发：
+
+```bash
+python3 -B deploy/opencode/proxy_relay.py up
+python3 -B deploy/opencode/proxy_relay.py status
+```
+
+配置位于 `.dev/opencode-proxy-relay.json`，包含 21 个本地端口和上游入口，不含账号密码；可从 [示例配置](opencode/proxy-relay.example.json) 恢复。当前 Mac 还配置了 `upstream_interface: en0`，仅将转发程序的 IPv6 出站 socket 绑定到该接口，不修改全局网络设置；换用其他网络接口时应相应调整。
+
+转发只监听 `127.0.0.1`，原样传输 TCP 数据，不解析请求内容。状态和日志保存在 `.dev/proxy-relay.*` 与 `.dev/logs/proxy-relay.log`。修改配置后先停止再启动：
+
+```bash
+python3 -B deploy/opencode/proxy_relay.py stop
+python3 -B deploy/opencode/proxy_relay.py up
+```
+
+原生开发环境的 Bun worker 仍使用独立启动命令 `python3 -B deploy/opencode/local.py worker`，另一个终端运行 `make dev`。`make dev-stop` 管理 Air、Vite 和开发依赖；上述独立 worker 和代理转发需要分别停止。完整 Docker 环境中的 worker 由 Compose 管理。
+
+后台账号测试现已按账号的 Bun 标记选择与正式网关共用的请求规范化、代理传递和流式响应校验逻辑。测试不创建消费者计费请求。代理连通成功不代表上游允许模型调用；上游限流或访问拒绝仍会使测试失败。代理请求收到的非 200 响应由 worker 按来源证据分类：带 `Retry-After`/`x-request-id` 或 JSON error envelope 的透传真实状态，否则保守转成 502 并输出结构化错误日志。
 
 完成功能后，仍可运行完整 Compose 构建验收，再推送到 `mysubapi` 执行 CI/CD；生产部署不会执行 Air 或 Vite 开发服务器。
 

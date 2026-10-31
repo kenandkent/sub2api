@@ -1,5 +1,35 @@
 # OpenCode free transport: local opt-in
 
+## Environment and network reference: 2026-10-31
+
+See [the environment and network reference](../ENVIRONMENT_REFERENCE.md) for the
+production, complete local Compose, and native development configurations.
+Both local databases now contain the four configured model groups, 21 instances
+per group, and 21 fixed authenticated proxy routes. Database IDs are local;
+proxy credentials and production consumer data are not stored in documentation.
+
+Marked free accounts now use Bun in the administrator's account test as well as
+the normal gateway. Both paths share request normalization, profile selection,
+proxy construction, worker dispatch and strict SSE/free-usage validation. An
+administrator diagnostic creates no consumer billing attempt.
+
+On the current Mac, Docker reaches the IPv6 proxy ingress through a loopback TCP
+relay. Its [credential-free example](proxy-relay.example.json) maps local ports
+23801–23821 to the original fixed nodes and uses the macOS-only
+`upstream_interface` option for the measured working interface. The relay changes
+neither HTTP headers nor the fixed exit IP. Start it with
+`python3 -B deploy/opencode/proxy_relay.py up`; use `status` or `stop` for its
+separate lifecycle. Native development uses the IPv6 ingress directly.
+
+Network checks and model availability are separate results. A successful HTTPS
+trace or website response does not establish that a model request is permitted.
+The local US23 model diagnostic returned upstream 429 `FreeUsageLimitError`; the
+proxied worker classifies non-200 responses by source evidence since 2026-10-31 —
+an upstream JSON error envelope or `Retry-After`/`x-request-id` keeps its real
+status (the quota 429 then cools the instance and fails over to its group), while
+responses without evidence stay an opaque, structured-log 502. The historical
+successful model samples below do not override that current result.
+
 ## Local verification on 2026-10-27
 
 The `mysubapi` implementation was built and deployed locally with the complete
@@ -242,10 +272,15 @@ points share one worker token; keep the worker running on `127.0.0.1:19090`
 while iterating, and re-run `make dev` after editing Go sources (air reloads
 them automatically).
 
-When an HTTP proxy is configured, any non-200 response through the proxy is
-conservatively reported as a 502 worker error. This includes genuine upstream
-429 responses, whose `Retry-After` may therefore be lost. The worker does not
-automatically retry. HTTPS proxies and SOCKS proxies are rejected before dispatch.
+When an HTTP proxy is configured, a non-200 response through the proxy is
+classified by source evidence (since 2026-10-31): upstream JSON error envelopes
+and `Retry-After`/`x-request-id` keep their real status so a genuine upstream
+429 `FreeUsageLimitError` retains `Retry-After`, parks the instance and fails
+over to the rest of its group; anything without evidence (proxy/edge junk, an
+oversized or unreadable body) is still reported as an opaque 502 worker error.
+Every failure path emits one structured log line with a redacted body snippet.
+The worker does not automatically retry. HTTPS proxies and SOCKS proxies are
+rejected before dispatch.
 
 The private file is created with mode 600 and contains the shared token; keep it private and do not
 print it. The launcher rejects an existing file with wider permissions. Restart

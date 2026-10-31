@@ -26,6 +26,8 @@ type openCodeFreeSSEOptions struct {
 	// `read` placeholder). The caller never declared them, so their calls are
 	// allowed through validation and stripped from the client stream.
 	InjectedTools []string
+	// QuietErrors keeps upstream frames and parser errors out of admin logs.
+	QuietErrors bool
 }
 
 type openCodeFreeToolCallResult struct {
@@ -962,14 +964,16 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 		}
 		frame, finished, err := validator.parse(payload)
 		if err != nil {
-			sample := payload
-			if len(sample) > 500 {
-				sample = sample[:500] + "..."
+			if opts == nil || !opts.QuietErrors {
+				sample := payload
+				if len(sample) > 500 {
+					sample = sample[:500] + "..."
+				}
+				logger.L().Warn("opencode free: upstream frame rejected",
+					zap.Error(err),
+					zap.String("payload", sample),
+				)
 			}
-			logger.L().Warn("opencode free: upstream frame rejected",
-				zap.Error(err),
-				zap.String("payload", sample),
-			)
 			return err
 		}
 		if finished {

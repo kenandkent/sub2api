@@ -1,0 +1,110 @@
+{
+  "routes": [
+    {
+      "listen_port": 23801,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38001
+    },
+    {
+      "listen_port": 23802,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38101
+    },
+    {
+      "listen_port": 23803,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38002
+    },
+    {
+      "listen_port": 23804,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38003
+    },
+    {
+      "listen_port": 23805,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38102
+    },
+    {
+      "listen_port": 23806,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38004
+    },
+    {
+      "listen_port": 23807,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38005
+    },
+    {
+      "listen_port": 23808,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38103
+    },
+    {
+      "listen_port": 23809,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38006
+    },
+    {
+      "listen_port": 23810,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38104
+    },
+    {
+      "listen_port": 23811,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38007
+    },
+    {
+      "listen_port": 23812,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38105
+    },
+    {
+      "listen_port": 23813,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38008
+    },
+    {
+      "listen_port": 23814,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38106
+    },
+    {
+      "listen_port": 23815,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38009
+    },
+    {
+      "listen_port": 23816,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38010
+    },
+    {
+      "listen_port": 23817,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38011
+    },
+    {
+      "listen_port": 23818,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38107
+    },
+    {
+      "listen_port": 23819,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38012
+    },
+    {
+      "listen_port": 23820,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38013
+    },
+    {
+      "listen_port": 23821,
+      "upstream_host": "2607:8700:5500:6bde::2",
+      "upstream_port": 38014
+    }
+  ],
+  "upstream_interface": "en0"
+}

@@ -215,6 +215,115 @@ test('proxy CONNECT rejection is a dispatched worker error without proxy body', 
   }
 });
 
+const captureWorkerLogs = () => {
+  const lines: any[] = [];
+  const original = console.error;
+  console.error = (...args: any[]) => {try { lines.push(JSON.parse(String(args[0])));} catch {}};
+  return {lines, restore: () => {console.error = original;}};
+};
+
+test('proxy upstream quota rejection keeps its real status and is logged', async () => {
+  const {createWorker}=await import('./worker');
+  const body=JSON.stringify({error:{code:'FreeUsageLimitError',message:'Free usage limit reached'}});
+  const logs=captureWorkerLogs();
+  try {
+    const worker=createWorker({token:TOKEN,profilesDir:PROFILES,fetchImpl:async()=>new Response(body,{status:429,headers:{'content-type':'application/json','retry-after':'74005','x-request-id':'req_upstream_1'}})});
+    const res=await worker(request({...envelope(),proxy:{id:7,generation:'gen7',url:'http://127.0.0.1:1'}}));
+    expect(res.status).toBe(429);
+    expect(res.headers.get('x-sub2api-transport-result')).toBe('upstream');
+    expect(res.headers.get('x-sub2api-dispatched')).toBe('true');
+    expect(res.headers.get('retry-after')).toBe('74005');
+    expect(res.headers.get('x-request-id')).toBe('req_upstream_1');
+    expect(await res.text()).toBe(body);
+  } finally {logs.restore();}
+  const entry=logs.lines.find(l=>l?.event==='proxy_upstream_non_200');
+  expect(entry).toBeDefined();
+  expect(entry.level).toBe('error');
+  expect(entry.classified).toBe('upstream');
+  expect(entry.upstream_status).toBe(429);
+  expect(entry.retry_after).toBe('74005');
+  expect(entry.content_type).toBe('application/json');
+  expect(entry.request_id).toBe('req-1');
+  expect(entry.account_id).toBe(1);
+  expect(entry.profile_id).toBe(ID);
+  expect(entry.proxy_id).toBe(7);
+  expect(entry.proxy_generation).toBe('gen7');
+  expect(entry.model).toBe('big-pickle');
+  expect(typeof entry.dispatch_ms).toBe('number');
+  expect(entry.body_truncated).toBe(false);
+});
+
+test('proxy junk without upstream evidence stays an opaque logged 502', async () => {
+  const {createWorker}=await import('./worker');
+  const logs=captureWorkerLogs();
+  try {
+    const worker=createWorker({token:TOKEN,profilesDir:PROFILES,fetchImpl:async()=>new Response('<html>denied http://user:pass@proxy.example:8080 try Bearer abc.def-123</html>',{status:403,headers:{'content-type':'text/html'}})});
+    const res=await worker(request({...envelope(),proxy:{id:2,generation:'gen2',url:'http://127.0.0.1:1'}}));
+    expect(res.status).toBe(502);
+    expect(res.headers.get('x-sub2api-transport-result')).toBe('worker-error');
+    const data=await res.json(); expect(data.error.code).toBe('proxy_or_upstream_http_error');
+    expect(JSON.stringify(data)).not.toContain('user:pass');
+  } finally {logs.restore();}
+  const entry=logs.lines.find(l=>l?.event==='proxy_upstream_non_200');
+  expect(entry).toBeDefined();
+  expect(entry.classified).toBe('proxy_error');
+  expect(entry.upstream_status).toBe(403);
+  expect(entry.content_type).toBe('text/html');
+  expect(entry.body_snippet).toContain('http://***:***@');
+  expect(entry.body_snippet).not.toContain('user:pass');
+  expect(entry.body_snippet).toContain('Bearer ***');
+  expect(entry.body_snippet).not.toContain('abc.def-123');
+});
+
+test('proxy upstream JSON error envelope is forwarded with its status', async () => {
+  const {createWorker}=await import('./worker');
+  const body=JSON.stringify({error:{message:'bad request parameters'}});
+  const logs=captureWorkerLogs();
+  try {
+    const worker=createWorker({token:TOKEN,profilesDir:PROFILES,fetchImpl:async()=>new Response(body,{status:400,headers:{'content-type':'application/json'}})});
+    const res=await worker(request({...envelope(),proxy:{id:3,generation:'gen3',url:'http://127.0.0.1:1'}}));
+    expect(res.status).toBe(400);
+    expect(res.headers.get('x-sub2api-transport-result')).toBe('upstream');
+    expect(await res.text()).toBe(body);
+  } finally {logs.restore();}
+  const entry=logs.lines.find(l=>l?.event==='proxy_upstream_non_200');
+  expect(entry.classified).toBe('upstream');
+  expect(entry.upstream_status).toBe(400);
+});
+
+test('proxy oversized non-200 body keeps the conservative 502', async () => {
+  const {createWorker}=await import('./worker');
+  const logs=captureWorkerLogs();
+  try {
+    const worker=createWorker({token:TOKEN,profilesDir:PROFILES,fetchImpl:async()=>new Response(new Uint8Array(70*1024).fill(120),{status:418,headers:{'content-type':'text/plain','x-request-id':'req_big'}})});
+    const res=await worker(request({...envelope(),proxy:{id:4,generation:'gen4',url:'http://127.0.0.1:1'}}));
+    expect(res.status).toBe(502);
+    const data=await res.json(); expect(data.error.code).toBe('proxy_or_upstream_http_error');
+  } finally {logs.restore();}
+  const entry=logs.lines.find(l=>l?.event==='proxy_upstream_non_200');
+  expect(entry.classified).toBe('proxy_error');
+  expect(entry.body_truncated).toBe(true);
+  expect(entry.upstream_status).toBe(418);
+  expect(entry.body_bytes).toBeGreaterThan(64*1024);
+});
+
+test('dispatch failures are logged before returning upstream_error', async () => {
+  const {createWorker}=await import('./worker');
+  const logs=captureWorkerLogs();
+  try {
+    const worker=createWorker({token:TOKEN,profilesDir:PROFILES,fetchImpl:async()=>{throw new Error('ECONNRESET after CONNECT');}});
+    const res=await worker(request(envelope()));
+    expect(res.status).toBe(502);
+    const data=await res.json(); expect(data.error.code).toBe('upstream_error');
+  } finally {logs.restore();}
+  const entry=logs.lines.find(l=>l?.event==='dispatch_failed');
+  expect(entry).toBeDefined();
+  expect(entry.dispatched).toBe(true);
+  expect(entry.request_id).toBe('req-1');
+  expect(entry.error_name).toBe('Error');
+  expect(entry.error_message).toContain('ECONNRESET');
+});
+
 test('slow real socket uploads release all slots after the body timeout', async () => {
   const {createWorker}=await import('./worker'); const net=await import('node:net');
   const worker=createWorker({token:TOKEN,profilesDir:PROFILES,bodyReadTimeoutMs:100,fetchImpl:async()=>new Response('ok')});

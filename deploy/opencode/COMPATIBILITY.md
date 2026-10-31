@@ -76,6 +76,22 @@
 - 首轮之后的第二轮复测撞上真实上游免费配额耗尽（text 也 429 “Free usage limit reached”，`Retry-After` 指向次日 ~08:15 +0800 重置），按已知上游行为记录为环境事件而非回归；agent 门禁修复的判定以首轮 16/16 与 9/9 为准。
 - 三方生产验收需部署本修复后在配额窗口内用实际客户端复测。
 
+## 2026-10-31 更新：失败可观测性、代理证据分类与免费配额 429 冷却/转移
+
+背景：生产 `deepseek-v4.1-flash-free` 分组 21 实例诊断中 11 路返回 502 `proxy_or_upstream_http_error`，worker 与网关对全部失败路径零日志，且代理路径任意非 200 一律丢弃状态/头/体包装成 502，导致真实原因（含上游 429 `FreeUsageLimitError` 与 `Retry-After`）无法回溯、调度器也无法冷却耗尽实例。
+
+修改逻辑（每处均补了回归测试）：
+
+- `deploy/opencode/worker/worker.ts`：代理非 200 先有界读取错误体（≤64KB），按证据分类——`Retry-After`/`x-request-id` 头或 JSON error envelope（`error` 为含 `message`/`code` 的对象或非空字符串）判定为上游响应并透传真实状态与 `content-type`/`retry-after`/`x-request-id`；无证据、读取失败或体超限仍保守返回 502 `proxy_or_upstream_http_error`。所有失败路径输出单行结构化 JSON 日志（`proxy_upstream_non_200` 含状态/头/分类/脱敏 body 片段/proxy id+generation/request_id/model/耗时，`dispatch_failed` 含异常名与消息，另有 `worker_busy`、`upstream_headers_too_large`）；片段截断 512 字符并抹除 userinfo URL 与 Bearer 令牌。
+- `backend/internal/service/opencode_free_bun_gateway.go`：四类失败补 WARN 日志（worker transport 失败、worker 错误含读回的 `worker_code`、上游非 200 含状态/Retry-After/x-request-id/消息/脱敏片段/是否已写出、错误体不可读与非法 content-type），均带 request_id/account_id/model/耗时；worker 错误的客户端消息追加 `worker_code`。
+- `backend/internal/service/opencode_free_quota.go`：`isOpenCodeFreeQuotaExhausted`（429 且体含 `FreeUsageLimitError` 或 `Free usage limit reached`）；`HandleOpenCodeFreeQuota429` 写 `RateLimitResetAt`——优先 `Retry-After`（夹紧 1 分钟~24 小时），缺省兜底 1 小时——并即时通知调度器 block，账号自动到期恢复。
+- 配额 429 且客户端响应尚未写出时，`forwardOpenCodeFree` 返回 `UpstreamFailoverError` 不写响应，由 handler 的既有候选循环切换到同分组其他实例（failedAccountIDs 与新冷却双重排除，默认预算 10 次切换，预算耗尽按既有映射回 429 并保留 Retry-After、ops 记录上游真实消息）；keepalive 已写出则回退原 SSE 透传。管理端逐实例测试命中同一检测时同样冷却（错误体只做本地分类，不回显）。
+- `backend/internal/service/account_test_service.go` + `account_test_service_opencode_free_bun.go`：后台账号测试在通用协议路由前按 Bun 标记复用与网关一致的规范化、profile、代理派发与 SSE 免费校验，不创建消费者计费请求；`opencode_free_bun_parser.go` 新增 `QuietErrors` 抑制管理端日志噪声。
+
+验证方法：`bun test deploy/opencode/`、`cd backend && make test-unit`、`go build ./... && go vet -tags=unit ./...`、改动文件 `gofmt -l`；新增用例覆盖代理证据分类四态（透传 429/400、垃圾 502+脱敏日志、超大体保守 502、dispatch 异常日志）、配额检测表、冷却窗口（Retry-After/兜底/上下限/仓失败）、网关未写出 failover 与 keepalive 回退、管理端冷却。
+
+验证结果（2026-10-31）：bun 70 通过/0 失败/225 断言；`make test-unit` 58 包 0 失败；`go vet -tags=unit ./...` 通过；改动文件 gofmt 干净。历史 11 路 502 的具体根因无法在零日志下回溯，需部署后复跑 21 实例诊断观察带细节的新日志。
+
 ## 官方公开能力与授权边界
 
 [官方模型文档](https://dev.opencode.ai/v2/docs/console/models) 当前列出九个免费聊天模型：`big-pickle`、`glm-5.3-flash-free`、`deepseek-v4.1-flash-free`、`beam-free`、`flint-40b-free`、`mimo-v2.6-flash-free`、`nemotron-3-ultra-free`、`nemotron-3.5-lightning-free`、`nemotron-3.5-super-vl-free`。同页明确要求免费聊天模型通过 OpenCode 使用，其他客户端采用付费 Console 或 Go。
@@ -88,6 +104,6 @@
 
 每个明确获准接入的模型分别测试普通对话、function tools、tool结果续接、流式及非流式、length/tool_calls终态、缓存/推理usage与计费。模型目录更新不等于验收成功。
 
-应保留错误来源、HTTP状态、Retry-After，区分本地未支持、协议错误、上游鉴权/客户端限制、上游真实429。当前代理路径的非200可能来自代理 CONNECT 拒绝而非真实上游，因此保守归类为502 transport错误；没有来源证明时也不能直接改成“上游额度耗尽”。没有对照证据时不能把工具字段认定为429原因，也不应自动重发可能已执行的工具请求。
+应保留错误来源、HTTP状态、Retry-After，区分本地未支持、协议错误、上游鉴权/客户端限制、上游真实429。代理路径的非200可能来自代理 CONNECT 拒绝而非真实上游，2026-10-31 起按来源证据分类：带 Retry-After/x-request-id 或 JSON error envelope 的透传真实状态（保留 Retry-After），没有证据仍保守归类为502 transport错误并落结构化日志；没有来源证明时也不能直接改成“上游额度耗尽”。没有对照证据时不能把工具字段认定为429原因，也不应自动重发可能已执行的工具请求。
 
 MoviePilot 的验收必须从实际客户端完整 Agent 对话发起，确认工具参数和调用ID传递正确；不执行真实有副作用的工具操作。用户当前明确要求继续使用 OmniRoute 的 OpenCode free provider；本轮没有将其切换到付费模型或其他提供方，也未修改该线上配置。

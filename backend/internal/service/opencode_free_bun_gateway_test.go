@@ -102,6 +102,75 @@ func TestOpenCodeFreeUpstreamStatusDoesNotFailOver(t *testing.T) {
 	require.Equal(t, 1, repo.unknown)
 }
 
+// A free-quota 429 parks the instance for its Retry-After window and hands the
+// request back to the handler so it switches to another instance of the same
+// group; the client must not receive anything before that switch.
+func TestOpenCodeFreeQuota429ParksInstanceAndFailsOver(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Sub2api-Transport-Result", "upstream")
+		w.Header().Set("X-Sub2api-Dispatched", "true")
+		w.Header().Set("Retry-After", "74005")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"FreeUsageLimitError","message":"Free usage limit reached"}}`))
+	}))
+	defer worker.Close()
+	repo := &freeGatewayRepo{}
+	cooldownRepo := &quotaCooldownRepoStub{}
+	svc := &OpenAIGatewayService{usageBillingRepo: repo, rateLimitService: &RateLimitService{accountRepo: cooldownRepo}, cfg: &config.Config{OpenCodeFreeBun: config.OpenCodeFreeBunConfig{Enabled: true, WorkerEndpoint: worker.URL, Token: "12345678901234567890123456789012", RequestTimeoutSeconds: 30, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}}}
+	a := &Account{ID: 1, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{"account_mode": AccountModeZen, "api_key": "public", "opencode_free_transport": "bun", "opencode_free_profile": openCodeFreeProfile}}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	c.Set("api_key", &APIKey{ID: 4})
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, a, []byte(`{"model":"big-pickle","messages":[{"role":"user","content":"hi"}]}`), "", "")
+	require.Nil(t, result)
+	require.Error(t, err)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Equal(t, http.StatusTooManyRequests, failover.StatusCode)
+	require.False(t, failover.RetryableOnSameAccount)
+	require.True(t, failover.ShouldRetryNextAccount())
+	require.False(t, IsResponseCommitted(c), "quota failover must not commit the client response")
+	require.Zero(t, w.Body.Len())
+	require.Equal(t, int64(1), cooldownRepo.id)
+	require.WithinDuration(t, time.Now().Add(74005*time.Second), cooldownRepo.until, 30*time.Second)
+	require.Equal(t, 1, repo.unknown)
+}
+
+// Once the client stream has committed (queue keepalive), the same quota 429
+// still parks the instance but must fall back to the SSE passthrough instead
+// of attempting a switch mid-stream.
+func TestOpenCodeFreeQuota429AfterKeepaliveParksAndStreams(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Sub2api-Transport-Result", "upstream")
+		w.Header().Set("X-Sub2api-Dispatched", "true")
+		w.Header().Set("Retry-After", "74005")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"FreeUsageLimitError","message":"Free usage limit reached"}}`))
+	}))
+	defer worker.Close()
+	repo := &freeGatewayRepo{}
+	cooldownRepo := &quotaCooldownRepoStub{}
+	svc := &OpenAIGatewayService{usageBillingRepo: repo, rateLimitService: &RateLimitService{accountRepo: cooldownRepo}, cfg: &config.Config{OpenCodeFreeBun: config.OpenCodeFreeBunConfig{Enabled: true, WorkerEndpoint: worker.URL, Token: "12345678901234567890123456789012", RequestTimeoutSeconds: 30, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}}}
+	a := &Account{ID: 1, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{"account_mode": AccountModeZen, "api_key": "public", "opencode_free_transport": "bun", "opencode_free_profile": openCodeFreeProfile}}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	c.Set("api_key", &APIKey{ID: 4})
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString(": keepalive\n\n")
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, a, []byte(`{"model":"big-pickle","messages":[{"role":"user","content":"hi"}],"stream":true}`), "", "")
+	require.Nil(t, result)
+	require.Error(t, err)
+	var failover *UpstreamFailoverError
+	require.NotErrorAs(t, err, &failover)
+	require.Equal(t, int64(1), cooldownRepo.id)
+	require.WithinDuration(t, time.Now().Add(74005*time.Second), cooldownRepo.until, 30*time.Second)
+	require.Contains(t, w.Body.String(), "data: {\"error\":")
+	require.Contains(t, w.Body.String(), "FreeUsageLimitError")
+	require.Equal(t, 1, repo.unknown)
+}
+
 func TestOpenCodeFreeSocketCompletesStreamingAndBufferedWithAlias(t *testing.T) {
 	fixture := "data: {\"id\":\"answer\",\"object\":\"chat.completion.chunk\",\"model\":\"big-pickle\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"answer\",\"model\":\"big-pickle\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +

@@ -17,3 +17,5 @@ redis_data/
 # Temporary files
 *.tmp
 *.log
+__pycache__/
+*.pyc

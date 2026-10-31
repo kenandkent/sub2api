@@ -2,11 +2,37 @@ import {timingSafeEqual} from 'node:crypto';
 import {OPENCODE_FREE_ENDPOINT, createRegistry} from './profiles';
 import {validateChatBody} from './chatBody';
 
-const MAX_BODY = 1024 * 1024, MAX_RESPONSE = 8 * 1024 * 1024, MAX_EVENT = 256 * 1024, MAX_HEADERS = 16 * 1024, MAX_ACTIVE = 64;
+const MAX_BODY = 1024 * 1024, MAX_RESPONSE = 8 * 1024 * 1024, MAX_EVENT = 256 * 1024, MAX_HEADERS = 16 * 1024, MAX_ACTIVE = 64, MAX_ERROR_BODY = 64 * 1024, MAX_ERROR_SNIPPET = 512;
 const envelopeFields = new Set(['version','request_id','profile_id','profile_sha256','target','account_id','session_id','deadline_unix_ms','proxy','body']);
 const isObject = (v: any) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const keysAllowed = (v: any, allowed: Set<string>) => Object.keys(v).every(k => allowed.has(k));
 const isToken = (v: any, max = 128) => typeof v === 'string' && v.length > 0 && v.length <= max && /^[\x21-\x7e]+$/.test(v);
+
+// Every dispatched failure path emits one structured line so docker logs can
+// explain an opaque 502. Snippets are truncated and scrubbed of userinfo URLs
+// and bearer tokens because proxy/edge junk bodies may embed credentials.
+const redactSnippet = (text: string) => text
+  .replace(/https?:\/\/[^\s"'@]+:[^\s"'@]+@/g, 'http://***:***@')
+  .replace(/Bearer\s+[A-Za-z0-9._\-]+/g, 'Bearer ***')
+  .slice(0, MAX_ERROR_SNIPPET);
+const workerLog = (level: 'warn' | 'error', event: string, fields: Record<string, unknown>) => {
+  try { console.error(JSON.stringify({level, event, component: 'opencode-free-worker', ts: new Date().toISOString(), ...fields})); } catch {}
+};
+// Proxy transport failures must not leak raw proxy/edge responses to callers,
+// but upstream rejections (OpenCode console API JSON errors, Retry-After,
+// x-request-id) have to keep their real status so the gateway can classify a
+// free-quota 429 and cool the instance down.
+const hasUpstreamEvidence = (headers: Headers, bodyComplete: boolean, bodyText: string) => {
+  if (headers.get('retry-after') !== null || headers.get('x-request-id') !== null) return true;
+  if (!bodyComplete || bodyText === '') return false;
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (!isObject(parsed)) return false;
+    const err = parsed.error;
+    if (typeof err === 'string') return err.length > 0;
+    return isObject(err) && (typeof err.message === 'string' || typeof err.code === 'string');
+  } catch { return false; }
+};
 
 export function createWorker({token, profilesDir, fetchImpl = fetch, bodyReadTimeoutMs = 5000}: {token: string, profilesDir: string, fetchImpl?: typeof fetch, bodyReadTimeoutMs?: number}) {
   if (typeof token !== 'string' || token.length < 32) throw new Error('invalid worker token');
@@ -25,7 +51,7 @@ export function createWorker({token, profilesDir, fetchImpl = fetch, bodyReadTim
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return error(401,'unauthorized','',false);
     let headerBytes = 0; for (const [k,v] of req.headers) headerBytes += k.length + v.length;
     if (headerBytes > MAX_HEADERS) return error(431,'headers_too_large','',false);
-    if (active >= MAX_ACTIVE) return error(503,'busy','',false);
+    if (active >= MAX_ACTIVE) {workerLog('warn','worker_busy',{active}); return error(503,'busy','',false);}
     active++;
     let released = false; const release = () => {if (!released) {released = true; active--;}};
     let id = '', dispatched = false;
@@ -79,10 +105,50 @@ export function createWorker({token, profilesDir, fetchImpl = fetch, bodyReadTim
       if (req.signal.aborted) {finish(); return error(499,'cancelled',id,false);}
       timer = setTimeout(() => controller?.abort(), data.deadline_unix_ms-Date.now());
       dispatched = true;
+      const dispatchedAt = Date.now();
       const response = await fetchImpl(OPENCODE_FREE_ENDPOINT, {method:'POST', headers:{'user-agent':profile.headers['user-agent'],'x-session-id':data.session_id}, body:JSON.stringify(body), keepalive:false, redirect:'error', signal:controller.signal, ...(proxy ? {proxy} : {})} as any);
-      if (proxy && response.status !== 200) {controller.abort(); void response.body?.cancel().catch(()=>{}); finish(); return error(502,'proxy_or_upstream_http_error',id,true);}
+      if (proxy && response.status !== 200) {
+        // Read a bounded prefix before deciding: upstream rejections must keep
+        // their real status (quota 429 detection lives there), while proxy/edge
+        // junk stays an opaque 502 with the evidence preserved in the log only.
+        // Any read failure or oversized body keeps bodyComplete=false so the
+        // conservative 502 path is chosen instead of forwarding a partial body.
+        const chunks: Uint8Array[] = []; let sniffed = 0, bodyComplete = false;
+        const sniffReader = response.body?.getReader();
+        if (!sniffReader) {bodyComplete = true;}
+        else {
+          while (sniffed <= MAX_ERROR_BODY) {
+            let result: ReadableStreamReadResult<Uint8Array>;
+            try { result = await sniffReader.read(); } catch { break; }
+            if (result.done) {bodyComplete = true; break;}
+            chunks.push(result.value); sniffed += result.value.length;
+          }
+          if (!bodyComplete) void sniffReader.cancel().catch(()=>{});
+        }
+        const sniffedBytes = bodyComplete ? new Uint8Array(sniffed) : new Uint8Array(0);
+        if (bodyComplete) {let offset = 0; for (const chunk of chunks) {sniffedBytes.set(chunk, offset); offset += chunk.length;}}
+        const snippet = bodyComplete ? new TextDecoder().decode(sniffedBytes) : '';
+        const upstreamish = bodyComplete && hasUpstreamEvidence(response.headers, true, snippet);
+        workerLog('error','proxy_upstream_non_200',{
+          request_id:id, account_id:data.account_id, profile_id:data.profile_id, model:b?.model,
+          proxy_id:data.proxy?.id, proxy_generation:data.proxy?.generation,
+          upstream_status:response.status,
+          retry_after:response.headers.get('retry-after'),
+          upstream_request_id:response.headers.get('x-request-id'),
+          content_type:response.headers.get('content-type'),
+          classified:bodyComplete ? (upstreamish ? 'upstream' : 'proxy_error') : 'proxy_error',
+          body_truncated:!bodyComplete, body_bytes:sniffed,
+          body_snippet:redactSnippet(snippet),
+          dispatch_ms:Date.now()-dispatchedAt,
+        });
+        if (!upstreamish) {controller.abort(); finish(); return error(502,'proxy_or_upstream_http_error',id,true);}
+        controller.abort(); finish();
+        const passthrough = new Headers({'x-sub2api-transport-result':'upstream','x-sub2api-dispatched':'true','cache-control':'no-store'});
+        for (const key of ['content-type','retry-after','x-request-id']) {const v=response.headers.get(key); if (v !== null) passthrough.set(key,v);}
+        return new Response(sniffedBytes,{status:response.status,headers:passthrough});
+      }
       let hsize=0; for (const [k,v] of response.headers) hsize+=k.length+v.length;
-      if (hsize > MAX_HEADERS) {controller.abort(); finish(); return error(502,'upstream_headers_too_large',id,true);}
+      if (hsize > MAX_HEADERS) {workerLog('error','upstream_headers_too_large',{request_id:id,account_id:data.account_id,header_bytes:hsize,dispatch_ms:Date.now()-dispatchedAt}); controller.abort(); finish(); return error(502,'upstream_headers_too_large',id,true);}
       const headers = new Headers({'x-sub2api-transport-result':'upstream','x-sub2api-dispatched':'true','cache-control':'no-store'});
       for (const key of ['content-type','retry-after','x-request-id']) {const v=response.headers.get(key); if (v !== null) headers.set(key,v);}
       if (!response.body) {finish(); return new Response(null,{status:response.status,headers});}
@@ -107,6 +173,13 @@ export function createWorker({token, profilesDir, fetchImpl = fetch, bodyReadTim
         async cancel() {terminated=true; controller?.abort(); try {await upstream.cancel();} catch {} finally {finish();}}
       }, {highWaterMark:0});
       return new Response(stream,{status:response.status,headers});
-    } catch {controller?.abort(); finish(); return error(dispatched ? 502 : 400,dispatched ? 'upstream_error' : 'invalid_envelope',id,dispatched);}
+    } catch (e) {
+      workerLog('error','dispatch_failed',{
+        request_id:id, dispatched,
+        error_name:e instanceof Error ? e.name : typeof e,
+        error_message: redactSnippet(e instanceof Error ? e.message : String(e)),
+      });
+      controller?.abort(); finish(); return error(dispatched ? 502 : 400,dispatched ? 'upstream_error' : 'invalid_envelope',id,dispatched);
+    }
   };
 }

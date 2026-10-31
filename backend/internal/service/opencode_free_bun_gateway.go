@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -75,13 +76,9 @@ func freeSessionID() (string, error) {
 
 func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.Context, a *Account, body []byte, defaultModel string) (*OpenAIForwardResult, error) {
 	start := time.Now()
-	if s.cfg == nil || !s.cfg.OpenCodeFreeBun.Enabled {
-		return nil, freeReject(c, http.StatusServiceUnavailable, "OpenCode free transport is disabled")
-	}
-	cfg := s.cfg.OpenCodeFreeBun
-	endpoint, err := url.Parse(cfg.WorkerEndpoint)
-	if err != nil || endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || len(cfg.Token) < 32 || cfg.RequestTimeoutSeconds <= 0 || cfg.MaxResponseBytes <= 0 || cfg.MaxEventBytes <= 0 {
-		return nil, freeReject(c, http.StatusServiceUnavailable, "invalid OpenCode free transport configuration")
+	cfg, err := openCodeFreeConfig(s.cfg)
+	if err != nil {
+		return nil, freeReject(c, http.StatusServiceUnavailable, err.Error())
 	}
 	if validateOpenCodeFreeAccount(a) != nil {
 		return nil, freeReject(c, http.StatusBadRequest, "invalid OpenCode free account configuration")
@@ -114,14 +111,9 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 			return nil, freeReject(c, http.StatusServiceUnavailable, "session storage unavailable")
 		}
 	}
-	var proxy *freeWorkerProxy
-	if a.ProxyID != nil {
-		if a.Proxy == nil || a.Proxy.ID != *a.ProxyID || a.Proxy.Protocol != "http" {
-			return nil, freeReject(c, http.StatusBadRequest, "unsupported OpenCode free proxy")
-		}
-		raw := a.Proxy.URL()
-		hash := sha256.Sum256([]byte(raw))
-		proxy = &freeWorkerProxy{ID: a.Proxy.ID, Generation: hex.EncodeToString(hash[:]), URL: raw}
+	proxy, err := openCodeFreeProxy(a)
+	if err != nil {
+		return nil, freeReject(c, http.StatusBadRequest, err.Error())
 	}
 	timeout := time.Duration(cfg.RequestTimeoutSeconds) * time.Second
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -140,31 +132,90 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 	}()
 	deadline, _ := requestCtx.Deadline()
 	env := freeWorkerEnvelope{Version: 1, RequestID: meta.RequestID, ProfileID: reqNorm.Profile.ID, ProfileSHA256: reqNorm.Profile.SHA256, Target: "console", AccountID: a.ID, SessionID: session, DeadlineUnixMS: deadline.UnixMilli(), Proxy: proxy, Body: reqNorm.Body}
-	payload, err := json.Marshal(env)
+	resp, err := dispatchOpenCodeFree(requestCtx, cfg, env)
 	if err != nil {
-		return nil, freeReject(c, http.StatusBadGateway, "cannot encode transport request")
-	}
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, strings.TrimRight(cfg.WorkerEndpoint, "/")+"/v1/transport/chat", bytes.NewReader(payload))
-	if err != nil {
-		return nil, freeReject(c, http.StatusBadGateway, "invalid transport request")
-	}
-	req.Header.Set("Authorization", "Bearer "+cfg.Token)
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	defer client.CloseIdleConnections()
-	resp, err := client.Do(req)
-	if err != nil {
+		logger.L().Warn("opencode free: worker transport failed",
+			zap.String("request_id", meta.RequestID),
+			zap.Int64("account_id", a.ID),
+			zap.String("model", model),
+			zap.Bool("stream", stream),
+			zap.Duration("elapsed", time.Since(start)),
+			zap.NamedError("context", requestCtx.Err()),
+			zap.Error(err))
 		return nil, freeReject(c, http.StatusBadGateway, "OpenCode free transport failed")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	source, dispatched := resp.Header.Get("X-Sub2api-Transport-Result"), resp.Header.Get("X-Sub2api-Dispatched")
 	if source != "upstream" || dispatched != "true" {
-		return nil, freeReject(c, http.StatusBadGateway, "OpenCode free transport failed")
+		// Worker-side failures discard the transport evidence by design; the
+		// worker logs the upstream status itself, this records the code the
+		// gateway actually received so a bare502 can be explained.
+		workerBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4097))
+		workerCode := gjson.GetBytes(workerBody, "error.code").String()
+		workerMessage := gjson.GetBytes(workerBody, "error.message").String()
+		logger.L().Warn("opencode free: worker error",
+			zap.String("request_id", meta.RequestID),
+			zap.Int64("account_id", a.ID),
+			zap.String("model", model),
+			zap.Int("worker_status", resp.StatusCode),
+			zap.String("transport_result", source),
+			zap.String("dispatched", dispatched),
+			zap.String("worker_code", workerCode),
+			zap.String("worker_message", redactOpenCodeFreeLogSnippet(workerMessage)),
+			zap.Duration("elapsed", time.Since(start)))
+		clientMessage := "OpenCode free transport failed"
+		if workerCode != "" {
+			clientMessage += ": " + workerCode
+		}
+		return nil, freeReject(c, http.StatusBadGateway, clientMessage)
 	}
 	if resp.StatusCode != http.StatusOK {
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 65537))
 		if readErr != nil || len(data) > 65536 || !json.Valid(data) {
+			logger.L().Warn("opencode free: upstream error body unreadable",
+				zap.String("request_id", meta.RequestID),
+				zap.Int64("account_id", a.ID),
+				zap.String("model", model),
+				zap.Int("upstream_status", resp.StatusCode),
+				zap.String("retry_after", resp.Header.Get("Retry-After")),
+				zap.String("upstream_request_id", resp.Header.Get("X-Request-Id")),
+				zap.Int("body_bytes", len(data)),
+				zap.Duration("elapsed", time.Since(start)),
+				zap.NamedError("read_error", readErr))
 			return nil, freeReject(c, http.StatusBadGateway, "OpenCode free upstream failed")
+		}
+		upstreamMsg := ExtractUpstreamErrorMessage(data)
+		logger.L().Warn("opencode free: upstream error",
+			zap.String("request_id", meta.RequestID),
+			zap.Int64("account_id", a.ID),
+			zap.String("model", model),
+			zap.String("display_model", displayModel),
+			zap.Int("upstream_status", resp.StatusCode),
+			zap.String("retry_after", resp.Header.Get("Retry-After")),
+			zap.String("upstream_request_id", resp.Header.Get("X-Request-Id")),
+			zap.String("content_type", resp.Header.Get("Content-Type")),
+			zap.String("upstream_message", redactOpenCodeFreeLogSnippet(upstreamMsg)),
+			zap.String("body_snippet", openCodeFreeBodySnippet(data)),
+			zap.Bool("stream", stream),
+			zap.Bool("response_committed", c.Writer.Written()),
+			zap.Duration("elapsed", time.Since(start)))
+		if isOpenCodeFreeQuotaExhausted(resp.StatusCode, data) {
+			// Free quota is per egress identity: park the instance for its
+			// window, then let the handler switch to another instance of the
+			// same group while nothing has been written to the client yet.
+			cooldownCtx, cooldownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleOpenCodeFreeQuota429(cooldownCtx, a, resp.Header)
+			}
+			cooldownCancel()
+			if !c.Writer.Written() {
+				logger.L().Warn("opencode free: quota exhausted, failing over",
+					zap.String("request_id", meta.RequestID),
+					zap.Int64("account_id", a.ID),
+					zap.String("model", model),
+					zap.String("retry_after", resp.Header.Get("Retry-After")))
+				return nil, s.newOpenAIAccountFailoverError(a, resp.StatusCode, resp.Header, data, upstreamMsg, false, false)
+			}
 		}
 		if stream && c.Writer.Written() {
 			// A queue keepalive may already have committed the SSE response.
@@ -185,6 +236,12 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 		return nil, errors.New("OpenCode free upstream error")
 	}
 	if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		logger.L().Warn("opencode free: invalid upstream content type",
+			zap.String("request_id", meta.RequestID),
+			zap.Int64("account_id", a.ID),
+			zap.String("model", model),
+			zap.String("content_type", resp.Header.Get("Content-Type")),
+			zap.Duration("elapsed", time.Since(start)))
 		return nil, freeReject(c, http.StatusBadGateway, "invalid upstream content type")
 	}
 	var out io.Writer
@@ -241,6 +298,48 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 	complete = true
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	return &OpenAIForwardResult{RequestID: meta.RequestID, ResponseID: parsed.ID, Usage: parsed.Usage, Model: displayModel, BillingModel: mapped, UpstreamModel: mapped, UpstreamEndpoint: "/v1/chat/completions", Stream: stream, Duration: time.Since(start), OpenCodeFree: meta}, nil
+}
+
+// openCodeFreeConfig, openCodeFreeProxy and dispatchOpenCodeFree are shared by
+// the gateway and the admin diagnostic so they use the same transport boundary.
+func openCodeFreeConfig(cfg *config.Config) (config.OpenCodeFreeBunConfig, error) {
+	if cfg == nil || !cfg.OpenCodeFreeBun.Enabled {
+		return config.OpenCodeFreeBunConfig{}, errors.New("OpenCode free transport is disabled")
+	}
+	free := cfg.OpenCodeFreeBun
+	endpoint, err := url.Parse(free.WorkerEndpoint)
+	if err != nil || endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || len(free.Token) < 32 || free.RequestTimeoutSeconds <= 0 || free.MaxResponseBytes <= 0 || free.MaxEventBytes <= 0 {
+		return config.OpenCodeFreeBunConfig{}, errors.New("invalid OpenCode free transport configuration")
+	}
+	return free, nil
+}
+
+func openCodeFreeProxy(a *Account) (*freeWorkerProxy, error) {
+	if a.ProxyID == nil {
+		return nil, nil
+	}
+	if a.Proxy == nil || a.Proxy.ID != *a.ProxyID || a.Proxy.Protocol != "http" {
+		return nil, errors.New("unsupported OpenCode free proxy")
+	}
+	raw := a.Proxy.URL()
+	hash := sha256.Sum256([]byte(raw))
+	return &freeWorkerProxy{ID: a.Proxy.ID, Generation: hex.EncodeToString(hash[:]), URL: raw}, nil
+}
+
+func dispatchOpenCodeFree(ctx context.Context, cfg config.OpenCodeFreeBunConfig, env freeWorkerEnvelope) (*http.Response, error) {
+	payload, err := json.Marshal(env)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.WorkerEndpoint, "/")+"/v1/transport/chat", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	defer client.CloseIdleConnections()
+	return client.Do(req)
 }
 
 // Persist only numeric usage fields and the known billing source, never arbitrary upstream data.

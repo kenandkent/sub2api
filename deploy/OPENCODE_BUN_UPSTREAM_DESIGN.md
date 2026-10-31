@@ -104,6 +104,8 @@ Profile 是不可变、受版本控制的文件，不接受下游传入任意模
 
 2026-10-30 补充（agent 模式与工具名门禁）：agent 模式现已支持调用方 `tools` 透传与 tool 结果续接，经真实上游隔离实验证实上游免费层会**检查请求声明的工具名集合**：非空 `tools` 中缺少官方占位名 `read` 即返回 429 `FreeUsageLimitError`（`tool_choice: none` 不豁免），含 `read` 则 200；3/3 模型复现。因此 worker 对非空调用方工具集合**合并占位 `read`**（描述声明禁止调用，schema 为 `{filePath}`），网关侧 `openCodeFreeInjectedTools` 与之保持同规则；注入调用在累积期允许（含前缀分片），finish 时从结果剔除并重排剩余调用，全部为注入调用时 `tool_calls` 降级为 `stop`，`none`/forced/required 语义不变，注入名绝不回传给客户端。`InjectedTools` 未配置时行为与原实现完全一致。详见 `deploy/opencode/COMPATIBILITY.md` 对应小节。
 
+2026-10-31 补充（失败日志、代理证据分类与配额 429 处置）：首版“代理任意非 200 归 502”的限制已按证据细化——worker 有界读取错误体，带 `Retry-After`/`x-request-id` 或 JSON error envelope 的判定为上游响应并透传真实状态（网关因此能收到真实 429 与 `Retry-After`），无证据/读取失败/体超限仍保守 502；worker 与网关的全部失败路径输出结构化 WARN 日志（request_id/account/model/状态/脱敏片段）。上游 429 命中 `FreeUsageLimitError`/`Free usage limit reached` 时按 `Retry-After`（夹紧 1 分钟~24 小时，缺省 1 小时）写 `RateLimitResetAt` 冷却该实例并即时通知调度器；客户端响应未写出则返回 failover 错误由 handler 切换同分组其他实例，已写出（keepalive）则维持原 SSE 透传。管理端账号测试与网关共用该路径。详见 `deploy/opencode/COMPATIBILITY.md` 的 2026-10-31 小节。
+
 首期 `n` 缺省或为 1，其他值发送前拒绝；旧式 `functions` / `function_call` 请求字段明确列为未支持，不静默转换。上游意外返回非零 choice index 属协议不匹配，必须检查所有 choices 后拒绝，不能只选择 choice 0 而漏过其他 choice 的工具事件。诊断器只取 choice 0 是研究聚合规则，不代表生产验收可以跳过其他 choice。
 
 温度参数采用明确契约：调用方未提供时发送 `temperature: 0`，显式 0 原样保留；任何非 0 值在发起上游请求前返回 `unsupported_parameter`，绝不静默覆盖。0 仅为本轮观察有效的请求条件，不保证确定性。

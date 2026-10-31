@@ -384,6 +384,12 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return nil
 	}
 
+	// The free transport is selected before protocol routing, just as it is in
+	// the gateway. A marked account must never fall back to a direct probe.
+	if account.UsesOpenCodeFreeBun() {
+		return s.testOpenCodeFreeBunConnection(c, account, modelID, prompt)
+	}
+
 	// Route to platform-specific test method
 	// 按入站协议分流的多协议供应商（国产厂商等）：按账号协议选测试路径。
 	if account.RoutesProtocolByInbound() {

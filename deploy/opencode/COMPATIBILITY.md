@@ -90,7 +90,7 @@
 
 验证方法：`bun test deploy/opencode/`、`cd backend && make test-unit`、`go build ./... && go vet -tags=unit ./...`、改动文件 `gofmt -l`；新增用例覆盖代理证据分类四态（透传 429/400、垃圾 502+脱敏日志、超大体保守 502、dispatch 异常日志）、配额检测表、冷却窗口（Retry-After/兜底/上下限/仓失败）、网关未写出 failover 与 keepalive 回退、管理端冷却。
 
-验证结果（2026-10-31）：bun 70 通过/0 失败/225 断言；`make test-unit` 58 包 0 失败；`go vet -tags=unit ./...` 通过；改动文件 gofmt 干净。历史 11 路 502 的具体根因无法在零日志下回溯，需部署后复跑 21 实例诊断观察带细节的新日志。
+验证结果（2026-10-31）：bun 70 通过/0 失败/225 断言；`make test-unit` 58 包 0 失败；`go vet -tags=unit ./...` 通过；改动文件 gofmt 干净。首轮推送被集成门禁拦下，暴露并修复了 `supplier_statement_debt_integration_test.go` 的月末日期归一化缺陷（先 `AddDate(0,-1,0)` 再取月初，10-31 会把上月末归一进当月令 `GenerateClosedMonth` 拒绝；纯测试代码、与本功能无关），修复后 `go test -tags=integration ./...` 与 marketplace 网关集成用例全绿。生产部署 `6c9d78020`（build 41163137962-1，2026-10-31 11:16 CST，应用与 worker 容器 healthy）后的复测：同一直连 worker 的 21 路诊断 **21/21 通过**（当日 00:09 历史为 10 过、11 路通用 502，历史失败实例全部恢复，全部 HTTP 200、`billing_source=free`、用量 prompt 2247/completion 188，直接 worker 诊断不产生消费者账单）；管理端账号测试 instance-01/02 均返回 `test_complete success:true`（无计费）；临时授权分组、建 key 后的真实消费者 `/v1/chat/completions` 冒烟返回 200（答案正确、usage 100、`cost=0`），随后删 key、回收授权、余额精确恢复原值 0，生产状态与诊断前一致；全过程 `opencode free` WARN 与 worker 失败日志均为 0，新失败路径本轮无自然触发样本，持续观察。历史 11 路 502 的具体根因在零日志下无法回溯，若再现将由新结构化日志直接给出分类与证据。
 
 ## 官方公开能力与授权边界
 

@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,32 @@ type freeWorkerEnvelope struct {
 	DeadlineUnixMS int64            `json:"deadline_unix_ms"`
 	Proxy          *freeWorkerProxy `json:"proxy,omitempty"`
 	Body           json.RawMessage  `json:"body"`
+}
+
+// openCodeFreeClientRetryAfterCap bounds the Retry-After the gateway exposes
+// to clients. The upstream free-quota 429 over-states the block (observed
+// values of 8+ hours while instances served 200 again within seconds), and a
+// client that honors such a value sleeps through recoverable windows; 120s
+// matches the observed flap/recovery timescale of the free pool and keeps the
+// client-facing hint honest without touching the (capped, verified) internal
+// cooldown, which still uses the real upstream value.
+const openCodeFreeClientRetryAfterCap = 120 * time.Second
+
+// openCodeFreeClientRetryAfter caps a delta-seconds Retry-After for client
+// exposure. Unparseable values (HTTP-date form or malformed) pass through
+// unchanged: the cap must never invent a value or break the header contract.
+func openCodeFreeClientRetryAfter(retry string) string {
+	if retry == "" {
+		return ""
+	}
+	seconds, err := strconv.Atoi(retry)
+	if err != nil {
+		return retry
+	}
+	if seconds <= 0 || time.Duration(seconds)*time.Second <= openCodeFreeClientRetryAfterCap {
+		return retry
+	}
+	return strconv.Itoa(int(openCodeFreeClientRetryAfterCap / time.Second))
 }
 
 func freeReject(c *gin.Context, status int, message string) error {
@@ -206,6 +233,10 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 			cooldownCtx, cooldownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleOpenCodeFreeQuota429(cooldownCtx, a, resp.Header)
+				// An upstream retry-after over-states the real block; verify the
+				// park asynchronously and auto-clear it when upstream serves 200
+				// again so a healthy instance is not lost for the whole window.
+				s.rateLimitService.ScheduleOpenCodeFreeQuotaVerify(a, mapped, cfg)
 			}
 			cooldownCancel()
 			if !c.Writer.Written() {
@@ -214,7 +245,14 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 					zap.Int64("account_id", a.ID),
 					zap.String("model", model),
 					zap.String("retry_after", resp.Header.Get("Retry-After")))
-				return nil, s.newOpenAIAccountFailoverError(a, resp.StatusCode, resp.Header, data, upstreamMsg, false, false)
+				// The cooldown above keeps the real upstream Retry-After; the
+				// client-facing copy is capped so callers retry within the
+				// window where the free pool demonstrably recovers.
+				clientHeaders := resp.Header.Clone()
+				if retry := clientHeaders.Get("Retry-After"); retry != "" {
+					clientHeaders.Set("Retry-After", openCodeFreeClientRetryAfter(retry))
+				}
+				return nil, s.newOpenAIAccountFailoverError(a, resp.StatusCode, clientHeaders, data, upstreamMsg, false, false)
 			}
 		}
 		if stream && c.Writer.Written() {
@@ -228,7 +266,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 			MarkResponseCommitted(c)
 		} else {
 			if retry := resp.Header.Get("Retry-After"); retry != "" {
-				c.Header("Retry-After", retry)
+				c.Header("Retry-After", openCodeFreeClientRetryAfter(retry))
 			}
 			c.Data(resp.StatusCode, "application/json", data)
 			MarkResponseCommitted(c)

@@ -46,18 +46,26 @@ func (r *quotaCooldownRepoStub) SetRateLimited(_ context.Context, id int64, rese
 
 func TestApplyOpenCodeFreeQuotaCooldownWindows(t *testing.T) {
 	account := &Account{ID: 7, Platform: PlatformOpenCodeGo}
-	t.Run("uses retry-after when present", func(t *testing.T) {
+	t.Run("uses retry-after when it stays under the cap", func(t *testing.T) {
 		repo := &quotaCooldownRepoStub{}
-		headers := http.Header{"Retry-After": []string{"74005"}}
+		headers := http.Header{"Retry-After": []string{"1800"}}
 		var notifiedUntil time.Time
 		until := applyOpenCodeFreeQuotaCooldown(context.Background(), repo, account, headers, func(_ *Account, u time.Time, reason string) {
 			require.Equal(t, "429", reason)
 			notifiedUntil = u
 		})
 		require.Equal(t, int64(7), repo.id)
-		require.WithinDuration(t, time.Now().Add(74005*time.Second), until, 30*time.Second)
+		require.WithinDuration(t, time.Now().Add(1800*time.Second), until, 30*time.Second)
 		require.Equal(t, until, repo.until)
 		require.Equal(t, until, notifiedUntil)
+	})
+	t.Run("caps an over-stated next-day retry-after", func(t *testing.T) {
+		repo := &quotaCooldownRepoStub{}
+		headers := http.Header{"Retry-After": []string{"50869"}}
+		until := applyOpenCodeFreeQuotaCooldown(context.Background(), repo, account, headers, nil)
+		require.Equal(t, int64(7), repo.id)
+		require.WithinDuration(t, time.Now().Add(openCodeFreeQuotaCooldownMax), until, 30*time.Second)
+		require.Equal(t, until, repo.until)
 	})
 	t.Run("falls back without retry-after", func(t *testing.T) {
 		repo := &quotaCooldownRepoStub{}

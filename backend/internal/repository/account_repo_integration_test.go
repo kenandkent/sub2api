@@ -942,6 +942,62 @@ func (s *AccountRepoSuite) TestClearRateLimitIfObservedProtectsRearmed429Generat
 	s.Require().WithinDuration(rearmedReset, *retyped.RateLimitResetAt, time.Second)
 }
 
+func (s *AccountRepoSuite) TestClearRateLimitIfObservedOpenCodeFreeProtectsRearmedGeneration() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-opencode-verify-clear",
+		Platform: service.PlatformOpenCodeGo,
+		Type:     service.AccountTypeAPIKey,
+	})
+	parkedReset := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
+	rearmedReset := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
+
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, parkedReset))
+	parked, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(parked.RateLimitedAt)
+	s.Require().NotNil(parked.RateLimitResetAt)
+
+	// A verify probe that observed this exact cooldown generation clears it.
+	cleared, err := s.repo.ClearRateLimitIfObservedOpenCodeFree(s.ctx, account.ID, *parked.RateLimitedAt, *parked.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().True(cleared)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.RateLimitedAt)
+	s.Require().Nil(got.RateLimitResetAt)
+
+	// A newer 429 re-arms a different generation; the stale probe result must
+	// not erase it even though the probe's timestamps were once correct.
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, rearmedReset))
+	cleared, err = s.repo.ClearRateLimitIfObservedOpenCodeFree(s.ctx, account.ID, *parked.RateLimitedAt, *parked.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().False(cleared)
+
+	kept, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(kept.RateLimitedAt)
+	s.Require().NotNil(kept.RateLimitResetAt)
+	s.Require().WithinDuration(rearmedReset, *kept.RateLimitResetAt, time.Second)
+
+	// The CAS is platform-scoped: an identical timestamp pair on a non-OpenCode
+	// account must never be cleared by this method.
+	other := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-opencode-verify-other-platform",
+		Platform: service.PlatformGrok,
+		Type:     service.AccountTypeOAuth,
+	})
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, other.ID, parkedReset))
+	otherRow, err := s.repo.GetByID(s.ctx, other.ID)
+	s.Require().NoError(err)
+	cleared, err = s.repo.ClearRateLimitIfObservedOpenCodeFree(s.ctx, other.ID, *otherRow.RateLimitedAt, *otherRow.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().False(cleared)
+	untouched, err := s.repo.GetByID(s.ctx, other.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(untouched.RateLimitResetAt)
+}
+
 func (s *AccountRepoSuite) TestClearRateLimit() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-clear"})
 	until := time.Now().Add(1 * time.Hour)

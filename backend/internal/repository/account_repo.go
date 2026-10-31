@@ -2379,6 +2379,39 @@ func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int
 	return true, nil
 }
 
+// ClearRateLimitIfObservedOpenCodeFree clears exactly the OpenCode free
+// rate-limit generation seen by an async post-park verify probe: the cooldown
+// written when an upstream 429 parked the instance. Matching both timestamps
+// (rate_limited_at and rate_limit_reset_at) means a stale probe result can
+// never erase a newer 429, an admin clear/re-arm, or an unrelated update that
+// landed between the probe read and this write. The observed 2026-10-31
+// incident showed upstream retry-after over-stating the block by hours, so the
+// verify probe clears promptly when upstream serves 200 again.
+func (r *accountRepository) ClearRateLimitIfObservedOpenCodeFree(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error) {
+	updated, err := r.client.Account.Update().
+		Where(
+			dbaccount.IDEQ(id),
+			dbaccount.PlatformEQ(service.PlatformOpenCodeGo),
+			dbaccount.RateLimitedAtEQ(observedLimitedAt),
+			dbaccount.RateLimitResetAtEQ(observedResetAt),
+		).
+		ClearRateLimitedAt().
+		ClearRateLimitResetAt().
+		Save(ctx)
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue opencode free observed rate-limit clear failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 // SetRateLimitedIfUnchanged atomically applies a rate-limit reset only while the
 // account still carries exactly the generation the caller observed: its
 // UpdatedAt row version, its RateLimitedAt and its RateLimitResetAt (nil means

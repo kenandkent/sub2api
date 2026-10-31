@@ -102,9 +102,11 @@ func TestOpenCodeFreeUpstreamStatusDoesNotFailOver(t *testing.T) {
 	require.Equal(t, 1, repo.unknown)
 }
 
-// A free-quota 429 parks the instance for its Retry-After window and hands the
-// request back to the handler so it switches to another instance of the same
-// group; the client must not receive anything before that switch.
+// A free-quota 429 parks the instance — honoring the upstream Retry-After only
+// while it stays under openCodeFreeQuotaCooldownMax, since upstream over-states
+// the real window — and hands the request back to the handler so it switches to
+// another instance of the same group; the client must not receive anything
+// before that switch.
 func TestOpenCodeFreeQuota429ParksInstanceAndFailsOver(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Sub2api-Transport-Result", "upstream")
@@ -133,8 +135,26 @@ func TestOpenCodeFreeQuota429ParksInstanceAndFailsOver(t *testing.T) {
 	require.False(t, IsResponseCommitted(c), "quota failover must not commit the client response")
 	require.Zero(t, w.Body.Len())
 	require.Equal(t, int64(1), cooldownRepo.id)
-	require.WithinDuration(t, time.Now().Add(74005*time.Second), cooldownRepo.until, 30*time.Second)
+	require.WithinDuration(t, time.Now().Add(openCodeFreeQuotaCooldownMax), cooldownRepo.until, 30*time.Second)
+	require.Equal(t, "120", failover.ResponseHeaders.Get("Retry-After"), "client-facing Retry-After must be capped even though the cooldown used the real upstream value")
 	require.Equal(t, 1, repo.unknown)
+}
+
+func TestOpenCodeFreeClientRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"12", "12"},
+		{"120", "120"},
+		{"121", "120"},
+		{"74005", "120"},
+		{"0", "0"},
+		{"-30", "-30"},
+		{"Wed, 21 Oct 2026 07:28:00 GMT", "Wed, 21 Oct 2026 07:28:00 GMT"},
+	} {
+		require.Equal(t, tc.want, openCodeFreeClientRetryAfter(tc.in), "input %q", tc.in)
+	}
 }
 
 // Once the client stream has committed (queue keepalive), the same quota 429
@@ -165,7 +185,7 @@ func TestOpenCodeFreeQuota429AfterKeepaliveParksAndStreams(t *testing.T) {
 	var failover *UpstreamFailoverError
 	require.NotErrorAs(t, err, &failover)
 	require.Equal(t, int64(1), cooldownRepo.id)
-	require.WithinDuration(t, time.Now().Add(74005*time.Second), cooldownRepo.until, 30*time.Second)
+	require.WithinDuration(t, time.Now().Add(openCodeFreeQuotaCooldownMax), cooldownRepo.until, 30*time.Second)
 	require.Contains(t, w.Body.String(), "data: {\"error\":")
 	require.Contains(t, w.Body.String(), "FreeUsageLimitError")
 	require.Equal(t, 1, repo.unknown)

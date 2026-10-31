@@ -10,15 +10,21 @@ import (
 )
 
 // The OpenCode free tier rejects an exhausted instance with HTTP 429 and a
-// body carrying FreeUsageLimitError (observed Retry-After spans ~10-20h until
-// the next-day reset). Free-tier identity is the proxy egress IP, so the
-// exhausted account+proxy pair must leave the scheduler until its window
-// returns and the in-flight request should switch to another instance of the
-// same group.
+// body carrying FreeUsageLimitError plus a Retry-After pointing at the
+// next-day 08:00 boundary. That Retry-After over-states the actual block:
+// on 2026-10-31 17:52/18:01 all 21 instances were parked until 11-01 08:00
+// off Retry-After 50298-50869s, yet 20 of them served 200 responses again by
+// 21:25 the same evening, so a trusted value left a healthy group empty for
+// hours. The cooldown therefore never outlives openCodeFreeQuotaCooldownMax;
+// the account rejoins the scheduler after at most that window and the next
+// client request re-probes the upstream for real, re-parking it immediately
+// if the limit still holds. Free-tier identity is the proxy egress IP, so
+// each account+cooled pair leaves the scheduler alone while the in-flight
+// request switches to another instance of the same group.
 const (
 	openCodeFreeQuotaCooldownFallback = time.Hour
 	openCodeFreeQuotaCooldownMin      = time.Minute
-	openCodeFreeQuotaCooldownMax      = 24 * time.Hour
+	openCodeFreeQuotaCooldownMax      = time.Hour
 	openCodeFreeLogSnippetMax         = 512
 )
 

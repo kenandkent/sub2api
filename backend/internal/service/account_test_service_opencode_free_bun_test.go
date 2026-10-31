@@ -394,5 +394,6 @@ func TestAdminOpenCodeFreeQuotaExhaustionParksInstance(t *testing.T) {
 	repo := svc.accountRepo.(*openAIAccountTestRepo)
 	require.Equal(t, int64(401), repo.rateLimitedID)
 	require.NotNil(t, repo.rateLimitedAt)
-	require.WithinDuration(t, time.Now().Add(74005*time.Second), *repo.rateLimitedAt, 30*time.Second)
+	// The upstream Retry-After (74005s) over-states the block and is capped.
+	require.WithinDuration(t, time.Now().Add(openCodeFreeQuotaCooldownMax), *repo.rateLimitedAt, 30*time.Second)
 }

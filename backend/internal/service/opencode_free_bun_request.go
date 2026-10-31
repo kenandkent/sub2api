@@ -76,6 +76,9 @@ func normalizeOpenCodeFreeRequest(body []byte, mapped string) (*openCodeFreeRequ
 	if err != nil {
 		return nil, err
 	}
+	if mode == openCodeFreeModeAgent {
+		stripOpenCodeFreeRejectedTools(v)
+	}
 	toolNames, toolChoice := openCodeFreeCallerTools(v, mode)
 	model, err := json.Marshal(mapped)
 	if err != nil {
@@ -112,6 +115,65 @@ func openCodeFreeInjectedTools(names []string) []string {
 		}
 	}
 	return []string{"read"}
+}
+
+// stripOpenCodeFreeRejectedTools removes the harness bookkeeping tool
+// `session_status` from a declared agent tool set before dispatch. The free
+// upstream is not rate-limiting these requests: live ablation pinned that a
+// declared set containing `session_status` together with other caller tools
+// (for example `gateway`, as OpenClaw's agent toolset does) is answered with
+// the quota-shaped `FreeUsageLimitError` 429, while the byte-identical body
+// succeeds once `session_status` is removed — repeatedly verified on a
+// healthy egress with interleaved baselines. The misleading error would
+// otherwise park the instance against the multi-hour upstream Retry-After
+// even though the egress still holds quota. The dropped tool never reaches
+// the model, so it can never be called; the caller-facing contract
+// (ToolNames, forced tool_choice) is updated in the same step so the SSE
+// validator and the upstream body stay consistent.
+func stripOpenCodeFreeRejectedTools(v map[string]json.RawMessage) {
+	raw, ok := v["tools"]
+	if !ok || string(raw) == "null" {
+		return
+	}
+	var tools []json.RawMessage
+	if json.Unmarshal(raw, &tools) != nil || len(tools) == 0 {
+		return
+	}
+	kept := make([]json.RawMessage, 0, len(tools))
+	found := false
+	for _, tool := range tools {
+		var item map[string]json.RawMessage
+		if json.Unmarshal(tool, &item) == nil {
+			var fn map[string]json.RawMessage
+			if json.Unmarshal(item["function"], &fn) == nil {
+				var name string
+				if json.Unmarshal(fn["name"], &name) == nil && name == "session_status" {
+					found = true
+					continue
+				}
+			}
+		}
+		kept = append(kept, tool)
+	}
+	if !found {
+		return
+	}
+	marshaled, err := json.Marshal(kept)
+	if err != nil {
+		return
+	}
+	v["tools"] = marshaled
+	if rawChoice, ok := v["tool_choice"]; ok {
+		var forced struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}
+		if json.Unmarshal(rawChoice, &forced) == nil && forced.Type == "function" && forced.Function.Name == "session_status" {
+			v["tool_choice"] = json.RawMessage(`"auto"`)
+		}
+	}
 }
 
 // openCodeFreeCallerTools mirrors the adapter: the SSE validator only accepts

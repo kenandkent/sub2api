@@ -89,3 +89,59 @@ func TestOpenCodeFreeRequestAgentMode(t *testing.T) {
 		require.Error(t, err, body)
 	}
 }
+
+func TestOpenCodeFreeRequestStripsSessionStatus(t *testing.T) {
+	toolNames := func(req *openCodeFreeRequest) []string {
+		var got struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		require.NoError(t, json.Unmarshal(req.Body, &got))
+		names := make([]string, 0, len(got.Tools))
+		for _, tool := range got.Tools {
+			names = append(names, tool.Function.Name)
+		}
+		return names
+	}
+
+	// The upstream rejects declared sets that pair `session_status` with other
+	// caller tools, so it is dropped from the dispatched body and from the
+	// caller-facing contract in the same step.
+	body := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read"}},{"type":"function","function":{"name":"gateway"}},{"type":"function","function":{"name":"session_status"}}],"tool_choice":"auto"}`
+	req, err := normalizeOpenCodeFreeRequest([]byte(body), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, openCodeFreeModeAgent, req.Mode)
+	require.Equal(t, []string{"read", "gateway"}, req.ToolNames)
+	require.Equal(t, openCodeFreeToolChoice{Kind: "auto"}, req.ToolChoice)
+	require.Empty(t, req.InjectedTools)
+	require.Equal(t, []string{"read", "gateway"}, toolNames(req))
+
+	// A forced tool_choice that targets the stripped tool falls back to auto
+	// because the declared set no longer contains it.
+	forced := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read"}},{"type":"function","function":{"name":"session_status"}}],"tool_choice":{"type":"function","function":{"name":"session_status"}}}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(forced), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, []string{"read"}, req.ToolNames)
+	require.Equal(t, openCodeFreeToolChoice{Kind: "auto"}, req.ToolChoice)
+	require.Equal(t, []string{"read"}, toolNames(req))
+
+	// Declaring only the stripped tool collapses the set: the caller keeps a
+	// valid agent body with an empty tool list pinned to tool_choice none.
+	only := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"session_status"}}]}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(only), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, openCodeFreeModeAgent, req.Mode)
+	require.Empty(t, req.ToolNames)
+	require.Equal(t, openCodeFreeToolChoice{Kind: "none"}, req.ToolChoice)
+	require.Empty(t, toolNames(req))
+
+	// Tool sets without the stripped tool are dispatched unchanged.
+	unchanged := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read"}},{"type":"function","function":{"name":"gateway"}}]}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(unchanged), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, []string{"read", "gateway"}, req.ToolNames)
+	require.Equal(t, []string{"read", "gateway"}, toolNames(req))
+}

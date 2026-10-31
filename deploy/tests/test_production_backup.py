@@ -152,6 +152,9 @@ print(str(int(now.timestamp())) if args[-1] == '+%s' else now.strftime(args[-1][
 
 
 class LocalToolTests(unittest.TestCase):
+    def setUp(self):
+        (ROOT / '.cache/backup-tests').mkdir(parents=True, exist_ok=True)
+
     def load_tool(self):
         self.assertTrue(TOOL.exists(), 'local backup verifier is required')
         spec = importlib.util.spec_from_file_location('production_backup', TOOL)

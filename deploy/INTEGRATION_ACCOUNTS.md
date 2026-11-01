@@ -32,6 +32,8 @@ API 客户端填写对应环境的 Base URL、该环境 Key，以及模型 `deep
 
 脱敏核验记录保存在本机 `.cache/local-integration-accounts-20261031/verification.json`，包含环境、账号/分组/Key ID、余额、模型列表及充值状态。
 
+2026-11-01 08:57～08:58（Asia/Shanghai）对本地开发 DeepSeek 分组的 21 个实例各执行一次短文本对话：12 个成功、9 个返回上游 429，21 条代理出口全部核对通过。测试前没有额度冷却状态，无需清理；失败实例由服务重新设置冷却。完整实例、代理与结果对照见 [本地开发 DeepSeek 实例可用性](opencode/DEV_DEEPSEEK_AVAILABILITY.md)。该轮未测试生产或完整 Docker 环境，也未验证完整 Agent 工具调用。
+
 不触发推理的开发环境连通性检查：
 
 ```bash

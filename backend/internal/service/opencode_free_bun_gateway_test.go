@@ -135,7 +135,7 @@ func TestOpenCodeFreeQuota429ParksInstanceAndFailsOver(t *testing.T) {
 	require.False(t, IsResponseCommitted(c), "quota failover must not commit the client response")
 	require.Zero(t, w.Body.Len())
 	require.Equal(t, int64(1), cooldownRepo.id)
-	require.WithinDuration(t, time.Now().Add(openCodeFreeQuotaCooldownMax), cooldownRepo.until, 30*time.Second)
+	require.WithinDuration(t, time.Now().Add(12*time.Hour), cooldownRepo.until, 30*time.Second)
 	require.Equal(t, "120", failover.ResponseHeaders.Get("Retry-After"), "client-facing Retry-After must be capped even though the cooldown used the real upstream value")
 	require.Equal(t, 1, repo.unknown)
 }
@@ -185,7 +185,7 @@ func TestOpenCodeFreeQuota429AfterKeepaliveParksAndStreams(t *testing.T) {
 	var failover *UpstreamFailoverError
 	require.NotErrorAs(t, err, &failover)
 	require.Equal(t, int64(1), cooldownRepo.id)
-	require.WithinDuration(t, time.Now().Add(openCodeFreeQuotaCooldownMax), cooldownRepo.until, 30*time.Second)
+	require.WithinDuration(t, time.Now().Add(12*time.Hour), cooldownRepo.until, 30*time.Second)
 	require.Contains(t, w.Body.String(), "data: {\"error\":")
 	require.Contains(t, w.Body.String(), "FreeUsageLimitError")
 	require.Equal(t, 1, repo.unknown)

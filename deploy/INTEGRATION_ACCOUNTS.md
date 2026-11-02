@@ -40,6 +40,19 @@ Base URL 已包含 `/v1`；Chat Completions 相对路径为 `/chat/completions`�
 
 三套数据库、账号余额和消费 Key 互相独立；它们的模型实例使用相同固定上游出口，上游免费模型的限流可能跨环境相互影响。本机 OpenClaw 原有默认配置保持不变，后续调用测试使用项目内隔离配置。
 
+## 本机 DeepSeek Harness 的生产 Mimo 接入
+
+2026-11-02 已在本机 Harness 的持久机器偏好层 `~/.dsh/cordis.patch.yml` 添加 `production-mimo` provider，并设为默认模型来源：
+
+- Base URL：`https://sub2api.vseeu.de/v1`。
+- 模型：`mimo-v2.6-flash-free`；使用生产普通用户 `ai@hostmails.de` 已有的 Mimo 消费 Key（Key ID 6、分组 ID 5）。
+- Key 存入本机 `~/.dsh/.credentials.yaml` 的 native refs，引用名 `SUB2API_PRODUCTION_MIMO_API_KEY`；两个配置文件权限均为 `600`，真实值不写入仓库。
+- 原 `sub2api` provider、各 profile 配置和已有 browser-session 凭据记录保留。正常加载机器偏好层后无需再传本轮临时 patch 或 Key 环境变量。
+
+真实 headless CLI 验证直接读取上述持久配置与凭据，确认选中 `production-mimo / mimo-v2.6-flash-free`；单次请求退出 0、回答 `5`，没有额外标题模型调用或工具调用。验证会话、日志、原配置备份和脱敏 diff 保存在本机 Git 忽略的 `.cache/dsh-prod-mimo-20261102/`。
+
+生产 Mimo 21 实例的本轮 OpenClaw / DeepSeek Harness 测试中，两个客户端均在实例 04、15、16、17、18 成功。其余 16 个实例为上游免费层限额拒绝，最小文本复验也收到同类 429；没有直接取得上游 remaining=0 的证据。本机完整报告在 `.cache/production-mimo-harness-20261102T034407Z/RESULTS.md`。当前调度仅开启上述五个实例，其他十六个手动暂停；手动暂停与自动冷却独立，具体冷却规则见 [兼容性说明](opencode/COMPATIBILITY.md)。
+
 ## 账号与 Key 配置核验（2026-11-01 11:15）
 
 - 三环境普通用户均登录成功，角色为 user；允许分组由原 DeepSeek 组追加为 DeepSeek、Mimo 两组，`restrict_public_groups=true`，无活动订阅。

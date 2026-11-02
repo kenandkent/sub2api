@@ -84,7 +84,7 @@
 
 - `deploy/opencode/worker/worker.ts`：代理非 200 先有界读取错误体（≤64KB），按证据分类——`Retry-After`/`x-request-id` 头或 JSON error envelope（`error` 为含 `message`/`code` 的对象或非空字符串）判定为上游响应并透传真实状态与 `content-type`/`retry-after`/`x-request-id`；无证据、读取失败或体超限仍保守返回 502 `proxy_or_upstream_http_error`。所有失败路径输出单行结构化 JSON 日志（`proxy_upstream_non_200` 含状态/头/分类/脱敏 body 片段/proxy id+generation/request_id/model/耗时，`dispatch_failed` 含异常名与消息，另有 `worker_busy`、`upstream_headers_too_large`）；片段截断 512 字符并抹除 userinfo URL 与 Bearer 令牌。
 - `backend/internal/service/opencode_free_bun_gateway.go`：四类失败补 WARN 日志（worker transport 失败、worker 错误含读回的 `worker_code`、上游非 200 含状态/Retry-After/x-request-id/消息/脱敏片段/是否已写出、错误体不可读与非法 content-type），均带 request_id/account_id/model/耗时；worker 错误的客户端消息追加 `worker_code`。
-- `backend/internal/service/opencode_free_quota.go`：`isOpenCodeFreeQuotaExhausted`（429 且体含 `FreeUsageLimitError` 或 `Free usage limit reached`）；`HandleOpenCodeFreeQuota429` 写 `RateLimitResetAt`——优先 `Retry-After`（夹紧 1 分钟~24 小时），缺省兜底 1 小时——并即时通知调度器 block，账号自动到期恢复。
+- `backend/internal/service/opencode_free_quota.go`：`isOpenCodeFreeQuotaExhausted`（429 且体含 `FreeUsageLimitError` 或 `Free usage limit reached`）；`HandleOpenCodeFreeQuota429` 写 `RateLimitResetAt` 并即时通知调度器 block，账号自动到期恢复。冷却窗口已在后续调整，当前规则见下节。
 - 配额 429 且客户端响应尚未写出时，`forwardOpenCodeFree` 返回 `UpstreamFailoverError` 不写响应，由 handler 的既有候选循环切换到同分组其他实例（failedAccountIDs 与新冷却双重排除，默认预算 10 次切换，预算耗尽按既有映射回 429 并保留 Retry-After、ops 记录上游真实消息）；keepalive 已写出则回退原 SSE 透传。管理端逐实例测试命中同一检测时同样冷却（错误体只做本地分类，不回显）。
 - `backend/internal/service/account_test_service.go` + `account_test_service_opencode_free_bun.go`：后台账号测试在通用协议路由前按 Bun 标记复用与网关一致的规范化、profile、代理派发与 SSE 免费校验，不创建消费者计费请求；`opencode_free_bun_parser.go` 新增 `QuietErrors` 抑制管理端日志噪声。
 
@@ -99,6 +99,14 @@
 另一免费模型 `jev-1.13-free` 使用 System One 结构化接口，官方展示了 Console API key 接入，不能当成第十个通用聊天模型。项目现有 TypeSafe/System One 路由也不等于已支持这一 Console 模型。
 
 本轮不会扩展伪装客户端以绕过免费聊天访问限制。对于经正式授权开放给第三方的模型，可以独立做标准API模型发现、能力声明、请求工具透传、工具结果续接、流式解析与真实usage计费兼容；不能以支付模型替换免费模型却仍声称满足原需求。
+
+## 2026-11-02 更新：免费层限额冷却为 12 小时
+
+`FreeUsageLimitError` 的缺省冷却和最长冷却均为 **12 小时**，最低值仍为 1 分钟。上游提供有效且较短的 `Retry-After` 时采用该值；缺失、空或无效值采用 12 小时，超过 12 小时的值截为 12 小时。标准秒数与 HTTP-date 两种格式均受同一规则约束。此规则用于后续新的限额拒绝，不会仅凭常量变化重写已有数据库截止时间。
+
+原有最小文本复验仍保留：同出口复验也返回免费层限额拒绝时保持冷却；复验恢复时，通过原冷却 generation 的 CAS 提前解除，避免旧探针清掉更新的限制。该复验确认的是上游拒绝是否仍可复现，没有读取官方剩余额度计数器。
+
+`schedulable=false` 是另一项手动调度开关，冷却到期或复验成功均不会自动把它设回 true。生产 Mimo 分组根据本轮两个真实客户端的测试结果，仅保留实例 04、15、16、17、18 可调度，其他 16 个实例手动暂停；账号凭据、代理绑定和额度使用记录保留。
 
 ## 后续完整验收应覆盖
 

@@ -22,9 +22,9 @@ import (
 // each account+cooled pair leaves the scheduler alone while the in-flight
 // request switches to another instance of the same group.
 const (
-	openCodeFreeQuotaCooldownFallback = time.Hour
+	openCodeFreeQuotaCooldownFallback = 12 * time.Hour
 	openCodeFreeQuotaCooldownMin      = time.Minute
-	openCodeFreeQuotaCooldownMax      = time.Hour
+	openCodeFreeQuotaCooldownMax      = 12 * time.Hour
 	openCodeFreeLogSnippetMax         = 512
 )
 

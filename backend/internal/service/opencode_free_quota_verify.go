@@ -18,9 +18,9 @@ import (
 // The upstream free tier rejects an exhausted instance with 429 plus a
 // Retry-After that over-states the real block (observed 2026-10-31: every
 // parked instance served 200 again within hours while the row stayed parked
-// until next-day 08:00). The cooldown cap already bounds the damage to one
-// hour, but a capped hour is still an hour of avoidable capacity loss when the
-// rejection was abnormal rather than a true quota wall. So every quota park
+// until next-day 08:00). The cooldown cap bounds each park to twelve hours,
+// but that window can still cause avoidable capacity loss when the rejection
+// no longer holds. So every quota park
 // schedules exactly one async verify probe: a minimal fresh-session request
 // dispatched through the same worker transport boundary as real traffic.
 //
@@ -29,8 +29,8 @@ import (
 //     cooldown generation captured from the row at probe start is cleared via
 //     an atomic repository CAS and the runtime scheduler block is announced
 //     clear; the instance is immediately selectable again;
-//   - upstream still returns the quota 429 -> the limit is real, the park
-//     stays until its (already capped) reset;
+//   - upstream still returns the quota 429 -> the quota rejection remains
+//     reproducible, so the park stays until its (already capped) reset;
 //   - anything else (transport failure, worker error, unreadable body) ->
 //     inconclusive, the park stays; the cap bounds staleness either way.
 //

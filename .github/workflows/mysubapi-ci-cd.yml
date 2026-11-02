@@ -54,6 +54,11 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+      - name: Check reachable Go dependency vulnerabilities
+        working-directory: backend
+        run: |
+          GOBIN="$GITHUB_WORKSPACE/.cache/security/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          "$GITHUB_WORKSPACE/.cache/security/bin/govulncheck" ./...
 
   backend-integration:
     concurrency:
@@ -95,6 +100,18 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
+      - name: Audit production frontend dependencies
+        working-directory: frontend
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.cache/security"
+          pnpm audit --prod --audit-level=high --json > "$GITHUB_WORKSPACE/.cache/security/pnpm-audit.json" || audit_status=$?
+          if (( ${audit_status:-0} > 1 )); then
+            echo "pnpm audit failed to produce a vulnerability report" >&2
+            exit "$audit_status"
+          fi
+          python3 "$GITHUB_WORKSPACE/tools/check_pnpm_audit_exceptions.py" \
+            --audit "$GITHUB_WORKSPACE/.cache/security/pnpm-audit.json" \
+            --exceptions "$GITHUB_WORKSPACE/.github/audit-exceptions.yml"
       - run: pnpm --dir frontend run lint:check
       - run: pnpm --dir frontend run typecheck
       - name: Run all frontend regression tests

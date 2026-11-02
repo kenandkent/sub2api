@@ -191,8 +191,8 @@ def setup(root, env):
         if not shutil.which(program):
             raise ValueError("Required program is unavailable: " + program)
     major = int(subprocess.check_output(["node", "--version"], env=env, text=True).strip().lstrip("v").split(".")[0])
-    if major < 20:
-        raise ValueError("Node.js 20 or newer is required; Node.js 24 is recommended")
+    if major < 22:
+        raise ValueError("Node.js 22 or newer is required; Node.js 24 is recommended")
 
     def air():
         marker = root / ".cache/dev/air-version"

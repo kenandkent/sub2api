@@ -74,11 +74,14 @@ func newInflightEstimateGateway(t *testing.T, channelService *ChannelService) *G
 	cfg := &config.Config{}
 	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, DefaultMaxTokens: 1000, MaxInputTokens: 200000, MaxOutputTokens: 128000}
 	billing := NewBillingService(cfg, nil)
+	// Match the production constructor: reuse the rate resolver instead of
+	// creating a temporary cache and janitor goroutine on every estimate.
 	return &GatewayService{
-		cfg:            cfg,
-		billingService: billing,
-		resolver:       NewModelPricingResolver(channelService, billing),
-		channelService: channelService,
+		cfg:                   cfg,
+		billingService:        billing,
+		resolver:              NewModelPricingResolver(channelService, billing),
+		channelService:        channelService,
+		userGroupRateResolver: newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(cfg), nil, "service.gateway"),
 	}
 }
 
@@ -459,6 +462,8 @@ func TestInflightEstimate_AccountMappingNoDBAndBoundedMemory(t *testing.T) {
 	}
 	runtime.GC()
 	runtime.ReadMemStats(&after)
+	// Keep the gateway and any caches reachable through it alive for the sample.
+	runtime.KeepAlive(svc)
 	require.Zero(t, repo.dbCalls.Load(), "no direct DB query on the request path")
 	require.Equal(t, int64(n), snap.reads.Load(), "unpriced lookups read the scheduler snapshot only")
 	require.Less(t, int64(after.HeapAlloc)-int64(before.HeapAlloc), int64(8<<20), "no per-model cache growth")

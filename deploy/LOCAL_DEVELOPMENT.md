@@ -8,7 +8,7 @@
 
 ## 启动与停止
 
-本机需要 Python 3.9+、Go 1.21+（用于下载项目要求的工具链）、Node.js 20+（建议 24）、Corepack 和正在运行的 Docker Desktop/Engine。脚本不会安装或替换全局工具。
+本机需要 Python 3.9+、Go 1.21+（用于下载项目要求的工具链）、Node.js 22+（建议 24，Vue I18n 11 的最低要求为 22）、Corepack 和正在运行的 Docker Desktop/Engine。脚本不会安装或替换全局工具。
 
 在项目根目录执行：
 
@@ -73,6 +73,8 @@ python3 -B deploy/local_runtime.py report --json
 ```
 
 重建会短暂中断本机完整镜像服务；它保留数据库/Redis 命名卷和私有配置，不管理原生 Air/Vite 或独立 Bun worker。重建前会核验应用、PostgreSQL、Redis 的项目归属和数据挂载；其他项目或 bind mount 配置不能使用这个入口。运行前准备已有 `deploy/.env` 和依赖服务；需要延长构建后的健康等待时使用 `python3 -B deploy/local_runtime.py rebuild --timeout 600`。远程 Docker daemon 不能用于此重建入口。
+
+完整 Compose 的 Redis 镜像可通过私有 `deploy/.env` 的 `REDIS_IMAGE` 固定版本或摘要；未设置或空值仍使用 `redis:8-alpine`。与生产对齐时采用 `docker-compose.production.yml` 已核验的 `redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537`，该索引同时包含 amd64 和 arm64。依赖升级应先备份并单独重建对应服务、保留命名卷；应用/worker 重建入口本身不升级依赖或管理原生开发依赖项目。
 
 报告同时显示当前提交、源码是否有未提交修改、源码指纹、运行容器的镜像 ID/仓库摘要与构建标签。未提交源码构建的版本会带 `-dirty.<指纹前12位>`，不能当作干净提交发布。应用和 worker 必须来自同一源码身份；只有 `/health` 返回成功不能证明运行的是当前代码。私有配置、数据和缓存不属于源码指纹；原生开发进程只报告存在状态，不宣称具备发布身份。
 

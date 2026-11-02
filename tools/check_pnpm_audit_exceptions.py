@@ -111,6 +111,44 @@ def iter_vulns(data: dict):
                 yield name, severity, advisory_id, title
 
 
+def validated_vulns(data: dict) -> list:
+    # Reject registry errors and malformed reports before interpreting an empty
+    # result as a clean audit. Explicit empty collections are valid clean reports.
+    if not isinstance(data, dict) or "error" in data:
+        raise ValueError("expected an audit report without a registry error")
+    fields = [field for field in ("advisories", "vulnerabilities") if field in data]
+    if not fields:
+        raise ValueError("missing advisories or vulnerabilities collection")
+    rows = []
+    for field in fields:
+        collection = data[field]
+        if not isinstance(collection, dict):
+            raise ValueError("audit collections must be objects")
+        for key, entry in collection.items():
+            if not isinstance(entry, dict):
+                raise ValueError("audit entries must be objects")
+            try:
+                entries = list(iter_vulns({field: {key: entry}}))
+            except (AttributeError, TypeError, IndexError, KeyError):
+                raise ValueError("invalid vulnerability entry") from None
+            if not entries:
+                raise ValueError("vulnerability entry has no advisory information")
+            if field == "vulnerabilities" and isinstance(entry.get("via"), list):
+                if len(entries) != len(entry["via"]):
+                    raise ValueError("invalid vulnerability advisory information")
+            for name, severity, advisory_id, _ in entries:
+                if (not isinstance(name, str) or not name.strip()
+                        or not isinstance(severity, str)
+                        or severity.strip().lower() not in
+                        {"info", "low", "moderate", "high", "critical"}
+                        or isinstance(advisory_id, bool)
+                        or not isinstance(advisory_id, (str, int))
+                        or not str(advisory_id).strip()):
+                    raise ValueError("vulnerability entry lacks a valid package, severity or advisory")
+            rows.extend(entries)
+    return rows
+
+
 def normalize_severity(severity: str) -> str:
     # 统一大小写，避免比较失败。
     return (severity or "").strip().lower()
@@ -145,8 +183,14 @@ def main() -> int:
     parser.add_argument("--exceptions", required=True)
     args = parser.parse_args()
 
-    with open(args.audit, "r", encoding="utf-8") as handle:
-        audit = json.load(handle)
+    try:
+        with open(args.audit, "r", encoding="utf-8") as handle:
+            audit = json.load(handle)
+        vulnerabilities = validated_vulns(audit)
+    except (OSError, UnicodeError, ValueError) as error:
+        message = "malformed JSON" if isinstance(error, json.JSONDecodeError) else str(error)
+        sys.stderr.write(f"Invalid pnpm audit input: {message}\n")
+        return 1
 
     # 读取异常清单并建立索引，便于快速匹配包名 + advisory。
     exceptions = parse_exceptions(args.exceptions)
@@ -190,7 +234,7 @@ def main() -> int:
 
     # 去重处理：同一包名 + advisory 可能在不同字段重复出现。
     seen = set()
-    for name, severity, advisory_id, title in iter_vulns(audit):
+    for name, severity, advisory_id, title in vulnerabilities:
         sev = normalize_severity(severity)
         if sev not in HIGH_SEVERITIES or not name:
             continue

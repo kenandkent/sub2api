@@ -15,6 +15,25 @@
 
 GitHub 的手动运行入口要求工作流也已存在于默认分支；仅把文件放在 `mysubapi` 不保证出现 Run workflow 按钮。向 `mysubapi` 推送仍是本流程的正常触发方式。
 
+本项目当前只在 `mysubapi` 维护和发布本流程；`main` 已由维护者回退，不依赖修改默认分支恢复手动入口。`push` 触发本身不要求默认分支包含工作流。发布必须确认完整 SHA 的运行和生产身份，不能把推送成功当成部署成功。
+
+## 推送后的触发确认
+
+```bash
+git push origin mysubapi
+python3 -B deploy/check-mysubapi-ci.py --timeout 180
+# 等待同一 SHA 的全部检查和部署完成；仍须另行核验生产运行身份
+python3 -B deploy/check-mysubapi-ci.py --completed --timeout 2400 --interval 60
+```
+
+检查器默认读取本地 HEAD，也可用 `--sha <40位完整SHA>` 指定。它只接受 `mysubapi` 分支、该工作流文件以及 `push` / `workflow_dispatch` 事件；旧提交、其他工作流和 PR 运行不能冒充本次触发。默认模式找到 queued/in-progress 运行即可退出 0，这只证明触发；`--completed` 要求工作流结论为 success，最终发布仍以服务器身份核验器为准。
+
+退出码：0 为确认触发（或 completed 模式成功），1 为 completed 模式的失败结论，2 为等待后没有运行或仍未完成，3 为 GitHub API 读取失败。API 错误不会被当作“没有触发”。公开仓库可匿名查询；已有 `GH_TOKEN` / `GITHUB_TOKEN` 可提高查询额度，脚本不会打印或保存令牌。
+
+2026-11-02 排查时，`dfdfe2522`、`4ca561fd3`、`ffd29e836`、`ef15032e3` 已推送但没有运行；分支过滤、跳过标记、SSH 身份、本地 hooks、工作流启用状态及仓库 Actions 策略未发现能解释跳过的变更。此前事件未创建运行的内部原因没有平台侧日志证明，不将其猜测为 YAML、权限或令牌故障。本次更新工作流定义后，应以新 SHA 的实际 push 运行验证恢复情况；没有运行时必须继续排查，不能重跑旧版本冒充发布。
+
+后端单元测试 job 同时执行固定版本 `govulncheck v1.9.0`，检查可达的 Go 依赖漏洞；前端 job 执行生产依赖 audit，并沿用仓库的 high/critical 阈值及现有、有到期时间的例外清单。无效或错误的 audit JSON 会阻断检查，不能被当成零漏洞。两项均属于生产部署的必需检查。
+
 ## GitHub 需要配置什么
 
 你已在 Repository secrets 添加 **`SSH_PRIVATE_KEY`**，工作流直接使用该名称，也兼容旧的 `DEPLOY_SSH_KEY`。私钥须可无交互使用，并获准登录目标服务器。无需把私钥提交到代码或再创建同内容 Secret。

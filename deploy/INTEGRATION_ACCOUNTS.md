@@ -51,7 +51,9 @@ Base URL 已包含 `/v1`；Chat Completions 相对路径为 `/chat/completions`�
 
 真实 headless CLI 验证直接读取上述持久配置与凭据，确认选中 `production-mimo / mimo-v2.6-flash-free`；单次请求退出 0、回答 `5`，没有额外标题模型调用或工具调用。验证会话、日志、原配置备份和脱敏 diff 保存在本机 Git 忽略的 `.cache/dsh-prod-mimo-20261102/`。
 
-生产 Mimo 21 实例的本轮 OpenClaw / DeepSeek Harness 测试中，两个客户端均在实例 04、15、16、17、18 成功。其余 16 个实例为上游免费层限额拒绝，最小文本复验也收到同类 429；没有直接取得上游 remaining=0 的证据。本机完整报告在 `.cache/production-mimo-harness-20261102T034407Z/RESULTS.md`。当前调度仅开启上述五个实例，其他十六个手动暂停；手动暂停与自动冷却独立，具体冷却规则见 [兼容性说明](opencode/COMPATIBILITY.md)。
+生产 Mimo 21 实例的本轮 OpenClaw / DeepSeek Harness 测试中，两个客户端均在实例 04、15、16、17、18 成功。其余 16 个实例为上游免费层限额拒绝，最小文本复验也收到同类 429；没有直接取得上游 remaining=0 的证据。本机完整报告在 `.cache/production-mimo-harness-20261102T034407Z/RESULTS.md`，保留为本轮测试的历史记录。
+
+当前 21 个实例均保持 `schedulable=true`，没有手动暂停；实例 04、15、16、17、18 保持可调度，其余 16 个实例由自动冷却暂时排除。受限实例保留原 `rate_limited_at`，冷却截止时间为该时间加 12 小时，分布在北京时间 **2026-11-03 00:00:29～00:08:20**。到期后由调度器自动恢复调度资格，无需人工启用；生产调度器每 300 秒完整重建一次候选集，因此到期到重新进入候选集可能再等待最多约 5 分钟及重建耗时。恢复调度资格不表示已确认上游免费额度恢复；再次收到限额拒绝时仍按规则冷却。具体规则见 [兼容性说明](opencode/COMPATIBILITY.md)。
 
 ## 账号与 Key 配置核验（2026-11-01 11:15）
 

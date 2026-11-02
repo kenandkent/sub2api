@@ -145,3 +145,89 @@ func TestOpenCodeFreeRequestStripsSessionStatus(t *testing.T) {
 	require.Equal(t, []string{"read", "gateway"}, req.ToolNames)
 	require.Equal(t, []string{"read", "gateway"}, toolNames(req))
 }
+
+func TestOpenCodeFreeRequestAcceptsStoreFlag(t *testing.T) {
+	// DeepSeek Harness (pi-ai) sends OpenAI's eval-store flag alongside
+	// max_completion_tokens and stream_options on plain text turns.
+	harness := `{"model":"alias","messages":[{"role":"system","content":"rules"},{"role":"user","content":"hi"}],"max_completion_tokens":4096,"stream":true,"stream_options":{"include_usage":true},"store":false}`
+	req, err := normalizeOpenCodeFreeRequest([]byte(harness), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, openCodeFreeModeText, req.Mode)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(req.Body, &got))
+	_, present := got["store"]
+	require.False(t, present, "store must be stripped before dispatch")
+	require.Equal(t, float64(4096), got["max_completion_tokens"])
+
+	agent := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read"}}],"store":true}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(agent), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, openCodeFreeModeAgent, req.Mode)
+	require.NoError(t, json.Unmarshal(req.Body, &got))
+	_, present = got["store"]
+	require.False(t, present)
+
+	for _, body := range []string{
+		`{"model":"alias","messages":[{"role":"user","content":"x"}],"store":"yes"}`,
+		`{"model":"alias","messages":[{"role":"user","content":"x"}],"store":1}`,
+		`{"model":"alias","messages":[{"role":"user","content":"x"}],"store":null}`,
+	} {
+		_, err = normalizeOpenCodeFreeRequest([]byte(body), "big-pickle")
+		require.Error(t, err, body)
+	}
+}
+
+func TestOpenCodeFreeRequestStripsSubagentFork(t *testing.T) {
+	// DeepSeek Harness declares `subagent_fork` in its 25-tool agent set;
+	// live ablation pinned that name alone as the FreeUsageLimitError trigger
+	// (`[subagent]` alone succeeds, `[subagent_fork]` alone fails).
+	body := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read"}},{"type":"function","function":{"name":"subagent"}},{"type":"function","function":{"name":"subagent_fork"}}],"tool_choice":"auto"}`
+	req, err := normalizeOpenCodeFreeRequest([]byte(body), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, openCodeFreeModeAgent, req.Mode)
+	require.Equal(t, []string{"read", "subagent"}, req.ToolNames)
+	require.Equal(t, openCodeFreeToolChoice{Kind: "auto"}, req.ToolChoice)
+	var got struct {
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+		ToolChoice any `json:"tool_choice"`
+	}
+	require.NoError(t, json.Unmarshal(req.Body, &got))
+	require.Len(t, got.Tools, 2)
+	require.Equal(t, "read", got.Tools[0].Function.Name)
+	require.Equal(t, "subagent", got.Tools[1].Function.Name)
+
+	forced := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read"}},{"type":"function","function":{"name":"subagent_fork"}}],"tool_choice":{"type":"function","function":{"name":"subagent_fork"}}}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(forced), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, []string{"read"}, req.ToolNames)
+	require.Equal(t, openCodeFreeToolChoice{Kind: "auto"}, req.ToolChoice)
+
+	// Both rejected names in one set are stripped together.
+	both := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"session_status"}},{"type":"function","function":{"name":"subagent_fork"}},{"type":"function","function":{"name":"read"}}]}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(both), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, []string{"read"}, req.ToolNames)
+	require.Empty(t, req.InjectedTools)
+
+	// working_directory poisons the set only together with read_image;
+	// the bookkeeping tool is stripped and the caller capability kept.
+	pair := `{"model":"alias","messages":[{"role":"user","content":"x"}],"tools":[{"type":"function","function":{"name":"read_image"}},{"type":"function","function":{"name":"working_directory"}},{"type":"function","function":{"name":"read"}}]}`
+	req, err = normalizeOpenCodeFreeRequest([]byte(pair), "big-pickle")
+	require.NoError(t, err)
+	require.Equal(t, []string{"read_image", "read"}, req.ToolNames)
+	var gotPair struct {
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+	}
+	require.NoError(t, json.Unmarshal(req.Body, &gotPair))
+	require.Len(t, gotPair.Tools, 2)
+	require.Equal(t, "read_image", gotPair.Tools[0].Function.Name)
+	require.Equal(t, "read", gotPair.Tools[1].Function.Name)
+}

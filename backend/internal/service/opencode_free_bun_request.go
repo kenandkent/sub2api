@@ -58,6 +58,16 @@ func normalizeOpenCodeFreeRequest(body []byte, mapped string) (*openCodeFreeRequ
 	if json.Unmarshal(body, &v) != nil || v == nil {
 		return nil, errors.New("invalid chat body")
 	}
+	// OpenAI's eval-store flag (`store`) is semantically inert for inference
+	// and is sent by third-party harnesses such as DeepSeek Harness. Accept a
+	// boolean value and drop the key before mode validation so the pinned
+	// upstream contract stays byte-clean.
+	if raw, ok := v["store"]; ok {
+		if _, err := openCodeFreeBool(raw); err != nil {
+			return nil, errors.New("unsupported store")
+		}
+		delete(v, "store")
+	}
 	if err := validateOpenCodeFreeToolParameters(v); err != nil {
 		return nil, err
 	}
@@ -117,19 +127,35 @@ func openCodeFreeInjectedTools(names []string) []string {
 	return []string{"read"}
 }
 
-// stripOpenCodeFreeRejectedTools removes the harness bookkeeping tool
-// `session_status` from a declared agent tool set before dispatch. The free
-// upstream is not rate-limiting these requests: live ablation pinned that a
-// declared set containing `session_status` together with other caller tools
-// (for example `gateway`, as OpenClaw's agent toolset does) is answered with
-// the quota-shaped `FreeUsageLimitError` 429, while the byte-identical body
-// succeeds once `session_status` is removed — repeatedly verified on a
-// healthy egress with interleaved baselines. The misleading error would
-// otherwise park the instance against the multi-hour upstream Retry-After
-// even though the egress still holds quota. The dropped tool never reaches
-// the model, so it can never be called; the caller-facing contract
-// (ToolNames, forced tool_choice) is updated in the same step so the SSE
-// validator and the upstream body stay consistent.
+// openCodeFreeRejectedToolNames lists caller tool names the free upstream
+// treats as a free-tier fingerprint and answers with the quota-shaped
+// `FreeUsageLimitError` 429 even though the egress still holds quota. Live
+// ablation on a pinned healthy egress with interleaved `[read]` baselines
+// pinned each entry independently:
+//   - `session_status`: OpenClaw's agent toolset failed only while it
+//     declared this alongside other caller tools (for example `gateway`);
+//     the byte-identical body minus the tool succeeded 4×.
+//   - `subagent_fork`: DeepSeek Harness's bookkeeping tool failed even as
+//     the only declared tool (`[subagent]` alone succeeded).
+//   - `working_directory`: poisons only in combination with `read_image`
+//     (each alone is answered 200; declaring both fails). It is stripped
+//     rather than `read_image` because it is harness bookkeeping while
+//     `read_image` is a real caller capability.
+//
+// The DeepSeek Harness 25-tool set dispatches 200 once `subagent_fork` and
+// `working_directory` are removed. The dropped tools never reach the model,
+// so they can never be called; the caller-facing contract (ToolNames, forced
+// tool_choice) is updated in the same step so the SSE validator and the
+// upstream body stay consistent. Without the strip the misleading error
+// parks the instance against the multi-hour upstream Retry-After.
+var openCodeFreeRejectedToolNames = map[string]bool{
+	"session_status":    true,
+	"subagent_fork":     true,
+	"working_directory": true,
+}
+
+// stripOpenCodeFreeRejectedTools removes upstream-rejected harness
+// bookkeeping tools from a declared agent tool set before dispatch.
 func stripOpenCodeFreeRejectedTools(v map[string]json.RawMessage) {
 	raw, ok := v["tools"]
 	if !ok || string(raw) == "null" {
@@ -147,7 +173,7 @@ func stripOpenCodeFreeRejectedTools(v map[string]json.RawMessage) {
 			var fn map[string]json.RawMessage
 			if json.Unmarshal(item["function"], &fn) == nil {
 				var name string
-				if json.Unmarshal(fn["name"], &name) == nil && name == "session_status" {
+				if json.Unmarshal(fn["name"], &name) == nil && openCodeFreeRejectedToolNames[name] {
 					found = true
 					continue
 				}
@@ -170,7 +196,7 @@ func stripOpenCodeFreeRejectedTools(v map[string]json.RawMessage) {
 				Name string `json:"name"`
 			} `json:"function"`
 		}
-		if json.Unmarshal(rawChoice, &forced) == nil && forced.Type == "function" && forced.Function.Name == "session_status" {
+		if json.Unmarshal(rawChoice, &forced) == nil && forced.Type == "function" && openCodeFreeRejectedToolNames[forced.Function.Name] {
 			v["tool_choice"] = json.RawMessage(`"auto"`)
 		}
 	}

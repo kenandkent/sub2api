@@ -1,0 +1,67 @@
+model_list:
+  - model_name: mimo-v2.6-flash-free
+    litellm_params:
+      model: openai/mimo-v2.6-flash-free
+      api_base: os.environ/SUB2API_MIMO_UPSTREAM_BASE
+      api_key: os.environ/SUB2API_PRODUCTION_MIMO_API_KEY
+      timeout: 180
+      max_retries: 0
+      extra_headers:
+        User-Agent: "claude-cli/2.1.316 (external, cli)"
+      drop_params: true
+      additional_drop_params:
+        - user
+        - metadata
+        - thinking
+        - reasoning_effort
+        - top_p
+        - top_k
+        - temperature
+        - n
+        - frequency_penalty
+        - presence_penalty
+        - logprobs
+        - top_logprobs
+        - response_format
+        - output_format
+        - seed
+        - service_tier
+        - store
+        - prediction
+        - modalities
+        - audio
+        - context_management
+        - output_config
+        - safety_identifier
+        - prompt_cache_key
+        - prompt_cache_retention
+        - web_search_options
+        - verbosity
+        - logit_bias
+        - functions
+        - function_call
+        - extra_body
+        - include_server_side_tool_invocations
+    model_info:
+      mode: chat
+      litellm_provider: openai
+      supports_reasoning: false
+      supports_function_calling: true
+      supports_parallel_function_calling: true
+      supports_vision: false
+litellm_settings:
+  use_chat_completions_url_for_anthropic_messages: true
+  route_all_chat_openai_to_responses: false
+  telemetry: false
+  set_verbose: false
+  turn_off_message_logging: true
+  success_callback: []
+  failure_callback: []
+router_settings:
+  num_retries: 0
+general_settings:
+  master_key: os.environ/SUB2API_PRODUCTION_MIMO_API_KEY
+  disable_spend_logs: true
+  disable_error_logs: true
+  background_health_checks: false
+  infer_model_from_keys: false

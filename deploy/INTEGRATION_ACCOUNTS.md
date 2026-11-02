@@ -38,9 +38,9 @@ Base URL 已包含 `/v1`；Chat Completions 相对路径为 `/chat/completions`�
 
 启动方式见 [本地开发环境](LOCAL_DEVELOPMENT.md) 和 [环境与网络参考](ENVIRONMENT_REFERENCE.md)。原生开发需同时运行 Air/Vite 和独立 Bun worker；完整 Docker 测试需运行 Compose worker 及 Mac TCP 中继。
 
-三套数据库、账号余额和消费 Key 互相独立；它们的模型实例使用相同固定上游出口，上游免费模型的限流可能跨环境相互影响。本次没有修改本机 OpenClaw 配置。
+三套数据库、账号余额和消费 Key 互相独立；它们的模型实例使用相同固定上游出口，上游免费模型的限流可能跨环境相互影响。本机 OpenClaw 原有默认配置保持不变，后续调用测试使用项目内隔离配置。
 
-## 本轮验证结果
+## 账号与 Key 配置核验（2026-11-01 11:15）
 
 - 三环境普通用户均登录成功，角色为 user；允许分组由原 DeepSeek 组追加为 DeepSeek、Mimo 两组，`restrict_public_groups=true`，无活动订阅。
 - 六把 Key 均为 active。三把原 DeepSeek Key 的完整值、ID、名称和分组绑定核验一致。
@@ -54,6 +54,8 @@ Base URL 已包含 `/v1`；Chat Completions 相对路径为 `/chat/completions`�
 2026-10-31 初始配置时，开发、测试分别通过官方充值码兑换路径充值 1,000 USD 测试余额，充值记录 ID 均为各自数据库的 `1`、状态 `used`。固定操作码保存在私有文档。生产沿用此前的 1,000 USD 充值记录；消费后余额会变化。旧配置核验记录为 `.cache/local-integration-accounts-20261031/verification.json`。
 
 2026-11-01 08:57～08:58（Asia/Shanghai）对本地开发 DeepSeek 分组的 21 个实例各执行一次短文本对话：12 个成功、9 个返回上游 429，21 条代理出口全部核对通过。测试前没有额度冷却状态，无需清理；失败实例由服务重新设置冷却。完整实例、代理与结果对照见 [本地开发 DeepSeek 实例可用性](opencode/DEV_DEEPSEEK_AVAILABILITY.md)。该历史测试未测试生产或完整 Docker 环境，也未验证 Mimo 或完整 Agent 工具调用。
+
+2026-11-01 21:37～21:44，本地开发 Mimo 21 个实例的 OpenClaw 调用全部返回 429，DeepSeek Harness 为 20 个 429 和 1 个已派发的 worker 502。2026-11-02 08:35～08:36 重新逐实例做最小文本复验，**15、16、17 成功，其余 18 个上游 429**，21 条代理出口全部核对通过。两轮请求形态和时间不同；最小文本成功不代表完整 Agent 已恢复。测试方法、逐实例对照、调用计数、配置恢复和日志证据限制见 [Mimo 客户端测试与最新最小文本复验](opencode/MIMO_HARNESS_VERIFICATION.md)。
 
 ## 不触发推理的连通性检查
 

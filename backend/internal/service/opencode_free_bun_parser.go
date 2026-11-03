@@ -28,7 +28,26 @@ type openCodeFreeSSEOptions struct {
 	InjectedTools []string
 	// QuietErrors keeps upstream frames and parser errors out of admin logs.
 	QuietErrors bool
+	// ExpectedModel optionally verifies an upstream model when a frame declares
+	// one, independently of the client alias used in rewritten output.
+	ExpectedModel string
+	// HoldUntilContent defers every frame write until the stream carries
+	// visible answer content (text or tool calls). While nothing visible has
+	// been seen the response writer stays untouched, so the caller can still
+	// fail over when the upstream answers with reasoning/usage only — the
+	// production 2026-11-03 empty-answer stream that was accepted as a
+	// success. Reasoning deliberately does not release the hold: it is not
+	// the answer. On an already-committed (keepalive) response the same hold
+	// keeps an answer-less stream's terminal frames away, so the caller's
+	// in-band error remains the last thing the client sees. Streams exceeding
+	// the bounded hold buffer fail before any held frames are written.
+	HoldUntilContent bool
 }
+
+// openCodeFreeHoldBackMaxBytes bounds the frames the parser may hold back while
+// waiting for visible content. Exceeding it fails the stream with the writer
+// untouched, preserving failover without buffering unbounded reasoning.
+const openCodeFreeHoldBackMaxBytes = 256 << 10
 
 type openCodeFreeToolCallResult struct {
 	ID       string `json:"id"`
@@ -56,14 +75,15 @@ var (
 )
 
 type openCodeFreeSSEValidator struct {
-	clientModel string
-	model       string
-	names       map[string]struct{}
-	injected    map[string]struct{}
-	forcedName  string
-	forced      bool
-	required    bool
-	none        bool
+	clientModel   string
+	expectedModel string
+	model         string
+	names         map[string]struct{}
+	injected      map[string]struct{}
+	forcedName    string
+	forced        bool
+	required      bool
+	none          bool
 
 	calls          map[int]*openCodeFreeToolCallResult
 	text           string
@@ -91,6 +111,7 @@ func newOpenCodeFreeSSEValidator(clientModel string, opts *openCodeFreeSSEOption
 	}
 	choice := openCodeFreeToolChoice{Kind: "none"}
 	if opts != nil {
+		v.expectedModel = opts.ExpectedModel
 		choice = opts.ToolChoice
 		seen := map[string]struct{}{}
 		for _, name := range opts.ToolNames {
@@ -153,7 +174,7 @@ func (v *openCodeFreeSSEValidator) inspectTools(raw json.RawMessage, calls map[i
 		return errors.New("unexpected tool calls")
 	}
 	var items []json.RawMessage
-	if json.Unmarshal(raw, &items) != nil || len(items) == 0 {
+	if json.Unmarshal(raw, &items) != nil || len(items) == 0 || len(items) > 128 {
 		return errors.New("invalid tool calls")
 	}
 	needsIndex := false
@@ -174,15 +195,16 @@ func (v *openCodeFreeSSEValidator) inspectTools(raw json.RawMessage, calls map[i
 		}
 		for index, item := range items {
 			var call struct {
-				ID       string  `json:"id"`
-				Type     string  `json:"type"`
-				Index    *string `json:"index"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
 				Function struct {
 					Name      string  `json:"name"`
 					Arguments *string `json:"arguments"`
 				} `json:"function"`
 			}
-			if json.Unmarshal(item, &call) != nil || call.Index != nil || call.ID == "" || !openCodeFreeToolCallIDPattern.MatchString(call.ID) || call.Type != "function" || call.Function.Arguments == nil || !openCodeFreeValidToolName(call.Function.Name) {
+			decoder := json.NewDecoder(bytes.NewReader(item))
+			decoder.DisallowUnknownFields()
+			if decoder.Decode(&call) != nil || call.ID == "" || !openCodeFreeToolCallIDPattern.MatchString(call.ID) || call.Type != "function" || call.Function.Arguments == nil || !openCodeFreeValidToolName(call.Function.Name) {
 				return errors.New("invalid tool calls")
 			}
 			if _, ok := v.names[call.Function.Name]; !ok && !v.isInjected(call.Function.Name) {
@@ -191,7 +213,7 @@ func (v *openCodeFreeSSEValidator) inspectTools(raw json.RawMessage, calls map[i
 			if v.forced && !v.isInjected(call.Function.Name) && call.Function.Name != v.forcedName {
 				return errors.New("forced tool mismatch")
 			}
-			if !json.Valid([]byte(*call.Function.Arguments)) {
+			if len(*call.Function.Arguments) > 256*1024 || !json.Valid([]byte(*call.Function.Arguments)) {
 				return errors.New("invalid tool arguments")
 			}
 			entry := &openCodeFreeToolCallResult{ID: call.ID, Type: "function"}
@@ -512,6 +534,12 @@ func (v *openCodeFreeSSEValidator) parse(payload string) (string, bool, error) {
 	}
 	if rawError, ok := top["error"]; ok && string(rawError) != "null" {
 		return "", false, errors.New("upstream error event")
+	}
+	if rawModel, ok := top["model"]; ok && v.expectedModel != "" {
+		model, err := openCodeFreeString(rawModel)
+		if err != nil || model != v.expectedModel {
+			return "", false, errors.New("unexpected upstream model")
+		}
 	}
 	if rawObject, ok := top["object"]; ok && string(rawObject) != "null" {
 		object, err := openCodeFreeString(rawObject)
@@ -860,6 +888,21 @@ func (v *openCodeFreeSSEValidator) finalEvents(out io.Writer) error {
 	return nil
 }
 
+// hasVisibleContent reports whether the stream carries client-visible answer
+// content: assistant text or tool calls. Reasoning and usage are excluded on
+// purpose — a stream that only produces them is an empty answer, not a
+// completion, and must stay failover-able.
+func (v *openCodeFreeSSEValidator) hasVisibleContent() bool {
+	return openCodeFreeHasVisibleAnswer(v.text, len(v.calls))
+}
+
+// openCodeFreeHasVisibleAnswer classifies text without changing the original
+// bytes returned to clients. Reasoning and injected placeholder tools do not
+// count; callers pass only validated, client-visible tool calls.
+func openCodeFreeHasVisibleAnswer(text string, toolCalls int) bool {
+	return strings.TrimSpace(text) != "" || toolCalls > 0
+}
+
 func (v *openCodeFreeSSEValidator) result() *openCodeFreeParsed {
 	parsed := &openCodeFreeParsed{
 		ID:            v.id,
@@ -903,11 +946,39 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 	if err != nil {
 		return nil, err
 	}
-	scanner := bufio.NewScanner(io.LimitReader(src, maxResponse+1))
+	limited := &io.LimitedReader{R: src, N: maxResponse + 1}
+	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 4096), maxEvent+1)
+	// ScanLines normally strips CR, which would undercount the raw bytes of
+	// CRLF events. Preserve it until emit normalizes the SSE fields.
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		advance, token, err := bufio.ScanLines(data, atEOF)
+		if advance > 0 {
+			end := advance
+			if data[end-1] == '\n' {
+				end--
+			}
+			token = data[:end]
+		}
+		return advance, token, err
+	})
 	var event bytes.Buffer
-	var total int64
 	var done bool
+	// hold buffers frames until the stream proves it carries visible content.
+	// flushHold releases them in order and turns holding off; while holdOpen is
+	// set the response writer must stay untouched.
+	var hold bytes.Buffer
+	holdOpen := opts != nil && opts.HoldUntilContent && out != nil
+	flushHold := func() error {
+		holdOpen = false
+		if hold.Len() == 0 {
+			return nil
+		}
+		buffered := hold.Bytes()
+		hold.Reset()
+		_, err := out.Write(buffered)
+		return err
+	}
 	emit := func() error {
 		raw := event.String()
 		event.Reset()
@@ -983,7 +1054,25 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 		if frame == "" || out == nil {
 			return nil
 		}
-		if _, err := io.WriteString(out, metadata.String()+"data: "+frame+"\n\n"); err != nil {
+		chunk := metadata.String() + "data: " + frame + "\n\n"
+		if holdOpen {
+			// Buffer non-visible frames (role, reasoning, ...) so an empty
+			// answer never commits the response. The frame that proves visible
+			// content is written after the buffer, preserving order.
+			// Tool calls stay private until valid EOF, so fragments (including
+			// injected-only calls) cannot release the response hold here.
+			if !openCodeFreeHasVisibleAnswer(validator.text, 0) {
+				if hold.Len()+len(chunk) > openCodeFreeHoldBackMaxBytes {
+					return errors.New("content hold limit exceeded")
+				}
+				_, _ = hold.WriteString(chunk)
+				return nil
+			}
+			if err := flushHold(); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(out, chunk); err != nil {
 			return err
 		}
 		if f, ok := out.(interface{ Flush() }); ok {
@@ -993,10 +1082,6 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
-		total += int64(len(line) + 1)
-		if total > maxResponse {
-			return nil, errors.New("response limit exceeded")
-		}
 		if line == "" || line == "\r" {
 			if err := emit(); err != nil {
 				return nil, err
@@ -1012,13 +1097,31 @@ func parseOpenCodeFreeSSE(ctx context.Context, src io.Reader, out io.Writer, max
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	// Reaching the extra byte means this was a synthetic EOF from the limit,
+	// even if it happened to fall on a complete [DONE] event boundary.
+	if limited.N == 0 {
+		return nil, errors.New("response limit exceeded")
+	}
 	if event.Len() != 0 {
 		return nil, errors.New("truncated event")
 	}
 	if !done || !validator.finished || !validator.haveUsage || validator.billingResult != "free" || ctx.Err() != nil {
 		return nil, errors.New("incomplete stream")
 	}
+	// A stream with no visible content (reasoning/usage only) is an empty
+	// answer. Under hold semantics its terminal frames are dropped and the
+	// held frames never reach the writer, so the caller can still fail over;
+	// once the writer is committed the caller appends an in-band error instead
+	// of a [DONE] that would hide it.
 	if out != nil {
+		if opts != nil && opts.HoldUntilContent {
+			if !validator.hasVisibleContent() {
+				return validator.result(), nil
+			}
+			if err := flushHold(); err != nil {
+				return nil, err
+			}
+		}
 		if err := validator.finalEvents(out); err != nil {
 			return nil, err
 		}

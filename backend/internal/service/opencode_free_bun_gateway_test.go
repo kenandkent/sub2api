@@ -69,7 +69,7 @@ func (r *freeGatewayRepo) RecoverOpenCodeFreeUsage(context.Context) ([]OpenCodeF
 	return nil, nil
 }
 
-func TestOpenCodeFreeUpstreamStatusDoesNotFailOver(t *testing.T) {
+func TestOpenCodeFreeOrdinary429RetriesBeforeFailover(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer 12345678901234567890123456789012", r.Header.Get("Authorization"))
 		var env freeWorkerEnvelope
@@ -94,12 +94,15 @@ func TestOpenCodeFreeUpstreamStatusDoesNotFailOver(t *testing.T) {
 	require.Nil(t, result)
 	require.Error(t, err)
 	var f *UpstreamFailoverError
-	require.NotErrorAs(t, err, &f)
-	require.Equal(t, 429, w.Code)
-	require.Equal(t, "12", w.Header().Get("Retry-After"))
-	require.Equal(t, `{"error":{"code":"rate_limit","message":"try later"}}`, w.Body.String())
-	require.True(t, IsResponseCommitted(c), "upstream error passthrough must mark the response committed")
-	require.Equal(t, 1, repo.unknown)
+	require.ErrorAs(t, err, &f)
+	require.Equal(t, 429, f.StatusCode)
+	require.Equal(t, "12", f.ResponseHeaders.Get("Retry-After"))
+	require.Equal(t, `{"error":{"code":"rate_limit","message":"try later"}}`, string(f.ResponseBody))
+	require.True(t, f.ShouldRetryNextAccount())
+	require.False(t, f.RetryableOnSameAccount, "the internal same-account retry is already exhausted")
+	require.False(t, c.Writer.Written())
+	require.Empty(t, w.Body.String())
+	require.Equal(t, 2, repo.unknown)
 }
 
 // A free-quota 429 parks the instance — honoring the upstream Retry-After only
@@ -565,4 +568,77 @@ func TestOpenCodeFreeRejectsInadmissibleModelsBeforeDispatch(t *testing.T) {
 		require.Contains(t, w.Body.String(), "unsupported model", model)
 		require.Equal(t, "", repo.profileHash, model)
 	}
+}
+
+func openCodeFreeEmptyAnswerService(t *testing.T) (*OpenAIGatewayService, *freeGatewayRepo, *Account, *httptest.Server) {
+	t.Helper()
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Sub2api-Transport-Result", "upstream")
+		w.Header().Set("X-Sub2api-Dispatched", "true")
+		w.Header().Set("X-Request-Id", "upstream-empty-1")
+		_, _ = w.Write([]byte(openCodeFreeEmptyAnswerFixture()))
+	}))
+	t.Cleanup(worker.Close)
+	repo := &freeGatewayRepo{}
+	svc := &OpenAIGatewayService{usageBillingRepo: repo, cfg: &config.Config{OpenCodeFreeBun: config.OpenCodeFreeBunConfig{Enabled: true, WorkerEndpoint: worker.URL, Token: "12345678901234567890123456789012", RequestTimeoutSeconds: 30, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}}}
+	a := &Account{ID: 1, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{"account_mode": AccountModeZen, "api_key": "public", "opencode_free_transport": "bun", "opencode_free_profile": openCodeFreeProfile}}
+	return svc, repo, a, worker
+}
+
+// A free stream that completes with reasoning/usage only carries no answer.
+// It must not be accepted as a success: the handler has to be able to switch
+// to another instance (production 2026-11-03 accepted inst18's empty answer).
+func TestOpenCodeFreeEmptyAnswerFailsOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc, repo, a, _ := openCodeFreeEmptyAnswerService(t)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"buffered", `{"model":"big-pickle","messages":[{"role":"user","content":"hi"}]}`},
+		{"stream", `{"model":"big-pickle","messages":[{"role":"user","content":"hi"}],"stream":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unknownBefore := repo.unknown
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			c.Set("api_key", &APIKey{ID: 4})
+			result, err := svc.ForwardAsChatCompletions(context.Background(), c, a, []byte(tc.body), "", "")
+			require.Nil(t, result)
+			require.Error(t, err)
+			var failover *UpstreamFailoverError
+			require.ErrorAs(t, err, &failover)
+			require.True(t, failover.ShouldRetryNextAccount())
+			require.Equal(t, http.StatusBadGateway, failover.StatusCode)
+			require.Contains(t, string(failover.ResponseBody), openCodeFreeEmptyAnswerErrorCode)
+			require.Equal(t, "upstream-empty-1", failover.ResponseHeaders.Get("x-request-id"))
+			require.False(t, IsResponseCommitted(c), "an empty answer must leave the response switchable")
+			require.Zero(t, w.Body.Len())
+			require.Equal(t, unknownBefore+1, repo.unknown, "the begun attempt must be released")
+		})
+	}
+}
+
+// Once the queue keepalive has committed the stream, a switch is impossible:
+// the client gets an in-band SSE error instead of an empty success.
+func TestOpenCodeFreeEmptyAnswerAfterKeepaliveStreamsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc, repo, a, _ := openCodeFreeEmptyAnswerService(t)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	c.Set("api_key", &APIKey{ID: 4})
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString(": keepalive\n\n")
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, a, []byte(`{"model":"big-pickle","messages":[{"role":"user","content":"hi"}],"stream":true}`), "", "")
+	require.Nil(t, result)
+	require.Error(t, err)
+	var failover *UpstreamFailoverError
+	require.NotErrorAs(t, err, &failover)
+	require.Contains(t, w.Body.String(), "empty OpenCode free response")
+	require.Contains(t, w.Body.String(), `data: {"error"`)
+	require.NotContains(t, w.Body.String(), "[DONE]")
+	require.Equal(t, 1, repo.unknown)
 }

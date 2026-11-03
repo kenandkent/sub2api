@@ -70,6 +70,9 @@ func openCodeFreeClientRetryAfter(retry string) string {
 
 func freeReject(c *gin.Context, status int, message string) error {
 	if !c.Writer.Written() {
+		// A held streaming attempt may have staged SSE headers without
+		// committing them. A terminal JSON error must replace that MIME.
+		c.Header("Content-Type", "application/json; charset=utf-8")
 		writeChatCompletionsError(c, status, "invalid_request_error", message)
 	} else {
 		b, _ := json.Marshal(gin.H{"error": gin.H{"type": "api_error", "message": message}})
@@ -78,6 +81,56 @@ func freeReject(c *gin.Context, status int, message string) error {
 		MarkResponseCommitted(c)
 	}
 	return errors.New(message)
+}
+
+const (
+	openCodeFreeEmptyAnswerMessage   = "OpenCode free upstream returned an empty completion (no text and no tool calls)"
+	openCodeFreeEmptyAnswerErrorCode = "opencode_free_empty_answer"
+)
+
+// newOpenCodeFreeEmptyAnswerFailoverError treats a complete-but-empty free
+// stream (reasoning/usage only) as an upstream anomaly instead of a success.
+// The caller has verified the response writer is still untouched, so the
+// handler switches to another instance rather than returning an empty answer
+// (production 2026-11-03: inst18/mimo-v2.6-flash-free was accepted).
+func newOpenCodeFreeEmptyAnswerFailoverError(c *gin.Context, account *Account, upstreamRequestID string) *UpstreamFailoverError {
+	accountID := int64(0)
+	accountName := ""
+	platform := PlatformOpenAI
+	if account != nil {
+		accountID = account.ID
+		accountName = account.Name
+		platform = account.Platform
+	}
+	setOpsUpstreamError(c, http.StatusBadGateway, openCodeFreeEmptyAnswerMessage, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		ProxyID:            opsUpstreamProxyID(account),
+		ProxyName:          opsUpstreamProxyName(account),
+		Platform:           platform,
+		AccountID:          accountID,
+		AccountName:        accountName,
+		UpstreamStatusCode: http.StatusBadGateway,
+		UpstreamRequestID:  upstreamRequestID,
+		Kind:               "failover",
+		Message:            openCodeFreeEmptyAnswerMessage,
+	})
+	headers := http.Header{}
+	if id := strings.TrimSpace(upstreamRequestID); id != "" {
+		headers.Set("x-request-id", id)
+	}
+	return &UpstreamFailoverError{
+		StatusCode:      http.StatusBadGateway,
+		ResponseBody:    openCodeFreeEmptyAnswerErrorBody(),
+		ResponseHeaders: headers,
+	}
+}
+
+func openCodeFreeEmptyAnswerErrorBody() []byte {
+	body, err := json.Marshal(gin.H{"error": gin.H{"type": "upstream_error", "code": openCodeFreeEmptyAnswerErrorCode, "message": openCodeFreeEmptyAnswerMessage}})
+	if err != nil {
+		return []byte(`{"error":{"type":"upstream_error","code":"opencode_free_empty_answer","message":"OpenCode free upstream returned an empty completion (no text and no tool calls)"}}`)
+	}
+	return body
 }
 
 // The descending six-byte timestamp follows OpenCode's identifier.ts. A
@@ -101,7 +154,7 @@ func freeSessionID() (string, error) {
 	return formatOpenCodeFreeSession(time.Now().UnixMilli(), entropy), nil
 }
 
-func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.Context, a *Account, body []byte, defaultModel string) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) forwardOpenCodeFreeAttempt(ctx context.Context, c *gin.Context, a *Account, body []byte, defaultModel string) (*OpenAIForwardResult, error) {
 	start := time.Now()
 	cfg, err := openCodeFreeConfig(s.cfg)
 	if err != nil {
@@ -169,7 +222,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 			zap.Duration("elapsed", time.Since(start)),
 			zap.NamedError("context", requestCtx.Err()),
 			zap.Error(err))
-		return nil, freeReject(c, http.StatusBadGateway, "OpenCode free transport failed")
+		return nil, &openCodeFreeRuntimeError{status: http.StatusBadGateway, message: "OpenCode free transport failed"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	source, dispatched := resp.Header.Get("X-Sub2api-Transport-Result"), resp.Header.Get("X-Sub2api-Dispatched")
@@ -194,7 +247,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 		if workerCode != "" {
 			clientMessage += ": " + workerCode
 		}
-		return nil, freeReject(c, http.StatusBadGateway, clientMessage)
+		return nil, &openCodeFreeRuntimeError{status: http.StatusBadGateway, message: clientMessage}
 	}
 	if resp.StatusCode != http.StatusOK {
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 65537))
@@ -209,7 +262,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 				zap.Int("body_bytes", len(data)),
 				zap.Duration("elapsed", time.Since(start)),
 				zap.NamedError("read_error", readErr))
-			return nil, freeReject(c, http.StatusBadGateway, "OpenCode free upstream failed")
+			return nil, &openCodeFreeRuntimeError{status: http.StatusBadGateway, message: "OpenCode free upstream failed"}
 		}
 		upstreamMsg := ExtractUpstreamErrorMessage(data)
 		logger.L().Warn("opencode free: upstream error",
@@ -255,23 +308,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 				return nil, s.newOpenAIAccountFailoverError(a, resp.StatusCode, clientHeaders, data, upstreamMsg, false, false)
 			}
 		}
-		if stream && c.Writer.Written() {
-			// A queue keepalive may already have committed the SSE response.
-			var compact bytes.Buffer
-			if err := json.Compact(&compact, data); err != nil {
-				return nil, freeReject(c, http.StatusBadGateway, "OpenCode free upstream failed")
-			}
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", compact.Bytes())
-			c.Writer.Flush()
-			MarkResponseCommitted(c)
-		} else {
-			if retry := resp.Header.Get("Retry-After"); retry != "" {
-				c.Header("Retry-After", openCodeFreeClientRetryAfter(retry))
-			}
-			c.Data(resp.StatusCode, "application/json", data)
-			MarkResponseCommitted(c)
-		}
-		return nil, errors.New("OpenCode free upstream error")
+		return nil, &openCodeFreeRuntimeError{status: resp.StatusCode, message: "OpenCode free upstream error", headers: resp.Header.Clone(), body: data}
 	}
 	if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		logger.L().Warn("opencode free: invalid upstream content type",
@@ -280,7 +317,7 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 			zap.String("model", model),
 			zap.String("content_type", resp.Header.Get("Content-Type")),
 			zap.Duration("elapsed", time.Since(start)))
-		return nil, freeReject(c, http.StatusBadGateway, "invalid upstream content type")
+		return nil, &openCodeFreeRuntimeError{status: http.StatusBadGateway, message: "invalid upstream content type"}
 	}
 	var out io.Writer
 	if stream {
@@ -288,7 +325,14 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 		c.Header("Cache-Control", "no-cache")
 		out = c.Writer
 	}
-	parsed, err := parseOpenCodeFreeSSE(requestCtx, resp.Body, out, cfg.MaxResponseBytes, cfg.MaxEventBytes, displayModel, &openCodeFreeSSEOptions{ToolNames: reqNorm.ToolNames, ToolChoice: reqNorm.ToolChoice, InjectedTools: reqNorm.InjectedTools})
+	opts := &openCodeFreeSSEOptions{ToolNames: reqNorm.ToolNames, ToolChoice: reqNorm.ToolChoice, InjectedTools: reqNorm.InjectedTools}
+	// Hold frames back until the answer proves visible. While the response is
+	// untouched that keeps an empty answer from committing the writer so the
+	// handler can switch instance; once a keepalive has committed it, the same
+	// hold keeps terminal frames ([DONE]) out of an answer-less stream so the
+	// in-band error below is still what the client sees.
+	opts.HoldUntilContent = stream
+	parsed, err := parseOpenCodeFreeSSE(requestCtx, resp.Body, out, cfg.MaxResponseBytes, cfg.MaxEventBytes, displayModel, opts)
 	if err != nil || requestCtx.Err() != nil || parsed.BillingSource != "free" {
 		logger.L().Warn("opencode free: incomplete upstream stream",
 			zap.String("request_id", meta.RequestID),
@@ -303,7 +347,26 @@ func (s *OpenAIGatewayService) forwardOpenCodeFree(ctx context.Context, c *gin.C
 			zap.NamedError("context", requestCtx.Err()),
 			zap.Error(err),
 		)
-		return nil, freeReject(c, http.StatusBadGateway, "incomplete OpenCode free response")
+		return nil, &openCodeFreeRuntimeError{status: http.StatusBadGateway, message: "incomplete OpenCode free response"}
+	}
+	// P0-1: a stream that carries no visible answer (reasoning/usage only) is
+	// an empty answer, not a completion. While nothing reached the client the
+	// handler switches to another instance; once committed the client gets an
+	// in-band error instead of a silently empty success.
+	if !openCodeFreeHasVisibleAnswer(parsed.Text, len(parsed.ToolCalls)) {
+		logger.L().Warn("opencode free: empty answer",
+			zap.String("request_id", meta.RequestID),
+			zap.Int64("account_id", a.ID),
+			zap.String("model", model),
+			zap.String("display_model", displayModel),
+			zap.Bool("stream", stream),
+			zap.Bool("response_committed", c.Writer.Written()),
+			zap.Duration("elapsed", time.Since(start)),
+		)
+		if !c.Writer.Written() {
+			return nil, newOpenCodeFreeEmptyAnswerFailoverError(c, a, resp.Header.Get("X-Request-Id"))
+		}
+		return nil, freeReject(c, http.StatusBadGateway, "empty OpenCode free response")
 	}
 	meta.RawUsage = freeSafeUsage(parsed)
 	meta.BillingSource = parsed.BillingSource

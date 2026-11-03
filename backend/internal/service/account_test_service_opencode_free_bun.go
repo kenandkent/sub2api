@@ -83,10 +83,18 @@ func (s *AccountTestService) testOpenCodeFreeBunConnection(c *gin.Context, accou
 			cooldownCtx, cooldownCancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 5*time.Second)
 			if s.openaiGatewayService != nil && s.openaiGatewayService.rateLimitService != nil {
 				s.openaiGatewayService.rateLimitService.HandleOpenCodeFreeQuota429(cooldownCtx, account, resp.Header)
+				// Mirror the gateway: an admin-parked instance must schedule the
+				// async verify run as well. Without it the diagnostic path parked
+				// with no probe at all (production 2026-11-03: 32 cooldown logs,
+				// zero verify logs), so every instance sat out the full capped
+				// window even when upstream recovered within hours. Fire-and-
+				// forget: the run owns its own context and never blocks here.
+				cooldownCancel()
+				s.openaiGatewayService.rateLimitService.ScheduleOpenCodeFreeQuotaVerify(account, mapped, cfg)
 			} else {
 				applyOpenCodeFreeQuotaCooldown(cooldownCtx, s.accountRepo, account, resp.Header, nil)
+				cooldownCancel()
 			}
-			cooldownCancel()
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("OpenCode free upstream failed (HTTP %d, %s)", resp.StatusCode, identity))
 	}
@@ -96,6 +104,13 @@ func (s *AccountTestService) testOpenCodeFreeBunConnection(c *gin.Context, accou
 	parsed, err := parseOpenCodeFreeSSE(ctx, resp.Body, nil, cfg.MaxResponseBytes, cfg.MaxEventBytes, mapped, &openCodeFreeSSEOptions{ToolNames: normalized.ToolNames, ToolChoice: normalized.ToolChoice, InjectedTools: normalized.InjectedTools, QuietErrors: true})
 	if err != nil || ctx.Err() != nil || parsed.BillingSource != "free" {
 		return s.sendErrorAndEnd(c, "incomplete OpenCode free response ("+identity+")")
+	}
+	// A whitespace/reasoning/usage-only stream carries no answer. Reporting it as
+	// test_complete{success:true} would clear the scheduling block of an
+	// instance that produced nothing (production 2026-11-03), so the
+	// diagnostic fails instead.
+	if !openCodeFreeHasVisibleAnswer(parsed.Text, len(parsed.ToolCalls)) {
+		return s.sendErrorAndEnd(c, "empty OpenCode free response ("+identity+")")
 	}
 	if parsed.Text != "" {
 		s.sendEvent(c, TestEvent{Type: "content", Text: redactOpenCodeFreeTestContent(parsed.Text, cfg.Token, account.Proxy)})

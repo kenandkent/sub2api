@@ -397,3 +397,52 @@ func TestAdminOpenCodeFreeQuotaExhaustionParksInstance(t *testing.T) {
 	// The upstream Retry-After (74005s) over-states the block and is capped.
 	require.WithinDuration(t, time.Now().Add(openCodeFreeQuotaCooldownMax), *repo.rateLimitedAt, 30*time.Second)
 }
+
+// A reasoning-only stream is not an answer: the diagnostic must fail instead of
+// reporting test_complete{success:true}, which would clear the scheduling block
+// of an instance that produced nothing (production 2026-11-03).
+func TestAdminOpenCodeFreeEmptyAnswerReportsError(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Sub2api-Transport-Result", "upstream")
+		w.Header().Set("X-Sub2api-Dispatched", "true")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(openCodeFreeEmptyAnswerFixture()))
+	}))
+	defer worker.Close()
+	account := adminFreeAccount()
+	svc, upstream := adminFreeService(account, worker.URL)
+	c, recorder := newTestContext()
+	err := svc.TestAccountConnection(c, account.ID, "big-pickle", "hi", AccountTestModeDefault)
+	require.Error(t, err)
+	require.Empty(t, upstream.requests)
+	body := recorder.Body.String()
+	require.Contains(t, body, `"type":"error"`)
+	require.Contains(t, body, "empty OpenCode free response")
+	require.NotContains(t, body, `"type":"test_complete"`)
+	require.NotContains(t, body, "Simple question")
+}
+
+// Whitespace is not an answer, including Unicode space emitted in a valid
+// free-billing stream. The diagnostic must not emit content before rejecting it.
+func TestAdminOpenCodeFreeWhitespaceAnswerReportsError(t *testing.T) {
+	for _, content := range []string{" \\t\\r\\n", "\\u00a0\\u2003"} {
+		t.Run(content, func(t *testing.T) {
+			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Sub2api-Transport-Result", "upstream")
+				w.Header().Set("X-Sub2api-Dispatched", "true")
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(strings.Replace(adminFreeGoodStream, `"content":"hello"`, `"content":"`+content+`"`, 1)))
+			}))
+			defer worker.Close()
+			account := adminFreeAccount()
+			svc, _ := adminFreeService(account, worker.URL)
+			c, recorder := newTestContext()
+			require.Error(t, svc.TestAccountConnection(c, account.ID, "big-pickle", "hi", AccountTestModeDefault))
+			body := recorder.Body.String()
+			require.Contains(t, body, `"type":"error"`)
+			require.Contains(t, body, "empty OpenCode free response")
+			require.NotContains(t, body, `"type":"content"`)
+			require.NotContains(t, body, `"type":"test_complete"`)
+		})
+	}
+}

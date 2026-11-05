@@ -1,157 +1,243 @@
-# 生产 Mimo / DeepSeek 42 实例对话测试
+# 清冷却 / 异常状态后重测：Mimo / DeepSeek 合并报告
 
-本轮时间：**2026-11-04 12:26:43 至 2026-11-04 12:29:56（北京时间）**。普通用户入口补充验证及状态采集完成于 2026-11-04 12:30:20。
+**最新结论对应清状态后的 32 次固定实例重测**：2026-11-05 16:20:10 完成首批清除回读；重测结束于 2026-11-05 16:22:18，最终状态采集于 2026-11-05 16:22:21（北京时间）。
 
-生产地址：`https://sub2api.vseeu.de`。普通账号：`ai@hostmails.de`（user ID 3）。测试时 app / worker 均运行提交 `5bfc628550578bbb5a8442c212e984507b8170c8`，四项生产服务健康。
+| 模型 | 清状态后重测 | 成功 | 再次免费额度 429 | 其他失败 | 重测成功实例 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `mimo-v2.6-flash-free` | 16 | 0 | 16 | 0 | 无 |
+| `deepseek-v4.1-flash-free` | 16 | 0 | 16 | 0 | 无 |
 
-## 结果概览
+**32 个实例在生产环境清除冷却 / 异常状态并确认干净后，重测仍全部收到真实上游免费额度 429。** 这次失败不能仅用本地遗留冷却来解释：本轮实际请求已再次到达上游并被其免费策略拒绝。该结论不表示永久不可用。
 
-| 模型分组 | 分组 / Key ID | 总数 | 成功 | 免费额度 429 | 其他失败 | 成功实例 |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| `mimo-v2.6-flash-free` | 5 / 6 | 21 | 3 | 16 | 2 | 04、15、16 |
-| `deepseek-v4.1-flash-free` | 3 / 5 | 21 | 3 | 16 | 2 | 04、15、16 |
+本轮用户明确授权把刚才确认免费额度限制的 32 个实例清除冷却 / 异常状态后重测。执行的是 `recover-state` 运行状态恢复及文件中记录的必要残留状态清除；这次确实包含人工恢复动作。它不是 `reset-quota`，没有用此动作重置 usage 计数或手动切换 schedulable。
 
-每个固定实例均单独新会话、沿用绑定代理、发起一次真实文本调用，不人工重试、不换实例兜底。成功必须同时满足：诊断流完成、`test_complete.success=true`、实际可见回答为 `5`、没有 error 事件。后台外层 HTTP 200 不作为模型调用成功依据。
+32 个实例首批清除后均回读为 active、schedulable=true 且运行时阻断字段为空；每次重测前也分别回读验证干净。执行器记录人工恢复 / 清理请求 **32** 次，其中重测前因运行状态重新出现而再次 recover-state **0** 次。每个实例只进行一次固定账号模型重测；没有在重测后为达成‘清状态’再次清除。
 
-提示词：`What is 2 + 3? Reply with only the number 5.`
+首次已经成功的 10 个实例没有被人工恢复，也没有在第二轮重测。下文保留其首次结果与时间，不能把跨两个时间窗的最近观察拼成一次新的 42 实例全量健康测试。本轮没有新增消费者入口或费用测试。
 
-## 逐实例结果
+本站运行状态清除不能重置上游免费限制。若重测再次遇到已证实免费额度 429，程序会自动重新进入冷却，规则为默认及上限 12 小时（最短 1 分钟，合法较短 Retry-After 按实现保留）；最终状态按真实调用后快照保留。
 
-同编号的两个模型实例绑定同一代理。代理列为生产配置中的节点名称，未另测出口公网 IP。耗时为本次 HTTP 请求读取完整诊断 SSE 的时间。
+## 21 组：首次结果与清状态后重测对比
 
-| 实例 | 代理 ID / 节点 | Mimo 账号 | Mimo 结果 / 耗时 | DeepSeek 账号 | DeepSeek 结果 / 耗时 |
-| --- | --- | ---: | --- | ---: | --- |
-| 01 | 1 / HTTP23 / 01 / US23-Hy2-out4 | 6 | 429，免费额度限制 / 1.442s | 2 | 429，免费额度限制 / 1.409s |
-| 02 | 2 / HTTP23 / 02 / US23-Hy2-out6 | 7 | 429，免费额度限制 / 0.842s | 3 | 429，免费额度限制 / 0.788s |
-| 03 | 3 / HTTP23 / 03 / US-RackNerd-out4 | 48 | 429，免费额度限制 / 0.835s | 10 | 429，免费额度限制 / 0.782s |
-| 04 | 4 / HTTP23 / 04 / KR-Seoul-out4 | 49 | 成功，回复 `5` / 3.117s | 11 | 成功，回复 `5` / 2.242s |
-| 05 | 5 / HTTP23 / 05 / KR-Seoul-out6 | 50 | 429，免费额度限制 / 1.378s | 12 | 429，免费额度限制 / 1.411s |
-| 06 | 6 / HTTP23 / 06 / NL-Amsterdam-out4 | 51 | 429，免费额度限制 / 1.246s | 13 | 429，免费额度限制 / 1.757s |
-| 07 | 7 / HTTP23 / 07 / DE-nc1-out4 | 52 | 429，免费额度限制 / 1.267s | 14 | 429，免费额度限制 / 1.283s |
-| 08 | 8 / HTTP23 / 08 / DE-nc1-out6 | 53 | 429，免费额度限制 / 1.595s | 15 | 429，免费额度限制 / 1.263s |
-| 09 | 9 / HTTP23 / 09 / DE-nc2-out4 | 54 | 429，免费额度限制 / 1.517s | 16 | 429，免费额度限制 / 1.204s |
-| 10 | 10 / HTTP23 / 10 / DE-nc2-out6 | 55 | 429，免费额度限制 / 1.635s | 17 | 429，免费额度限制 / 1.276s |
-| 11 | 11 / HTTP23 / 11 / DE-nc3-out4 | 56 | 429，免费额度限制 / 1.492s | 18 | 429，免费额度限制 / 1.266s |
-| 12 | 12 / HTTP23 / 12 / DE-nc3-out6 | 57 | 429，免费额度限制 / 1.342s | 19 | 429，免费额度限制 / 1.574s |
-| 13 | 13 / HTTP23 / 13 / DE-nc4-out4 | 58 | 429，免费额度限制 / 1.308s | 20 | 429，免费额度限制 / 1.298s |
-| 14 | 14 / HTTP23 / 14 / DE-nc4-out6 | 59 | 429，免费额度限制 / 1.904s | 21 | 429，免费额度限制 / 2.170s |
-| 15 | 15 / HTTP23 / 15 / UK-London1-out4 | 60 | 成功，回复 `5` / 2.551s | 22 | 成功，回复 `5` / 2.124s |
-| 16 | 16 / HTTP23 / 16 / UK-London2-out4 | 61 | 成功，回复 `5` / 3.691s | 23 | 成功，回复 `5` / 7.242s |
-| 17 | 17 / HTTP23 / 17 / HK-out4 | 62 | worker 502，socket 连接异常 / 5.440s | 24 | worker 502，socket 连接异常 / 5.495s |
-| 18 | 18 / HTTP23 / 18 / HK-out6 | 63 | worker 502，socket 连接异常 / 5.441s | 25 | worker 502，socket 连接异常 / 5.483s |
-| 19 | 19 / HTTP23 / 19 / CN-Aliyun-out4 | 64 | 429，免费额度限制 / 1.842s | 26 | 429，免费额度限制 / 1.937s |
-| 20 | 20 / HTTP23 / 20 / CN-Tencent1-out4 | 65 | 429，免费额度限制 / 1.797s | 27 | 429，免费额度限制 / 2.423s |
-| 21 | 21 / HTTP23 / 21 / CN-Tencent2-out4 | 66 | 429，免费额度限制 / 5.085s | 28 | 429，免费额度限制 / 2.107s |
+首次 42 次诊断：2026-11-05 16:00:59 至 2026-11-05 16:04:09；第二轮只覆盖首次失败的 32 个实例。提示词均为 `What is 2 + 3? Reply with only the number 5.`。
 
-## 错误原因与证据
+耗时为读取完整诊断响应所需时间；账号 / 代理绑定来自生产快照。代理名称没有被另行转换为出口公网 IP。
 
-**免费额度限制：32 个。** 均以相同请求 ID 关联 worker 日志，确认真实上游 HTTP 429、`classified=upstream`，且错误 JSON 包含 `FreeUsageLimitError` / `Free usage limit reached`。这些是上游免费层限额拒绝，不能归因于本项目用户余额不足。
-
-该结论不等于已经查询到某个上游注册账号的剩余额度数值为 0：这些实例使用绑定代理访问免费入口，上游具体按 IP、身份还是其他维度限额，本轮没有额度查询证据。
-
-**其他失败：4 个。** 下表保留与各次诊断请求 ID 精确关联的 worker 错误证据；不把它们归为免费额度耗尽。
-
-| 测试项 | 账号 / 代理 | 诊断错误 | worker 证据 | 请求 ID |
+| 实例 | Mimo 账号 / 代理 / 节点 | Mimo 首次 → 重测（耗时） | DeepSeek 账号 / 代理 / 节点 | DeepSeek 首次 → 重测（耗时） |
 | --- | --- | --- | --- | --- |
-| mimo-17 | 62 / 17 | worker HTTP 502 | `{"event":"dispatch_failed","error_name":"TypeError","error_message":"The socket connection was closed unexpectedly. For more information, pass 'verbose: true' in the second argument to fetch()","dispatched":true}` | `ocfree_0cf799e52ec0ee2fe8b693aad7ac0200c5bb76b634e8c685` |
-| mimo-18 | 63 / 18 | worker HTTP 502 | `{"event":"dispatch_failed","error_name":"TypeError","error_message":"The socket connection was closed unexpectedly. For more information, pass 'verbose: true' in the second argument to fetch()","dispatched":true}` | `ocfree_7b4bbea2d14c75188cd2f89c3a91a2680493f2dc8218553e` |
-| deepseek-17 | 24 / 17 | worker HTTP 502 | `{"event":"dispatch_failed","error_name":"TypeError","error_message":"The socket connection was closed unexpectedly. For more information, pass 'verbose: true' in the second argument to fetch()","dispatched":true}` | `ocfree_572a059a4304cc2c0f933c94733bd00ba7f4ed2aa200bf57` |
-| deepseek-18 | 25 / 18 | worker HTTP 502 | `{"event":"dispatch_failed","error_name":"TypeError","error_message":"The socket connection was closed unexpectedly. For more information, pass 'verbose: true' in the second argument to fetch()","dispatched":true}` | `ocfree_f7e971b52b507f4ab5cf5cf83185651d109244a93c59dfae` |
+| 01 | 6 / 1 / HTTP23 / 01 / US23-Hy2-out4 | 上游 429，免费额度限制 / 0.855s → 上游 429，免费额度限制 / 1.491s | 2 / 1 / HTTP23 / 01 / US23-Hy2-out4 | 上游 429，免费额度限制 / 0.864s → 上游 429，免费额度限制 / 0.844s |
+| 02 | 7 / 2 / HTTP23 / 02 / US23-Hy2-out6 | 上游 429，免费额度限制 / 1.996s → 上游 429，免费额度限制 / 0.863s | 3 / 2 / HTTP23 / 02 / US23-Hy2-out6 | 上游 429，免费额度限制 / 0.814s → 上游 429，免费额度限制 / 1.350s |
+| 03 | 48 / 3 / HTTP23 / 03 / US-RackNerd-out4 | 上游 429，免费额度限制 / 0.911s → 上游 429，免费额度限制 / 0.831s | 10 / 3 / HTTP23 / 03 / US-RackNerd-out4 | 上游 429，免费额度限制 / 1.043s → 上游 429，免费额度限制 / 0.886s |
+| 04 | 49 / 4 / HTTP23 / 04 / KR-Seoul-out4 | 成功，回复 5 / 4.001s → 未恢复、未重测（保留首次观察） | 11 / 4 / HTTP23 / 04 / KR-Seoul-out4 | 成功，回复 5 / 3.111s → 未恢复、未重测（保留首次观察） |
+| 05 | 50 / 5 / HTTP23 / 05 / KR-Seoul-out6 | 上游 429，免费额度限制 / 1.444s → 上游 429，免费额度限制 / 2.012s | 12 / 5 / HTTP23 / 05 / KR-Seoul-out6 | 上游 429，免费额度限制 / 1.393s → 上游 429，免费额度限制 / 1.318s |
+| 06 | 51 / 6 / HTTP23 / 06 / NL-Amsterdam-out4 | 上游 429，免费额度限制 / 1.685s → 上游 429，免费额度限制 / 1.551s | 13 / 6 / HTTP23 / 06 / NL-Amsterdam-out4 | 上游 429，免费额度限制 / 1.543s → 上游 429，免费额度限制 / 1.242s |
+| 07 | 52 / 7 / HTTP23 / 07 / DE-nc1-out4 | 上游 429，免费额度限制 / 1.911s → 上游 429，免费额度限制 / 1.288s | 14 / 7 / HTTP23 / 07 / DE-nc1-out4 | 上游 429，免费额度限制 / 1.627s → 上游 429，免费额度限制 / 1.808s |
+| 08 | 53 / 8 / HTTP23 / 08 / DE-nc1-out6 | 上游 429，免费额度限制 / 1.420s → 上游 429，免费额度限制 / 2.226s | 15 / 8 / HTTP23 / 08 / DE-nc1-out6 | 上游 429，免费额度限制 / 1.349s → 上游 429，免费额度限制 / 1.263s |
+| 09 | 54 / 9 / HTTP23 / 09 / DE-nc2-out4 | 上游 429，免费额度限制 / 1.676s → 上游 429，免费额度限制 / 1.264s | 16 / 9 / HTTP23 / 09 / DE-nc2-out4 | 上游 429，免费额度限制 / 1.355s → 上游 429，免费额度限制 / 1.434s |
+| 10 | 55 / 10 / HTTP23 / 10 / DE-nc2-out6 | 上游 429，免费额度限制 / 1.399s → 上游 429，免费额度限制 / 1.339s | 17 / 10 / HTTP23 / 10 / DE-nc2-out6 | 上游 429，免费额度限制 / 1.391s → 上游 429，免费额度限制 / 1.241s |
+| 11 | 56 / 11 / HTTP23 / 11 / DE-nc3-out4 | 上游 429，免费额度限制 / 1.357s → 上游 429，免费额度限制 / 1.248s | 18 / 11 / HTTP23 / 11 / DE-nc3-out4 | 上游 429，免费额度限制 / 1.368s → 上游 429，免费额度限制 / 1.464s |
+| 12 | 57 / 12 / HTTP23 / 12 / DE-nc3-out6 | 上游 429，免费额度限制 / 1.496s → 上游 429，免费额度限制 / 1.279s | 19 / 12 / HTTP23 / 12 / DE-nc3-out6 | 上游 429，免费额度限制 / 1.590s → 上游 429，免费额度限制 / 1.418s |
+| 13 | 58 / 13 / HTTP23 / 13 / DE-nc4-out4 | 上游 429，免费额度限制 / 1.323s → 上游 429，免费额度限制 / 1.374s | 20 / 13 / HTTP23 / 13 / DE-nc4-out4 | 上游 429，免费额度限制 / 1.388s → 上游 429，免费额度限制 / 1.390s |
+| 14 | 59 / 14 / HTTP23 / 14 / DE-nc4-out6 | 上游 429，免费额度限制 / 1.302s → 上游 429，免费额度限制 / 1.287s | 21 / 14 / HTTP23 / 14 / DE-nc4-out6 | 上游 429，免费额度限制 / 1.356s → 上游 429，免费额度限制 / 1.333s |
+| 15 | 60 / 15 / HTTP23 / 15 / UK-London1-out4 | 成功，回复 5 / 2.902s → 未恢复、未重测（保留首次观察） | 22 / 15 / HTTP23 / 15 / UK-London1-out4 | 成功，回复 5 / 1.740s → 未恢复、未重测（保留首次观察） |
+| 16 | 61 / 16 / HTTP23 / 16 / UK-London2-out4 | 成功，回复 5 / 2.571s → 未恢复、未重测（保留首次观察） | 23 / 16 / HTTP23 / 16 / UK-London2-out4 | 成功，回复 5 / 1.826s → 未恢复、未重测（保留首次观察） |
+| 17 | 62 / 17 / HTTP23 / 17 / HK-out4 | 成功，回复 5 / 4.650s → 未恢复、未重测（保留首次观察） | 24 / 17 / HTTP23 / 17 / HK-out4 | 成功，回复 5 / 2.971s → 未恢复、未重测（保留首次观察） |
+| 18 | 63 / 18 / HTTP23 / 18 / HK-out6 | 成功，回复 5 / 15.304s → 未恢复、未重测（保留首次观察） | 25 / 18 / HTTP23 / 18 / HK-out6 | 成功，回复 5 / 3.174s → 未恢复、未重测（保留首次观察） |
+| 19 | 64 / 19 / HTTP23 / 19 / CN-Aliyun-out4 | 上游 429，免费额度限制 / 1.884s → 上游 429，免费额度限制 / 2.105s | 26 / 19 / HTTP23 / 19 / CN-Aliyun-out4 | 上游 429，免费额度限制 / 1.938s → 上游 429，免费额度限制 / 3.193s |
+| 20 | 65 / 20 / HTTP23 / 20 / CN-Tencent1-out4 | 上游 429，免费额度限制 / 1.870s → 上游 429，免费额度限制 / 3.439s | 27 / 20 / HTTP23 / 20 / CN-Tencent1-out4 | 上游 429，免费额度限制 / 3.562s → 上游 429，免费额度限制 / 1.836s |
+| 21 | 66 / 21 / HTTP23 / 21 / CN-Tencent2-out4 | 上游 429，免费额度限制 / 2.006s → 上游 429，免费额度限制 / 1.768s | 28 / 21 / HTTP23 / 21 / CN-Tencent2-out4 | 上游 429，免费额度限制 / 2.039s → 上游 429，免费额度限制 / 1.684s |
 
-17 / 18 四次错误的共同日志为 `dispatch_failed`、`dispatched=true`、`TypeError`：`The socket connection was closed unexpectedly.`。worker 已开始 fetch，但没有取得上游 HTTP 响应；这属于连接传输故障，无法据此断言断开方一定是代理节点或一定是模型上游。四个实例也没有被记为免费额度 429。
+## 授权恢复动作与清除回读
 
-失败归属校验：可比对的 request / account / proxy / model 字段不匹配 **0**，请求 ID 归属冲突 **0**。32 个额度错误的 worker 记录具有完整账号、代理、模型字段；4 个 socket 错误的 worker 记录未提供账号 / 代理字段，以固定账号诊断目标及相同内部请求 ID 建立关联。成功项不依靠 worker 成功日志（当前 worker 主要记录失败）；以固定账号路径、绑定配置和诊断成功流为证据。
+只对首次已确认额度 429 的账号执行恢复。表中保留实际请求方法、路径、HTTP 和 request ID；恢复动作属于管理 API 调用，不计作模型上游派发。清除后状态与模型重测后状态是不同时间点。
 
-## 普通用户生产 Key 入口
+| 模型 / 实例 | 账号 | 动作 | 方法 / 路径 | HTTP | 管理 request ID | 动作完成（北京时间） | 清除后回读 |
+| --- | ---: | --- | --- | ---: | --- | --- | --- |
+| Mimo / 01 | 6 | `recover-state` | `POST /api/v1/admin/accounts/6/recover-state` | 200 | `e0c54736-ef47-4138-ae82-944144676c43` | 2026-11-05 16:18:05 | 通过 |
+| Mimo / 02 | 7 | `recover-state` | `POST /api/v1/admin/accounts/7/recover-state` | 200 | `f5337431-865b-41cb-8e5c-0add28840f71` | 2026-11-05 16:18:09 | 通过 |
+| Mimo / 03 | 48 | `recover-state` | `POST /api/v1/admin/accounts/48/recover-state` | 200 | `a892f9f5-52c7-41f3-a212-2038aec0eceb` | 2026-11-05 16:18:12 | 通过 |
+| Mimo / 05 | 50 | `recover-state` | `POST /api/v1/admin/accounts/50/recover-state` | 200 | `1b9e8a0a-da17-431c-aae5-315d09c9399f` | 2026-11-05 16:18:15 | 通过 |
+| Mimo / 06 | 51 | `recover-state` | `POST /api/v1/admin/accounts/51/recover-state` | 200 | `320f1d15-22bc-4363-8f49-2f7c8af87643` | 2026-11-05 16:18:19 | 通过 |
+| Mimo / 07 | 52 | `recover-state` | `POST /api/v1/admin/accounts/52/recover-state` | 200 | `bae4ef03-fd80-4b24-bcf7-bc5a3a14745d` | 2026-11-05 16:18:22 | 通过 |
+| Mimo / 08 | 53 | `recover-state` | `POST /api/v1/admin/accounts/53/recover-state` | 200 | `d050b353-3062-4aa4-be0d-17e5c62083d9` | 2026-11-05 16:18:26 | 通过 |
+| Mimo / 09 | 54 | `recover-state` | `POST /api/v1/admin/accounts/54/recover-state` | 200 | `931de88f-16a9-463a-8b08-971bdb995ca5` | 2026-11-05 16:18:31 | 通过 |
+| Mimo / 10 | 55 | `recover-state` | `POST /api/v1/admin/accounts/55/recover-state` | 200 | `95d3ff17-48e9-426b-9c16-a04c68575ced` | 2026-11-05 16:18:34 | 通过 |
+| Mimo / 11 | 56 | `recover-state` | `POST /api/v1/admin/accounts/56/recover-state` | 200 | `614e5824-05fb-4693-b902-2b9de7cb1f3b` | 2026-11-05 16:18:40 | 通过 |
+| Mimo / 12 | 57 | `recover-state` | `POST /api/v1/admin/accounts/57/recover-state` | 200 | `db14cef0-0690-46e0-b0b5-3759c8bfb0fe` | 2026-11-05 16:18:43 | 通过 |
+| Mimo / 13 | 58 | `recover-state` | `POST /api/v1/admin/accounts/58/recover-state` | 200 | `79c3de28-548d-46f8-98a5-3a65d5a81900` | 2026-11-05 16:18:47 | 通过 |
+| Mimo / 14 | 59 | `recover-state` | `POST /api/v1/admin/accounts/59/recover-state` | 200 | `e308572d-b866-49e0-ae3c-6a2defdcb1fc` | 2026-11-05 16:18:52 | 通过 |
+| Mimo / 19 | 64 | `recover-state` | `POST /api/v1/admin/accounts/64/recover-state` | 200 | `35d671d6-cd29-4a27-8af0-95f0fe0da753` | 2026-11-05 16:18:57 | 通过 |
+| Mimo / 20 | 65 | `recover-state` | `POST /api/v1/admin/accounts/65/recover-state` | 200 | `2c9119e2-02ef-4b1c-a0ea-d8160afa9340` | 2026-11-05 16:19:00 | 通过 |
+| Mimo / 21 | 66 | `recover-state` | `POST /api/v1/admin/accounts/66/recover-state` | 200 | `f561ead2-e13b-4254-8947-1e127f8235db` | 2026-11-05 16:19:03 | 通过 |
+| DeepSeek / 01 | 2 | `recover-state` | `POST /api/v1/admin/accounts/2/recover-state` | 200 | `6ed1a6df-b900-4f6e-8e2d-9f64ae2a95d5` | 2026-11-05 16:19:08 | 通过 |
+| DeepSeek / 02 | 3 | `recover-state` | `POST /api/v1/admin/accounts/3/recover-state` | 200 | `03e964a9-f350-420d-b44b-5974bd7cf4ba` | 2026-11-05 16:19:12 | 通过 |
+| DeepSeek / 03 | 10 | `recover-state` | `POST /api/v1/admin/accounts/10/recover-state` | 200 | `cd7133db-6d29-4b0c-8146-18459d5fd14f` | 2026-11-05 16:19:16 | 通过 |
+| DeepSeek / 05 | 12 | `recover-state` | `POST /api/v1/admin/accounts/12/recover-state` | 200 | `8a2f2072-e52f-442b-8df9-b2922ddc21ed` | 2026-11-05 16:19:20 | 通过 |
+| DeepSeek / 06 | 13 | `recover-state` | `POST /api/v1/admin/accounts/13/recover-state` | 200 | `9603864b-4460-4695-b714-59bb90dfd6e3` | 2026-11-05 16:19:28 | 通过 |
+| DeepSeek / 07 | 14 | `recover-state` | `POST /api/v1/admin/accounts/14/recover-state` | 200 | `a545925d-c1a8-4112-bf9b-3ad2e21881c5` | 2026-11-05 16:19:34 | 通过 |
+| DeepSeek / 08 | 15 | `recover-state` | `POST /api/v1/admin/accounts/15/recover-state` | 200 | `a52f0877-b102-43ff-aaa3-76628fe4c043` | 2026-11-05 16:19:37 | 通过 |
+| DeepSeek / 09 | 16 | `recover-state` | `POST /api/v1/admin/accounts/16/recover-state` | 200 | `f1eb58bc-eb97-4224-8444-81263d370c4c` | 2026-11-05 16:19:39 | 通过 |
+| DeepSeek / 10 | 17 | `recover-state` | `POST /api/v1/admin/accounts/17/recover-state` | 200 | `f8e37f01-e1d5-4328-8d3b-dba4b026e216` | 2026-11-05 16:19:43 | 通过 |
+| DeepSeek / 11 | 18 | `recover-state` | `POST /api/v1/admin/accounts/18/recover-state` | 200 | `9c5ddccd-aa2d-4736-b1c7-8dbd7ab6a10a` | 2026-11-05 16:19:47 | 通过 |
+| DeepSeek / 12 | 19 | `recover-state` | `POST /api/v1/admin/accounts/19/recover-state` | 200 | `338cafb7-6937-4d05-8333-2cfa26e283e4` | 2026-11-05 16:19:50 | 通过 |
+| DeepSeek / 13 | 20 | `recover-state` | `POST /api/v1/admin/accounts/20/recover-state` | 200 | `2dba6b46-6925-4dae-b872-9cfdbf5a6933` | 2026-11-05 16:19:54 | 通过 |
+| DeepSeek / 14 | 21 | `recover-state` | `POST /api/v1/admin/accounts/21/recover-state` | 200 | `1148723e-14d3-4ea8-bc17-559c3fe54d60` | 2026-11-05 16:19:57 | 通过 |
+| DeepSeek / 19 | 26 | `recover-state` | `POST /api/v1/admin/accounts/26/recover-state` | 200 | `663cf763-10cd-465b-b3e4-cf5b80c6f1d6` | 2026-11-05 16:20:01 | 通过 |
+| DeepSeek / 20 | 27 | `recover-state` | `POST /api/v1/admin/accounts/27/recover-state` | 200 | `be14afa1-19d4-4d6c-bcde-c8caf32c2414` | 2026-11-05 16:20:04 | 通过 |
+| DeepSeek / 21 | 28 | `recover-state` | `POST /api/v1/admin/accounts/28/recover-state` | 200 | `d69958bc-dc69-4f6e-87b8-8eff01a75e7e` | 2026-11-05 16:20:09 | 通过 |
 
-为精确测试 42 个实例，主测试走管理员固定账号诊断接口，该接口不携带普通用户 Key，也不创建消费者计费记录。已另外用 user 3 的 Mimo Key 6 / group 5 和 DeepSeek Key 5 / group 3 各发起一次 `/v1/chat/completions`，结果另计。两把 Key 的 `/v1/models` 权限及模型可见性检查均通过（该请求会更新 Key 最后使用时间，不能证明全池健康）。
+## 重测后的真实冷却状态
 
-| 模型 | HTTP | 真实可见回答 | 完整流 | 结果 | 耗时 |
-| --- | ---: | --- | --- | --- | ---: |
-| `mimo-v2.6-flash-free` | 200 | `5` | 是 | 成功 | 14.674s |
-| `deepseek-v4.1-flash-free` | 200 | `5` | 是 | 成功 | 2.880s |
+所有时间均为北京时间。首批清除后回读及每次重测前的干净状态从 report 重新核对；若自动复验或同期生产请求随后影响运行时字段，最终快照保留实际观察，不按预期覆盖。冷却截止仅表示本地恢复候选资格，不保证上游届时恢复。
 
-| 模型 | attempt 轨迹（实例 / 账号 / 状态） | 唯一结算 usage | 本站余额扣费 USD |
-| --- | --- | ---: | ---: |
-| `mimo-v2.6-flash-free` | 17 / 62 / unknown → 17 / 62 / unknown → 04 / 49 / settled | 232 | 0 |
-| `deepseek-v4.1-flash-free` | 15 / 22 / settled | 233 | 0.00001725 |
+| 模型 / 实例 | 账号 | 恢复前冷却截止 | 首批清除回读 | 重测前干净 | 重测后冷却截止 | 最终冷却截止 |
+| --- | ---: | --- | --- | --- | --- | --- |
+| Mimo / 01 | 6 | 2026-11-06 04:01:00 | 通过 | 通过 | 2026-11-06 04:20:13 | 2026-11-06 04:20:13 |
+| Mimo / 02 | 7 | 2026-11-06 04:01:04 | 通过 | 通过 | 2026-11-06 04:20:18 | 2026-11-06 04:20:18 |
+| Mimo / 03 | 48 | 2026-11-06 04:01:08 | 通过 | 通过 | 2026-11-06 04:20:20 | 2026-11-06 04:20:20 |
+| Mimo / 05 | 50 | 2026-11-06 04:01:17 | 通过 | 通过 | 2026-11-06 04:20:23 | 2026-11-06 04:20:23 |
+| Mimo / 06 | 51 | 2026-11-06 04:01:21 | 通过 | 通过 | 2026-11-06 04:20:28 | 2026-11-06 04:20:28 |
+| Mimo / 07 | 52 | 2026-11-06 04:01:25 | 通过 | 通过 | 2026-11-06 04:20:32 | 2026-11-06 04:20:32 |
+| Mimo / 08 | 53 | 2026-11-06 04:01:30 | 通过 | 通过 | 2026-11-06 04:20:36 | 2026-11-06 04:20:36 |
+| Mimo / 09 | 54 | 2026-11-06 04:01:33 | 通过 | 通过 | 2026-11-06 04:20:41 | 2026-11-06 04:20:41 |
+| Mimo / 10 | 55 | 2026-11-06 04:01:38 | 通过 | 通过 | 2026-11-06 04:20:44 | 2026-11-06 04:20:44 |
+| Mimo / 11 | 56 | 2026-11-06 04:01:41 | 通过 | 通过 | 2026-11-06 04:20:48 | 2026-11-06 04:20:48 |
+| Mimo / 12 | 57 | 2026-11-06 04:01:45 | 通过 | 通过 | 2026-11-06 04:20:52 | 2026-11-06 04:20:52 |
+| Mimo / 13 | 58 | 2026-11-06 04:01:49 | 通过 | 通过 | 2026-11-06 04:20:56 | 2026-11-06 04:20:56 |
+| Mimo / 14 | 59 | 2026-11-06 04:01:52 | 通过 | 通过 | 2026-11-06 04:21:00 | 2026-11-06 04:21:00 |
+| Mimo / 19 | 64 | 2026-11-06 04:02:32 | 通过 | 通过 | 2026-11-06 04:21:04 | 2026-11-06 04:21:04 |
+| Mimo / 20 | 65 | 2026-11-06 04:02:36 | 通过 | 通过 | 2026-11-06 04:21:10 | 2026-11-06 04:21:10 |
+| Mimo / 21 | 66 | 2026-11-06 04:02:40 | 通过 | 通过 | 2026-11-06 04:21:15 | 2026-11-06 04:21:15 |
+| DeepSeek / 01 | 2 | 2026-11-06 04:02:43 | 通过 | 通过 | 2026-11-06 04:21:18 | 2026-11-06 04:21:18 |
+| DeepSeek / 02 | 3 | 2026-11-06 04:02:46 | 通过 | 通过 | 2026-11-06 04:21:20 | 2026-11-06 04:21:20 |
+| DeepSeek / 03 | 10 | 2026-11-06 04:02:49 | 通过 | 通过 | 2026-11-06 04:21:24 | 2026-11-06 04:21:24 |
+| DeepSeek / 05 | 12 | 2026-11-06 04:02:59 | 通过 | 通过 | 2026-11-06 04:21:27 | 2026-11-06 04:21:27 |
+| DeepSeek / 06 | 13 | 2026-11-06 04:03:03 | 通过 | 通过 | 2026-11-06 04:21:31 | 2026-11-06 04:21:31 |
+| DeepSeek / 07 | 14 | 2026-11-06 04:03:07 | 通过 | 通过 | 2026-11-06 04:21:34 | 2026-11-06 04:21:34 |
+| DeepSeek / 08 | 15 | 2026-11-06 04:03:12 | 通过 | 通过 | 2026-11-06 04:21:39 | 2026-11-06 04:21:39 |
+| DeepSeek / 09 | 16 | 2026-11-06 04:03:16 | 通过 | 通过 | 2026-11-06 04:21:43 | 2026-11-06 04:21:43 |
+| DeepSeek / 10 | 17 | 2026-11-06 04:03:19 | 通过 | 通过 | 2026-11-06 04:21:47 | 2026-11-06 04:21:47 |
+| DeepSeek / 11 | 18 | 2026-11-06 04:03:23 | 通过 | 通过 | 2026-11-06 04:21:52 | 2026-11-06 04:21:52 |
+| DeepSeek / 12 | 19 | 2026-11-06 04:03:26 | 通过 | 通过 | 2026-11-06 04:21:56 | 2026-11-06 04:21:56 |
+| DeepSeek / 13 | 20 | 2026-11-06 04:03:30 | 通过 | 通过 | 2026-11-06 04:22:00 | 2026-11-06 04:22:00 |
+| DeepSeek / 14 | 21 | 2026-11-06 04:03:34 | 通过 | 通过 | 2026-11-06 04:22:04 | 2026-11-06 04:22:04 |
+| DeepSeek / 19 | 26 | 2026-11-06 04:03:58 | 通过 | 通过 | 2026-11-06 04:22:08 | 2026-11-06 04:22:08 |
+| DeepSeek / 20 | 27 | 2026-11-06 04:04:04 | 通过 | 通过 | 2026-11-06 04:22:13 | 2026-11-06 04:22:13 |
+| DeepSeek / 21 | 28 | 2026-11-06 04:04:08 | 通过 | 通过 | 2026-11-06 04:22:17 | 2026-11-06 04:22:17 |
 
-消费者归属依据：精确请求 payload SHA-256、user / Key、时间窗、唯一 settled usage 及原始 / 存储 token 数同时吻合；不把公网 request ID 冒称为内部 `ocfree_` ID 的直接链接。Mimo 前两条账本状态保留为 `unknown`，没有 usage 结算记录；另通过这些内部 request ID 对应的 worker 日志核对传输错误。
+## 重测失败的精确证据
 
-本次 Mimo 实际走通了“17 原实例首次 socket 502 → 17 原实例重试一次仍 socket 502 → 换 04 成功”的路径。两个内部失败 request ID 均通过上述账本匹配与 worker 日志精确核对；成功结算落在 04 / account 49 / proxy 4。DeepSeek 直接在 15 / account 22 / proxy 15 成功。
+免费额度类别要求精确 worker request ID 关联、`classified=upstream`、真实上游 HTTP 429 和 `FreeUsageLimitError` / `Free usage limit reached` 标记同时成立。空回答、不完整流、HTTP 5xx 与 socket 故障不会合并成额度错误；额度拒绝也不是上游剩余额度数值为 0 的直接查询。
 
-余额由 999.99044399 USD 变为 999.99042674 USD；两条已结算记录合计 **0.00001725 USD**，与本窗口余额差额一致。上游 free billing 不代表本站 DeepSeek 分组免除用户费用。
+| 测试项 | 账号 / 代理 | 已核实类别 | worker / 内部 request ID | 诊断错误 | worker 关键证据 |
+| --- | --- | --- | --- | --- | --- |
+| `mimo-01` | 6 / 1 | 上游 429，免费额度限制 | `ocfree_6a147c2c123983891bc323884de46827a09f43192073af90` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_6a147c2c123983891bc323884de46827a09f43192073af90 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"59117","free_usage_limit_marker":true}]` |
+| `mimo-02` | 7 / 2 | 上游 429，免费额度限制 | `ocfree_00a2ef2d341a39f32b4b855361dc1b6674c2addaf26af8fe` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_00a2ef2d341a39f32b4b855361dc1b6674c2addaf26af8fe profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56718","free_usage_limit_marker":true}]` |
+| `mimo-03` | 48 / 3 | 上游 429，免费额度限制 | `ocfree_da1b90180ef976d9ea8ab443cd424e60a1b779a347b149d5` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_da1b90180ef976d9ea8ab443cd424e60a1b779a347b149d5 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57596","free_usage_limit_marker":true}]` |
+| `mimo-05` | 50 / 5 | 上游 429，免费额度限制 | `ocfree_579607eb1c7af76dbf7b01ca9c4061231580ac9f9492f874` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_579607eb1c7af76dbf7b01ca9c4061231580ac9f9492f874 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"59619","free_usage_limit_marker":true}]` |
+| `mimo-06` | 51 / 6 | 上游 429，免费额度限制 | `ocfree_fff80d1b1c7b677823b3a7be38ab9c1fdadcc01fd87f794f` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_fff80d1b1c7b677823b3a7be38ab9c1fdadcc01fd87f794f profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57712","free_usage_limit_marker":true}]` |
+| `mimo-07` | 52 / 7 | 上游 429，免费额度限制 | `ocfree_67cb6787d9144bb9266b4b0fcc550e4f4c67b13ffcd7517f` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_67cb6787d9144bb9266b4b0fcc550e4f4c67b13ffcd7517f profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57181","free_usage_limit_marker":true}]` |
+| `mimo-08` | 53 / 8 | 上游 429，免费额度限制 | `ocfree_3c326d4fe358639169b1cf61dfcb19920239289fcb4159eb` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_3c326d4fe358639169b1cf61dfcb19920239289fcb4159eb profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56684","free_usage_limit_marker":true}]` |
+| `mimo-09` | 54 / 9 | 上游 429，免费额度限制 | `ocfree_a3804bfd469361dd5f617e8413bcdc3420841f34929e9ec7` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_a3804bfd469361dd5f617e8413bcdc3420841f34929e9ec7 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56516","free_usage_limit_marker":true}]` |
+| `mimo-10` | 55 / 10 | 上游 429，免费额度限制 | `ocfree_8d097a401c65daefaa521d8ec3e7ea01c9119841235b25b4` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_8d097a401c65daefaa521d8ec3e7ea01c9119841235b25b4 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"58162","free_usage_limit_marker":true}]` |
+| `mimo-11` | 56 / 11 | 上游 429，免费额度限制 | `ocfree_7ad44199dfa76823ec8f0be49a20ac2ea7df039220b9dc80` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_7ad44199dfa76823ec8f0be49a20ac2ea7df039220b9dc80 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56626","free_usage_limit_marker":true}]` |
+| `mimo-12` | 57 / 12 | 上游 429，免费额度限制 | `ocfree_ce6823761393af1828af60389a8e3f93465753f928e0eb57` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_ce6823761393af1828af60389a8e3f93465753f928e0eb57 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57360","free_usage_limit_marker":true}]` |
+| `mimo-13` | 58 / 13 | 上游 429，免费额度限制 | `ocfree_92865caaef74f018727ccf194c9c76b07119ad401d66ffd1` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_92865caaef74f018727ccf194c9c76b07119ad401d66ffd1 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56893","free_usage_limit_marker":true}]` |
+| `mimo-14` | 59 / 14 | 上游 429，免费额度限制 | `ocfree_500c64ca388bfd9094275fe0cbd70a842edec68f1f20b44c` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_500c64ca388bfd9094275fe0cbd70a842edec68f1f20b44c profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"58717","free_usage_limit_marker":true}]` |
+| `mimo-19` | 64 / 19 | 上游 429，免费额度限制 | `ocfree_0f904e9777bc9d4b99251d4ebbdbc60a3b8ba3a2edf41ca4` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_0f904e9777bc9d4b99251d4ebbdbc60a3b8ba3a2edf41ca4 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57844","free_usage_limit_marker":true}]` |
+| `mimo-20` | 65 / 20 | 上游 429，免费额度限制 | `ocfree_ff42b64a1558f21fca6d1ece7cfabaf7b37dcff62a6f3e09` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_ff42b64a1558f21fca6d1ece7cfabaf7b37dcff62a6f3e09 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"58731","free_usage_limit_marker":true}]` |
+| `mimo-21` | 66 / 21 | 上游 429，免费额度限制 | `ocfree_f82f64deb1646b040d1e95aa97a7d2243902d23589dbe191` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_f82f64deb1646b040d1e95aa97a7d2243902d23589dbe191 profile=opencode-mimo-v2.6-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"59484","free_usage_limit_marker":true}]` |
+| `deepseek-01` | 2 / 1 | 上游 429，免费额度限制 | `ocfree_670b51b36f012b3464a76e9a487e1f501571c88c0b55d8c3` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_670b51b36f012b3464a76e9a487e1f501571c88c0b55d8c3 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"59052","free_usage_limit_marker":true}]` |
+| `deepseek-02` | 3 / 2 | 上游 429，免费额度限制 | `ocfree_51e437d2bd6cb964d368f9de812dff769c8c856ab2321b71` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_51e437d2bd6cb964d368f9de812dff769c8c856ab2321b71 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56656","free_usage_limit_marker":true}]` |
+| `deepseek-03` | 10 / 3 | 上游 429，免费额度限制 | `ocfree_f676949aa6d3addb9d8638a11cad965e4e35a2ea02c9477d` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_f676949aa6d3addb9d8638a11cad965e4e35a2ea02c9477d profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57533","free_usage_limit_marker":true}]` |
+| `deepseek-05` | 12 / 5 | 上游 429，免费额度限制 | `ocfree_cdc8e18eaea3289f11798ee2c0d014ecd22248973868e073` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_cdc8e18eaea3289f11798ee2c0d014ecd22248973868e073 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"59555","free_usage_limit_marker":true}]` |
+| `deepseek-06` | 13 / 6 | 上游 429，免费额度限制 | `ocfree_ac9ea0387ee035d59f7605376902791c38ec7841ea75b5c6` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_ac9ea0387ee035d59f7605376902791c38ec7841ea75b5c6 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57649","free_usage_limit_marker":true}]` |
+| `deepseek-07` | 14 / 7 | 上游 429，免费额度限制 | `ocfree_d69ac780a509851242c8b98d429adbfcecc1c4a2ceacf1be` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_d69ac780a509851242c8b98d429adbfcecc1c4a2ceacf1be profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57119","free_usage_limit_marker":true}]` |
+| `deepseek-08` | 15 / 8 | 上游 429，免费额度限制 | `ocfree_689384910ae181aa0b20fa793646c6491d31860f36ddb10a` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_689384910ae181aa0b20fa793646c6491d31860f36ddb10a profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56621","free_usage_limit_marker":true}]` |
+| `deepseek-09` | 16 / 9 | 上游 429，免费额度限制 | `ocfree_1dc8e174a8dee72f6674b6e1249d211872be8b561fe0e9c1` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_1dc8e174a8dee72f6674b6e1249d211872be8b561fe0e9c1 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56453","free_usage_limit_marker":true}]` |
+| `deepseek-10` | 17 / 10 | 上游 429，免费额度限制 | `ocfree_dc8f765628a7da8116b4f549ead36bc923df4ca686fd6e9c` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_dc8f765628a7da8116b4f549ead36bc923df4ca686fd6e9c profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"58099","free_usage_limit_marker":true}]` |
+| `deepseek-11` | 18 / 11 | 上游 429，免费额度限制 | `ocfree_87ff9e20ff1285c4f2717ff918ad910781bf049e408f8556` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_87ff9e20ff1285c4f2717ff918ad910781bf049e408f8556 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56562","free_usage_limit_marker":true}]` |
+| `deepseek-12` | 19 / 12 | 上游 429，免费额度限制 | `ocfree_03918a65f3f63bc9bc95e1a7e0a4fc617bb6a33064647270` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_03918a65f3f63bc9bc95e1a7e0a4fc617bb6a33064647270 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57296","free_usage_limit_marker":true}]` |
+| `deepseek-13` | 20 / 13 | 上游 429，免费额度限制 | `ocfree_d2ea2f99ddd3b9caf9bb2780fac20ed0fb3d7298f97760bf` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_d2ea2f99ddd3b9caf9bb2780fac20ed0fb3d7298f97760bf profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"56829","free_usage_limit_marker":true}]` |
+| `deepseek-14` | 21 / 14 | 上游 429，免费额度限制 | `ocfree_9d2f62238328f999103d1b09408aa670b625cc1cadd863d7` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_9d2f62238328f999103d1b09408aa670b625cc1cadd863d7 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"58653","free_usage_limit_marker":true}]` |
+| `deepseek-19` | 26 / 19 | 上游 429，免费额度限制 | `ocfree_9f889055ed213c5ccd2f0f1880866b230c96f92577a263bf` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_9f889055ed213c5ccd2f0f1880866b230c96f92577a263bf profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"57780","free_usage_limit_marker":true}]` |
+| `deepseek-20` | 27 / 20 | 上游 429，免费额度限制 | `ocfree_f264ff427f8ce1d12d3ffc7f43e682f058a5868cb6f03175` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_f264ff427f8ce1d12d3ffc7f43e682f058a5868cb6f03175 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"58667","free_usage_limit_marker":true}]` |
+| `deepseek-21` | 28 / 21 | 上游 429，免费额度限制 | `ocfree_735689b0887941d1ac4a1e3f59627ac0544006efdc2d0dd1` | `OpenCode free upstream failed (HTTP 429, request_id=ocfree_735689b0887941d1ac4a1e3f59627ac0544006efdc2d0dd1 profile=opencode-deepseek-v4.1-flash-free-text-balanced-20261027-v1)` | `[{"classified":"upstream","upstream_status":429,"error_type":"FreeUsageLimitError","error_message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","retry_after":"59422","free_usage_limit_marker":true}]` |
 
-## 冷却与配置状态
+归属核验：精确请求 ID 冲突 0，可比对账号 / 代理 / 模型字段不匹配 0。成功按固定账号路径、绑定、有效完整响应合同、`test_complete.success=true`、可见 `5` 和无 error 核验，HTTP 200 本身不足以证明成功。
 
-本轮没有手动暂停、清冷却、重置 usage 或修改代理 / 分组 / Key。成功诊断会通过现有逻辑恢复运行状态；识别到免费额度 429 会自动进入冷却并安排后台探针。429 的本地冷却默认及上限为 12 小时，合法的较短 Retry-After 按实现保留。
+## 首次 42 次测试和消费者记录（历史）
 
-新的后台复验流程先立即验证一次，后续按间隔 20 / 40 / 80 / 160 / 320 分钟复验；已有流程会按每账号并发保护合并处理。只有完整有效的免费 SSE 和可见答案才允许清除对应冷却。探针与消费者请求的自动重试均不计入 42 次固定实例主测试。冷却截止表示本地恢复候选资格的时间，不保证上游届时恢复。
+| 模型 | 首次固定实例 | 成功 | 免费额度 429 | 其他失败 | 首次成功实例 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `mimo-v2.6-flash-free` | 21 | 5 | 16 | 0 | 04、15、16、17、18 |
+| `deepseek-v4.1-flash-free` | 21 | 5 | 16 | 0 | 04、15、16、17、18 |
 
-| 模型 | 实例 | 账号 ID | 本次 429 后观察到的冷却截止（北京时间） |
-| --- | --- | ---: | --- |
-| Mimo | 01 | 6 | 2026-11-05 00:26:45 |
-| Mimo | 02 | 7 | 2026-11-05 00:26:48 |
-| Mimo | 03 | 48 | 2026-11-05 00:26:51 |
-| Mimo | 05 | 50 | 2026-11-05 00:27:00 |
-| Mimo | 06 | 51 | 2026-11-05 00:27:03 |
-| Mimo | 07 | 52 | 2026-11-05 00:27:07 |
-| Mimo | 08 | 53 | 2026-11-05 00:27:12 |
-| Mimo | 09 | 54 | 2026-11-05 00:27:16 |
-| Mimo | 10 | 55 | 2026-11-05 00:27:19 |
-| Mimo | 11 | 56 | 2026-11-05 00:27:24 |
-| Mimo | 12 | 57 | 2026-11-05 00:27:27 |
-| Mimo | 13 | 58 | 2026-11-05 00:27:31 |
-| Mimo | 14 | 59 | 2026-11-05 00:27:35 |
-| Mimo | 19 | 64 | 2026-11-05 00:28:08 |
-| Mimo | 20 | 65 | 2026-11-05 00:28:13 |
-| Mimo | 21 | 66 | 2026-11-05 00:28:20 |
-| DeepSeek | 01 | 2 | 2026-11-05 00:28:23 |
-| DeepSeek | 02 | 3 | 2026-11-05 00:28:26 |
-| DeepSeek | 03 | 10 | 2026-11-05 00:28:29 |
-| DeepSeek | 05 | 12 | 2026-11-05 00:28:37 |
-| DeepSeek | 06 | 13 | 2026-11-05 00:28:43 |
-| DeepSeek | 07 | 14 | 2026-11-05 00:28:47 |
-| DeepSeek | 08 | 15 | 2026-11-05 00:28:50 |
-| DeepSeek | 09 | 16 | 2026-11-05 00:28:54 |
-| DeepSeek | 10 | 17 | 2026-11-05 00:28:57 |
-| DeepSeek | 11 | 18 | 2026-11-05 00:29:01 |
-| DeepSeek | 12 | 19 | 2026-11-05 00:29:05 |
-| DeepSeek | 13 | 20 | 2026-11-05 00:29:08 |
-| DeepSeek | 14 | 21 | 2026-11-05 00:29:11 |
-| DeepSeek | 19 | 26 | 2026-11-05 00:29:47 |
-| DeepSeek | 20 | 27 | 2026-11-05 00:29:51 |
-| DeepSeek | 21 | 28 | 2026-11-05 00:29:56 |
+首次 42 次诊断阶段没有人工清状态；随后根据用户追加指示执行了本报告前面的授权恢复与重测。因此“首次无手动清除”只描述首次阶段，不能用于整个任务。首次文件保持原样，详细错误与初始 / 最终冷却时间仍可在上一份私有报告追溯。
 
-测试前尚未到期的冷却：Mimo 11 个，DeepSeek 0 个。主测试直接命中固定实例，未先清除此状态。本次 32 条额度错误后观察到的截止时间见上表；17 / 18 的连接错误没有被误写为免费额度冷却。
+| 首次消费者模型 | 结果 | 账号 / 代理 / usage | 本站余额扣费 USD |
+| --- | --- | --- | ---: |
+| `mimo-v2.6-flash-free` | 成功 | 62 / 17 / 234 | 0 |
+| `deepseek-v4.1-flash-free` | 成功 | 24 / 17 / 235 | 0.0000477 |
 
-独立复核确认：42 个账号的配置、`status=active`、`schedulable=true` 保持；21 个完整代理定义、两个分组配置、两个用户 Key 的配置均不变。账号变化仅涉及运行时冷却或使用时间等字段。分组 active / rate-limited 派生计数可随这些运行状态变化，不作为分组配置变更。
+首次已匹配 settled 余额扣费合计 0.0000477 USD；本轮没有新增消费者 Key 请求或费用验证。固定账号 admin 诊断不使用消费者 Key，不产生同类消费者结算记录。余额整段变化不能据此排除其他并发生产流量。
 
-44 份完整 SSE 均重新计算 SHA-256 并独立重判，覆盖和结果一致；生产四项服务在测试后仍健康，容器与测试前相同。
+## 配置、请求计数与证据边界
 
-日志窗口内另外观察到 21 个独立 `opencode-free-verify-` 后台探针 ID，其 worker 均返回免费额度 429；这只是窗口内可观察的自动复验，不逐条归属于某个人工诊断，也不据此断言不存在其他自动请求。人工部分为 42 个固定实例诊断 + 2 个普通用户生成请求；两次用户请求对应 4 条 attempt，人工主流程共 46 次已验证的上游派发 / attempt，后台探针另计。
+| 项目 | 数量 |
+| --- | ---: |
+| 首次固定账号诊断 | 42 |
+| 首次消费者请求 | 2 |
+| 首次已匹配消费者 attempt | 2 |
+| 本轮授权恢复 / 清理管理请求 | 32 |
+| 本轮固定账号重测 | 32 |
+| 本轮人工模型请求 + 恢复管理请求（POST） | 64 |
+| 本轮方法审计确认的模型上游派发 | 32 |
+| 本轮消费者请求 | 0 |
+| 首次窗口可见独立自动复验 worker ID（历史） | 21 |
+| 本轮窗口可见独立自动复验 worker ID | 11 |
 
-32 个主测试额度错误的真实上游 Retry-After 为 70422–73622 秒（均超过 12 小时），本地均按配置上限截为 12 小时。测试后截止范围为 2026-11-05 00:26:45 至 2026-11-05 00:29:56（北京时间）。后台探针成功时仍可按现有机制提前解除冷却。
+上述类别分开计数，自动探针不逐一强行归属到人工诊断；恢复请求也不是上游模型调用。后台探针可能延续旧流程或合并新冷却，窗口可见 ID 数不证明没有成功或未记录的其他探针。不把不同轮次可能重叠的日志观察简单相加成生产上游总数，也不排除其他生产流量。
 
-应用访问日志也逐个核对了 42 个固定账号诊断 POST：无缺失、无重复、无额外实例测试；该日志窗口没有其他修改性 admin 请求。
+| 独立复核项目 | 结果 |
+| --- | --- |
+| 目标恰为首次 32 个额度实例 | 通过 |
+| 首批恢复与清除回读 | 通过 |
+| 恢复 metadata 与访问日志精确匹配 | 通过 |
+| 32 次重测前状态独立核对干净 | 通过 |
+| 32 份保存响应文件 SHA | 通过 |
+| 保存文件字节数 | 通过 |
+| 保存文件 UTF-8 无损解码 | 通过 |
+| 32 次结果独立重判 | 通过 |
+| 32 次真实上游 429 与额度 marker | 通过 |
+| 首次成功 10 账号无恢复 / 诊断访问 | 通过 |
+| 42 账号四快照静态定义 | 通过 |
+| 42 账号 status 保持 | 通过 |
+| 42 账号手动 schedulable 保持 | 通过 |
+| 21 代理定义保持 | 通过 |
+| 分组配置保持 | 通过 |
+| 无新增消费者生成或 Key 触碰 | 通过 |
+| 已部署方法与核验源码吻合 | 通过 |
+| 执行器账号配置不变（含账号 / 代理 / 分组 / 手动 schedulable） | 通过 |
 
-## 与上一轮的比较
+访问日志独立核对：模型诊断 32 次，授权恢复 32 次；预期诊断 ID 缺失 0，预期恢复 ID 缺失 0，未归属修改性访问 0。排除的 10 个首次成功账号没有本轮模型测试或恢复访问。
 
-- `mimo-v2.6-flash-free`：11 月 3 日成功实例 04、15、16、17、18；本轮成功 04、15、16。本轮新增成功 无，本轮未再成功 17、18。
-- `deepseek-v4.1-flash-free`：11 月 3 日成功实例 04、15、16、17、18；本轮成功 04、15、16。本轮新增成功 无，本轮未再成功 17、18。
+运行时冷却、异常和使用时间可以因用户授权恢复、真实调用及后台探针变化；静态定义和手动标志复核与这些变化区分。此处不声称恢复 API 重置了模型上游额度。
 
-## 范围与证据文件
+独立复核全部 28 项检查通过。目标有效冷却数量：恢复前 32 → 首批清除后 0 → 重测后 32 → 复核时 32。变化字段仅记录为 `rate_limit_reset_at、rate_limited_at、updated_at`。
 
-本轮验证最小文本对话，不包含 OpenClaw / DeepSeek Harness 的完整工具往返。诊断请求配置和模型映射已核对；admin parser 没有启用 ExpectedModel，因此不声称另外严格校验了上游响应的模型 echo。
+首次 SSE 执行器先 `response.text()` 后以 UTF-8 保存，SHA 校验对象是保存的文本文件字节；本轮重测通过 `response.arrayBuffer()` 保存 HTTP 响应体字节，SHA 针对该保存文件计算。两者均不被描述成 TLS 原始线缆捕获。admin parser 未设置 `ExpectedModel`，不声称严格核验上游模型 echo。
 
-原始证据保存在本项目 `.cache/production-dual-group-20261104/`，不进入 Git；私有目录 0700，报告与原始文件 0600。
+只验证最小文本对话，不覆盖 OpenClaw / DeepSeek Harness 的完整工具往返。所有可用性结论都是相应测试窗口的快照；已成功的历史观察也不保证之后持续可用。
 
-- `report.json`、`wire/`：42 个固定实例与两个普通用户入口的原始结果、完整 SSE、SHA-256、耗时及前后状态。
-- `instances.csv`、`verified-results.json`：逐实例结果与最终错误分类。
-- `method-audit/evidence/correlation.private.json`：失败请求、真实上游错误、worker 日志和 account / proxy / model 归属。
-- `review/`：独立覆盖率、SSE、配置、Key 与只读账本归属核查。
-- `method-audit/consumer-attempt-log-correlation.private.json`、`method-audit/automatic-verify-summary.json`：消费者内部 attempt 日志关联与后台探针分开计数。
-- `before.private.json`、`after.private.json`：含敏感字段的前后快照，仅供本机后续核查。
-- `production-runtime.json`：测试时的部署版本和服务健康。
+私有目录 0700，脚本和三份衍生输出 0600；原始快照可能包含凭证，只读私有留存。
 
-可用性结论仅对应上述测试窗口；免费层状态和生产流量会继续变化。
+- 本轮：`report.json`、`wire/`、`before.private.json`、`cleared.private.json`、`after.private.json`。
+- 本轮核验：`method-audit/evidence/correlation.private.json`、`method-audit/summary.json`、`review/summary.json`。
+- 本轮另行核验：`root-offline-verification.json`；运行状态：`production-runtime-after.json`。
+- 本轮衍生输出：`RESULTS.md`、`instances.csv`、`verified-results.json`。
+- 首次历史报告：`../production-dual-group-20261105/RESULTS.md`；首次逐实例原始和核验文件均保持只读。
+
+本轮 429 Retry-After 数值范围：56453–59619 秒；超过 12 小时 32 条。实际本地冷却截止见逐账号状态表。
+
+测试后服务核验时间：2026-11-05 16:24:51（北京时间）；四服务全部健康 通过，容器与基线一致 通过；公开 `/health` HTTP 200。

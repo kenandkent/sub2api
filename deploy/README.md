@@ -99,7 +99,7 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 ### Supported Build Entrypoints
 
 The repository-root `Dockerfile` is the single full-application image definition,
-using the Go version in `backend/go.mod` (currently 1.27.3), Node.js 24 and pnpm 9.
+using the Go version in `backend/go.mod` (currently 1.27.4), Node.js 24 and pnpm 9.
 The obsolete `deploy/Dockerfile` has been removed. Use the full repository as
 context, including `docs/legal/`:
 

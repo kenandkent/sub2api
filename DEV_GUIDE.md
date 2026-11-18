@@ -59,7 +59,7 @@ npm install -g pnpm
 - 目标环境为 `root@167.114.210.84:22`，部署根目录 `/home/workspace/subapi`；只允许原仓库可信 `mysubapi` 分支推送或手动运行进行发布和部署。默认部署应用、PostgreSQL、Redis 和 OpenCode Bun worker 四个容器，并使用同一提交的应用及 worker 镜像摘要。
 - 三份常规 Compose 从当前检出的完整仓库和根 `Dockerfile` 构建本地镜像 `sub2api:mysubapi`，通过 `pull_policy: build` 在启动时重新构建。服务器结合 `docker-compose.production.yml` 覆盖配置后，移除 build 并使用 GHCR 的不可变镜像 digest，无需上传源码。
 - 该服务器为 `x86_64`，分支 CI 默认只构建 `linux/amd64`；根 Dockerfile 保留手动交叉编译其他架构的能力。构建阶段只发布提交专用标签，成功部署后复查分支 HEAD 再更新 `mysubapi` 标签。
-- Go 版本以 `backend/go.mod` 为准，当前声明为 **1.27.3**；完整镜像统一使用根 `Dockerfile`，`backend/Dockerfile` 是相同 Go 版本的后端开发镜像（构建上下文为 `backend/`），不包含前端与生产运行工具。
+- Go 版本以 `backend/go.mod` 为准，当前声明为 **1.27.4**；完整镜像统一使用根 `Dockerfile`，`backend/Dockerfile` 是相同 Go 版本的后端开发镜像（构建上下文为 `backend/`），不包含前端与生产运行工具。
 - 前端使用 pnpm **9.15.9** 和 `pnpm install --frozen-lockfile`，必须提交 `frontend/pnpm-lock.yaml`；根镜像使用 Node.js 24。
 - 后端单元测试、集成及真实基础设施网关测试、前端 lint/typecheck/全量测试、部署配置检查和候选镜像构建并行执行。网关测试使用临时 PostgreSQL/Redis 与替身上游；所有检查通过才部署。部署等待容器健康，检查 `/setup/status` 的初始化状态、`/api/v1/settings/public` 的站点名称与 worker 鉴权空请求（400、未派发）。部署不登录、不请求真实模型；`/health` 只表示应用存活，不检查运行期间的数据库或 Redis 连接。
 - 新提交会取消同分支/PR 的旧 CI 检查或候选构建；生产部署独立串行执行，不中断已开始的 SSH 部署。

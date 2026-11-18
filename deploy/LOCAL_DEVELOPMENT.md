@@ -2,7 +2,7 @@
 
 日常开发使用本机 Vite 和 Go/Air，PostgreSQL、Redis 放在独立 Docker Compose 项目中。现有完整 Docker Compose 部署和 GHCR CI/CD 继续保留。
 
-当前依赖基线是 PostgreSQL 18、Redis 8。Go 以 `backend/go.mod` 为准（当前 1.27.3）；完整镜像使用 Node.js 24 和 pnpm 9。`DEV_GUIDE.md` 中的 PostgreSQL 16/Windows 服务配置是历史记录。
+当前依赖基线是 PostgreSQL 18、Redis 8。Go 以 `backend/go.mod` 为准（当前 1.27.4）；完整镜像使用 Node.js 24 和 pnpm 9。`DEV_GUIDE.md` 中的 PostgreSQL 16/Windows 服务配置是历史记录。
 
 三套环境的配置、网络差异、代理编号和核验记录见 [环境与网络对照](ENVIRONMENT_REFERENCE.md)。
 

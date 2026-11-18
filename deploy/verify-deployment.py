@@ -16,6 +16,7 @@ RELEASE = re.compile(r"[0-9a-f]{40}-[0-9]+-[0-9]+")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 APP = re.compile(r"ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}")
 WORKER = re.compile(r"ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}")
+BUNDLED_OVERLAY = "docker-compose.opencode-bundled.production.yml"
 
 
 class VerificationError(Exception):
@@ -48,18 +49,20 @@ def containers(service, running_only=False):
                    "--filter", "label=com.docker.compose.service=" + service]).split()
 
 
-def verify_service(service, reference, sha):
+def verify_service(service, reference, sha, bundled=False):
     ids = containers(service)
     if len(ids) != 1:
         raise VerificationError(f"{service}: expected exactly one container; inspect Compose project mysubapi")
-    actual_id, running = fields(docker(["container", "inspect", "--format",
-        '[{{json .Image}},{{json .State.Running}}]', ids[0]]), 2)
+    actual_id, running, health = fields(docker(["container", "inspect", "--format",
+        '[{{json .Image}},{{json .State.Running}},'
+        '{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}]', ids[0]]), 3)
     if running is not True:
         raise VerificationError(f"{service}: container is not running; inspect health and retained release")
-    expected_id, revision, dirty, source = fields(docker(["image", "inspect", "--format",
+    expected_id, revision, dirty, source, mode = fields(docker(["image", "inspect", "--format",
         '[{{json .Id}},{{json (index .Config.Labels "org.opencontainers.image.revision")}},'
         '{{json (index .Config.Labels "io.sub2api.source.dirty")}},'
-        '{{json (index .Config.Labels "io.sub2api.source.digest")}}]', reference]), 4)
+        '{{json (index .Config.Labels "io.sub2api.source.digest")}},'
+        '{{json (index .Config.Labels "io.sub2api.opencode-free.mode")}}]', reference]), 5)
     if not isinstance(expected_id, str) or not DIGEST.fullmatch(expected_id):
         raise VerificationError(f"{service}: expected digest has no valid local image ID; inspect the pinned release image")
     if actual_id != expected_id:
@@ -72,6 +75,10 @@ def verify_service(service, reference, sha):
         raise VerificationError(f"{service}: source is dirty or unrecognized; production requires a clean release")
     if source not in (None, "") and (not isinstance(source, str) or not DIGEST.fullmatch(source)):
         raise VerificationError(f"{service}: invalid source digest label")
+    if mode not in (("bundled",) if bundled else (None, "")):
+        raise VerificationError(f"{service}: OpenCode worker image mode does not match retained release")
+    if bundled and health != "healthy":
+        raise VerificationError(f"{service}: bundled app and worker must be healthy")
     legacy = dirty in (None, "")
     print(f"{service}: running image ID and OCI revision match" + (" (legacy source labels absent)" if legacy else ""))
     return source or None
@@ -82,7 +89,7 @@ def main(argv=None):
     parser.add_argument("deploy_root", type=Path)
     parser.add_argument("--release")
     parser.add_argument("--image")
-    parser.add_argument("--worker", help="immutable worker digest, or '-' for no worker")
+    parser.add_argument("--worker", help="immutable standalone worker digest, or '-'")
     args = parser.parse_args(argv)
     try:
         supplied = [args.release, args.image, args.worker]
@@ -104,13 +111,16 @@ def main(argv=None):
             raise VerificationError("invalid release identity: use SHA-RUN_ID-RUN_ATTEMPT and immutable repository digests")
         if os.environ.get("DOCKER_HOST") or os.environ.get("DOCKER_CONTEXT", "default") != "default" or docker(["context", "show"]) != "default":
             raise VerificationError("only the default local Docker context is supported")
-        source = verify_service("sub2api", image, release[:40])
+        bundled = (args.deploy_root / "releases" / release / BUNDLED_OVERLAY).is_file()
+        if bundled and worker != "-":
+            raise VerificationError("release specifies both bundled and standalone worker modes")
+        source = verify_service("sub2api", image, release[:40], bundled=bundled)
         if worker != "-":
             worker_source = verify_service("opencode-free-worker", worker, release[:40])
             if source != worker_source:
                 raise VerificationError("app/worker source digest mismatch; deploy both images from the same source")
-        elif containers("opencode-free-worker", running_only=True):
-            raise VerificationError("unexpected running opencode-free-worker while release state disables the worker; inspect retained release")
+        elif containers("opencode-free-worker", running_only=not bundled):
+            raise VerificationError("unexpected standalone opencode-free-worker for this release; inspect retained release")
         print(f"Deployment identity verified: {release}")
         return 0
     except VerificationError as error:

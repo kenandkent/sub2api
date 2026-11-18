@@ -1,6 +1,6 @@
 # 环境与网络参考
 
-本文记录 **2026-10-31（Asia/Shanghai）** 的实际部署和本机状态，地址、容器名和验证结果是该时点的快照，不代表将来仍然可用。所有命令从项目根目录执行；生产发布和回滚以 [mysubapi CI/CD](CICD_MYSUBAPI.md) 为准，本机开发细节见 [本地开发环境](LOCAL_DEVELOPMENT.md) 和 [OpenCode 本地运行](opencode/LOCAL_FREE.md)。
+本文记录 **2026-10-31（Asia/Shanghai）** 的实际部署和本机状态，地址、容器名和验证结果是该时点的快照，不代表将来仍然可用。所有命令从项目根目录执行；当前生产镜像和容器布局见 [mysubapi CI/CD](CICD_MYSUBAPI.md) 为准，本机开发细节见 [本地开发环境](LOCAL_DEVELOPMENT.md) 和 [OpenCode 本地运行](opencode/LOCAL_FREE.md)。
 
 ## 环境对照
 

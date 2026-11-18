@@ -181,5 +181,21 @@ with tempfile.TemporaryDirectory(prefix="compose-production-", dir=repo_root / "
     assert render(deployment_root, files + [worker_file], environment=no_worker_image, check=False).returncode != 0
     print("PASS opt-in worker uses an immutable private runtime with a shared token and no server build")
 
+    bundled_file = release / "docker-compose.opencode-bundled.production.yml"
+    shutil.copyfile(repo_root / "deploy" / bundled_file.name, bundled_file)
+    bundled = json.loads(render(deployment_root, files + [bundled_file], environment=no_worker_image).stdout)
+    assert set(bundled["services"]) == {"sub2api", "postgres", "redis"}
+    bundled_app = bundled["services"]["sub2api"]
+    assert bundled_app["image"] == image and "build" not in bundled_app
+    assert bundled_app["ports"] == production_app["ports"]
+    assert bundled_app["volumes"] == production_app["volumes"]
+    assert bundled_app["environment"] == enabled_app["environment"]
+    health_command = " ".join(bundled_app["healthcheck"]["test"])
+    assert "http://127.0.0.1:8080/health" in health_command
+    assert "&&" in health_command and "http://127.0.0.1:19090/health/ready" in health_command
+    assert seconds(bundled_app["healthcheck"]["start_period"]) == 120
+    assert render(deployment_root, files + [bundled_file], environment=no_token, check=False).returncode != 0
+    print("PASS bundled production uses three services and requires both loopback health checks")
+
 print("docker compose production test passed")
 PY

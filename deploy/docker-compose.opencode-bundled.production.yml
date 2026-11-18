@@ -1,0 +1,16 @@
+# Load after local + production for releases with Bun packaged in the app image.
+services:
+  sub2api:
+    environment:
+      - OPENCODE_FREE_BUN_ENABLED=true
+      - OPENCODE_FREE_BUN_WORKER_ENDPOINT=http://127.0.0.1:19090
+      - OPENCODE_FREE_BUN_TOKEN=${OPENCODE_FREE_BUN_TOKEN:?OPENCODE_FREE_BUN_TOKEN is required}
+      - OPENCODE_FREE_BUN_REQUEST_TIMEOUT_SECONDS=${OPENCODE_FREE_BUN_REQUEST_TIMEOUT_SECONDS:-120}
+      - OPENCODE_FREE_BUN_MAX_RESPONSE_BYTES=${OPENCODE_FREE_BUN_MAX_RESPONSE_BYTES:-8388608}
+      - OPENCODE_FREE_BUN_MAX_EVENT_BYTES=${OPENCODE_FREE_BUN_MAX_EVENT_BYTES:-262144}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -Y off -T 4 -O /dev/null http://127.0.0.1:8080/health &&
+          wget -q -Y off -T 4 -O /dev/null http://127.0.0.1:19090/health/ready

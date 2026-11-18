@@ -134,7 +134,6 @@ jobs:
       DOCKER_CONFIG: ${{ github.workspace }}/.cache/docker-auth
     outputs:
       image: ${{ steps.result.outputs.image }}
-      worker_image: ${{ steps.result.outputs.worker_image }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -151,12 +150,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and publish this commit
+      - name: Build and publish bundled image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
+          target: bundled
           platforms: linux/amd64
           push: true
           tags: |
@@ -174,42 +174,18 @@ jobs:
             GOSUMDB=sum.golang.org
           cache-from: type=gha,scope=mysubapi
           cache-to: type=gha,mode=max,scope=mysubapi
-      - name: Build and publish OpenCode worker from the same commit
-        id: worker
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/opencode/worker/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ steps.metadata.outputs.repository }}-opencode-free-worker:sha-${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
-          build-args: |
-            VERSION=${{ steps.metadata.outputs.version }}
-            COMMIT=${{ github.sha }}
-            DATE=${{ steps.metadata.outputs.date }}
-            SOURCE_DIRTY=false
-          cache-from: type=gha,scope=mysubapi-opencode-free-worker
-          cache-to: type=gha,mode=max,scope=mysubapi-opencode-free-worker
-      - name: Verify worker authentication in a private network namespace
+      - name: Verify bundled app and worker without external networking
         env:
-          WORKER_SMOKE_IMAGE: ${{ steps.metadata.outputs.repository }}-opencode-free-worker@${{ steps.worker.outputs.digest }}
+          BUNDLED_SMOKE_IMAGE: ${{ steps.metadata.outputs.repository }}@${{ steps.build.outputs.digest }}
         run: python3 -B deploy/tests/opencode_worker_smoke.py
       - name: Record immutable deployment image
         id: result
         env:
           REPOSITORY: ${{ steps.metadata.outputs.repository }}
           DIGEST: ${{ steps.build.outputs.digest }}
-          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
         run: |
           echo "image=$REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "worker_image=$REPOSITORY-opencode-free-worker@$WORKER_DIGEST" >> "$GITHUB_OUTPUT"
           echo "Published image: $REPOSITORY@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
-          echo "Published worker: $REPOSITORY-opencode-free-worker@$WORKER_DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     needs: [deployment-checks, backend-unit, backend-integration, frontend, image]
@@ -233,7 +209,6 @@ jobs:
       DEPLOY_USER: ${{ vars.DEPLOY_USER || 'root' }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/home/workspace/subapi' }}
       DEPLOY_IMAGE: ${{ needs.image.outputs.image }}
-      DEPLOY_WORKER_IMAGE: ${{ needs.image.outputs.worker_image }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -269,7 +244,6 @@ jobs:
           [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ && "$DEPLOY_PATH" != / ]]
           case "/$DEPLOY_PATH/" in */../*|*/./*) exit 1;; esac
           [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
-          [[ "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
           umask 077
           mkdir -p "$GITHUB_WORKSPACE/.cache"
           ssh_dir=$(mktemp -d "$GITHUB_WORKSPACE/.cache/ssh.XXXXXX")
@@ -295,12 +269,12 @@ jobs:
             "umask 077; test -s '$DEPLOY_PATH/.env' || { echo 'Configure the private server .env first.' >&2; exit 1; }; mkdir -p -- '$DEPLOY_PATH/releases' '$DEPLOY_PATH/incoming'; test ! -e '$release_path' && mkdir -- '$incoming_path'"
           scp "${options[@]}" -P "$DEPLOY_PORT" \
             deploy/docker-compose.local.yml deploy/docker-compose.production.yml \
-            deploy/docker-compose.opencode-free.production.yml \
+            deploy/docker-compose.opencode-bundled.production.yml \
             deploy/deploy-mysubapi.sh deploy/verify-deployment.py deploy/.env.example deploy/.env.mysubapi.production.example "$server:$incoming_path/"
           ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
             "test ! -e '$release_path' && mv -T -- '$incoming_path' '$release_path'"
           printf '%s\n' "$GHCR_TOKEN" | ssh "${options[@]}" -p "$DEPLOY_PORT" "$server" \
-            "bash '$release_path/deploy-mysubapi.sh' '$DEPLOY_PATH' '$release_id' '$DEPLOY_IMAGE' '$GITHUB_ACTOR' '$DEPLOY_WORKER_IMAGE'"
+            "bash '$release_path/deploy-mysubapi.sh' '$DEPLOY_PATH' '$release_id' '$DEPLOY_IMAGE' '$GITHUB_ACTOR' '-'"
           echo "Deployed $DEPLOY_IMAGE to $DEPLOY_HOST ($release_id)." >> "$GITHUB_STEP_SUMMARY"
       - name: Check current commit before promotion
         id: promotion_current
@@ -315,13 +289,12 @@ jobs:
             echo "promote=false" >> "$GITHUB_OUTPUT"
             echo "Skipped tag promotion: this commit has been superseded." >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Validate promotion images
+      - name: Validate promotion image
         if: steps.current.outputs.deploy == 'true' && steps.promotion_current.outputs.promote == 'true'
         shell: bash
         run: |
           set -euo pipefail
           [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
-          [[ "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
       - name: Log in for promotion
         if: steps.current.outputs.deploy == 'true' && steps.promotion_current.outputs.promote == 'true'
         uses: docker/login-action@v3
@@ -329,12 +302,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Promote deployed images
+      - name: Promote deployed image
         if: steps.current.outputs.deploy == 'true' && steps.promotion_current.outputs.promote == 'true'
         shell: bash
         run: |
           set -euo pipefail
           [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api@sha256:[0-9a-f]{64}$ ]]
-          [[ "$DEPLOY_WORKER_IMAGE" =~ ^ghcr\.io/kenandkent/sub2api-opencode-free-worker@sha256:[0-9a-f]{64}$ ]]
-          docker buildx imagetools create --tag ghcr.io/kenandkent/sub2api:mysubapi "$DEPLOY_IMAGE"
-          docker buildx imagetools create --tag ghcr.io/kenandkent/sub2api-opencode-free-worker:mysubapi "$DEPLOY_WORKER_IMAGE"
+          docker buildx imagetools create --prefer-index=false --tag ghcr.io/kenandkent/sub2api:mysubapi "$DEPLOY_IMAGE"

@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -9,7 +10,6 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = "ghcr.io/kenandkent/sub2api@sha256:" + "a" * 64
-WORKER = "ghcr.io/kenandkent/sub2api-opencode-free-worker@sha256:" + "b" * 64
 
 
 def deployment_step():
@@ -61,7 +61,7 @@ class WorkflowDeployTests(unittest.TestCase):
             SSH_PRIVATE_KEY="fixture-private-key-sentinel", SSH_KNOWN_HOSTS="",
             GHCR_TOKEN="fixture-registry-token-sentinel", DEPLOY_HOST="167.114.210.84",
             DEPLOY_PORT="22", DEPLOY_USER="root", DEPLOY_PATH="/home/workspace/subapi",
-            DEPLOY_IMAGE=APP, DEPLOY_WORKER_IMAGE=WORKER,
+            DEPLOY_IMAGE=APP,
         )
 
     def tearDown(self):
@@ -78,7 +78,7 @@ class WorkflowDeployTests(unittest.TestCase):
     def calls(self):
         return json.loads(self.log.read_text()) if self.log.exists() else []
 
-    def test_existing_private_key_and_repository_pin_deploy_exact_digests(self):
+    def test_existing_private_key_and_repository_pin_deploy_bundled_digest(self):
         result = self.run_step()
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = self.calls()
@@ -89,14 +89,17 @@ class WorkflowDeployTests(unittest.TestCase):
         self.assertTrue(all("StrictHostKeyChecking=yes" in r["args"] and
                             "GlobalKnownHostsFile=/dev/null" in r["args"] for r in calls))
         upload = next(r for r in calls if r["tool"] == "scp")
-        self.assertIn("deploy/docker-compose.opencode-free.production.yml", upload["args"])
+        self.assertIn("deploy/docker-compose.opencode-bundled.production.yml", upload["args"])
+        self.assertNotIn("deploy/docker-compose.opencode-free.production.yml", upload["args"])
         self.assertIn("deploy/.env.mysubapi.production.example", upload["args"])
         self.assertIn("deploy/verify-deployment.py", upload["args"])
         self.assertIn("root@167.114.210.84:/home/workspace/subapi/incoming/" + "c" * 40 + "-123-2/", upload["args"])
         final = ssh[-1]
         self.assertTrue(final["token_ok"])
-        self.assertIn("'" + APP + "'", final["args"][-1])
-        self.assertIn("'" + WORKER + "'", final["args"][-1])
+        self.assertEqual(shlex.split(final["args"][-1]), [
+            "bash", "/home/workspace/subapi/releases/" + "c" * 40 + "-123-2/deploy-mysubapi.sh",
+            "/home/workspace/subapi", "c" * 40 + "-123-2", APP, "fixture", "-",
+        ])
 
     def test_host_override_requires_explicit_trusted_key(self):
         result = self.run_step(DEPLOY_HOST="another.example.test")
@@ -110,9 +113,8 @@ class WorkflowDeployTests(unittest.TestCase):
     def test_invalid_remote_path_or_mutable_image_never_contacts_server(self):
         for values in [dict(DEPLOY_PATH="/home/workspace/subapi/../other"),
                        dict(DEPLOY_IMAGE="ghcr.io/kenandkent/sub2api:mysubapi"),
-                       dict(DEPLOY_WORKER_IMAGE="-"),
-                       dict(DEPLOY_WORKER_IMAGE="ghcr.io/other/worker@sha256:" + "a" * 64),
-                       dict(DEPLOY_WORKER_IMAGE="")]:
+                       dict(DEPLOY_IMAGE="ghcr.io/other/sub2api@sha256:" + "a" * 64),
+                       dict(DEPLOY_IMAGE="")]:
             with self.subTest(values=values):
                 self.assertNotEqual(self.run_step(**values).returncode, 0)
                 self.assertEqual(self.calls(), [])
@@ -126,7 +128,7 @@ class WorkflowDeployTests(unittest.TestCase):
 
 def promotion_step():
     lines = (ROOT / ".github/workflows/mysubapi-ci-cd.yml").read_text().splitlines()
-    start = next((i for i, line in enumerate(lines) if "name: Promote deployed images" in line), None)
+    start = next((i for i, line in enumerate(lines) if line.strip() == "- name: Promote deployed image"), None)
     if start is None:
         return ""
     start = next(i for i in range(start, len(lines)) if lines[i] == "        run: |") + 1
@@ -158,7 +160,7 @@ class WorkflowPromotionTests(unittest.TestCase):
         self.log = self.directory / "calls.json"
         self.env = dict(PATH=str(binaries) + os.pathsep + os.environ["PATH"],
                         WORKFLOW_FAKE_LOG=str(self.log), PYTHONDONTWRITEBYTECODE="1",
-                        DEPLOY_IMAGE=APP, DEPLOY_WORKER_IMAGE=WORKER,
+                        DEPLOY_IMAGE=APP,
                         GHCR_TOKEN="fixture-registry-token-sentinel")
 
     def tearDown(self):
@@ -173,33 +175,29 @@ class WorkflowPromotionTests(unittest.TestCase):
     def calls(self):
         return json.loads(self.log.read_text()) if self.log.exists() else []
 
-    def test_promotes_exact_deployed_digests_to_both_branch_tags(self):
+    def test_promotes_only_the_deployed_app_digest(self):
         result = self.run_step()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), [
-            ["buildx", "imagetools", "create", "--tag", "ghcr.io/kenandkent/sub2api:mysubapi", APP],
-            ["buildx", "imagetools", "create", "--tag", "ghcr.io/kenandkent/sub2api-opencode-free-worker:mysubapi", WORKER],
+            ["buildx", "imagetools", "create", "--prefer-index=false", "--tag", "ghcr.io/kenandkent/sub2api:mysubapi", APP],
         ])
 
-    def test_invalid_either_digest_fails_before_docker(self):
-        cases = [dict(DEPLOY_IMAGE=""), dict(DEPLOY_WORKER_IMAGE=""),
+    def test_invalid_digest_fails_before_docker(self):
+        cases = [dict(DEPLOY_IMAGE=""),
                  dict(DEPLOY_IMAGE="ghcr.io/kenandkent/sub2api:mysubapi"),
-                 dict(DEPLOY_WORKER_IMAGE="ghcr.io/kenandkent/sub2api-opencode-free-worker:mysubapi"),
                  dict(DEPLOY_IMAGE="ghcr.io/other/sub2api@sha256:" + "a" * 64),
-                 dict(DEPLOY_WORKER_IMAGE="ghcr.io/other/worker@sha256:" + "b" * 64),
-                 dict(DEPLOY_IMAGE="ghcr.io/kenandkent/sub2api@sha256:bad"),
-                 dict(DEPLOY_WORKER_IMAGE="ghcr.io/kenandkent/sub2api-opencode-free-worker@sha256:bad")]
+                 dict(DEPLOY_IMAGE="ghcr.io/kenandkent/sub2api@sha256:bad")]
         for values in cases:
             with self.subTest(values=values):
                 result = self.run_step(**values)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(self.calls(), [])
 
-    def test_first_promotion_failure_stops_before_second(self):
+    def test_promotion_failure_is_reported(self):
         result = self.run_step(WORKFLOW_FAKE_FAIL="true")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.calls(), [
-            ["buildx", "imagetools", "create", "--tag", "ghcr.io/kenandkent/sub2api:mysubapi", APP],
+            ["buildx", "imagetools", "create", "--prefer-index=false", "--tag", "ghcr.io/kenandkent/sub2api:mysubapi", APP],
         ])
 
 

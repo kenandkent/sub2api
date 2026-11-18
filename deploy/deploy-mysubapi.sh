@@ -15,19 +15,31 @@ image=$3
 registry_user=${4:-}
 worker=${5:--}
 [[ -n $worker ]] || worker=-
+bundled_overlay=docker-compose.opencode-bundled.production.yml
+sidecar_overlay=docker-compose.opencode-free.production.yml
 [[ $deploy_root =~ ^/[a-zA-Z0-9_./-]+$ && $deploy_root != / ]] || die "invalid absolute deployment path"
 case "/$deploy_root/" in */../*|*/./*) die "deployment path must not contain dot segments";; esac
 valid_release "$release" || die "release ID must be SHA-RUN_ID-RUN_ATTEMPT"
 valid_image "$image" || die "expected ghcr.io/kenandkent/sub2api@sha256:<64 hex characters>"
 [[ $worker == - ]] || valid_worker "$worker" || die "invalid worker image digest"
 [[ -s "$deploy_root/.env" ]] || die "configure the private $deploy_root/.env before enabling deployment"
-release_dir="$deploy_root/releases/$release"
-for filename in docker-compose.local.yml docker-compose.production.yml; do
-    [[ -f "$release_dir/$filename" ]] || die "release is missing $filename"
-done
-if [[ $worker != - ]]; then
-    [[ -f "$release_dir/docker-compose.opencode-free.production.yml" ]] || die "release is missing worker Compose file"
-fi
+is_bundled() { [[ -f "$deploy_root/releases/$1/$bundled_overlay" ]]; }
+
+require_release_files() {
+    local selected_release=$1 selected_worker=$2 directory filename
+    directory="$deploy_root/releases/$selected_release"
+    for filename in docker-compose.local.yml docker-compose.production.yml; do
+        [[ -f "$directory/$filename" ]] || die "release $selected_release is missing $filename"
+    done
+    if [[ $selected_worker != - ]]; then
+        [[ -f "$directory/$sidecar_overlay" ]] || die "release $selected_release is missing worker Compose file"
+        if is_bundled "$selected_release"; then
+            die "release $selected_release specifies both bundled and standalone worker modes"
+        fi
+    fi
+}
+
+require_release_files "$release" "$worker"
 retry_delay=${DEPLOY_RETRY_DELAY_SECONDS:-5}
 [[ $retry_delay =~ ^[0-9]+$ ]] || die "invalid retry delay"
 pull_timeout=${DEPLOY_PULL_TIMEOUT_SECONDS:-180}
@@ -83,7 +95,9 @@ compose_for() {
         -f "$deploy_root/releases/$selected_release/docker-compose.local.yml" \
         -f "$deploy_root/releases/$selected_release/docker-compose.production.yml")
     if [[ $selected_worker != - ]]; then
-        command+=(-f "$deploy_root/releases/$selected_release/docker-compose.opencode-free.production.yml")
+        command+=(-f "$deploy_root/releases/$selected_release/$sidecar_overlay")
+    elif is_bundled "$selected_release"; then
+        command+=(-f "$deploy_root/releases/$selected_release/$bundled_overlay")
     fi
     if [[ $1 == pull ]]; then
         SUB2API_IMAGE="$selected_image" OPENCODE_FREE_WORKER_IMAGE="$selected_worker" timeout -k 10 "$pull_timeout" "${command[@]}" "$@"
@@ -123,10 +137,33 @@ apply_worker() {
     local selected_release=$1 selected_image=$2 selected_worker=$3
     compose_for "$selected_release" "$selected_image" "$selected_worker" up -d --no-build --pull never \
         --no-deps --force-recreate --wait --wait-timeout 300 opencode-free-worker &&
+    probe_worker "$selected_release" "$selected_image" "$selected_worker" opencode-free-worker
+}
+
+probe_worker() {
+    local selected_release=$1 selected_image=$2 selected_worker=$3 service=$4
+    # An empty envelope proves authentication without dispatching upstream.
     compose_for "$selected_release" "$selected_image" "$selected_worker" exec -T sub2api \
         sh -c 'printf "%s" "${OPENCODE_FREE_BUN_TOKEN-}"' |
-    compose_for "$selected_release" "$selected_image" "$selected_worker" exec -T opencode-free-worker \
-        bun -e 'const token = await Bun.stdin.text(); for (const k of Object.keys(process.env)) if (/^(http_proxy|https_proxy|all_proxy|no_proxy)$/i.test(k)) delete process.env[k]; fetch("http://127.0.0.1:19090/v1/transport/chat", {method: "POST", headers: {authorization: "Bearer " + token}, body: "{}", signal: AbortSignal.timeout(10000)}).then(r => { if (r.status !== 400 || r.headers.get("x-sub2api-dispatched") !== "false") process.exit(1) }).catch(() => process.exit(1))'
+    compose_for "$selected_release" "$selected_image" "$selected_worker" exec -T "$service" bun -e '
+        const token = await Bun.stdin.text();
+        for (const name of Object.keys(process.env)) {
+            if (/^(http_proxy|https_proxy|all_proxy|no_proxy)$/i.test(name)) delete process.env[name];
+        }
+        try {
+            for (const [credential, status] of [[token, 400], [token + "-invalid", 401]]) {
+                const response = await fetch("http://127.0.0.1:19090/v1/transport/chat", {
+                    method: "POST",
+                    headers: {authorization: "Bearer " + credential},
+                    body: "{}",
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (response.status !== status || response.headers.get("x-sub2api-dispatched") !== "false") process.exit(1);
+                await response.body?.cancel();
+            }
+        } catch {
+            process.exit(1);
+        }'
 }
 
 remove_worker() {
@@ -148,11 +185,7 @@ if [[ -f "$deploy_root/current-deployment" ]]; then
     previous_worker=${state_fields[2]:--}
     valid_release "$previous_release" && valid_image "$previous_image" || die "invalid previous deployment state"
     [[ $previous_worker == - ]] || valid_worker "$previous_worker" || die "invalid previous worker state"
-    [[ -f "$deploy_root/releases/$previous_release/docker-compose.local.yml" &&
-       -f "$deploy_root/releases/$previous_release/docker-compose.production.yml" ]] || die "previous release files are missing"
-    if [[ $previous_worker != - ]]; then
-        [[ -f "$deploy_root/releases/$previous_release/docker-compose.opencode-free.production.yml" ]] || die "previous worker Compose file is missing"
-    fi
+    require_release_files "$previous_release" "$previous_worker"
 fi
 
 validate_worker() {
@@ -166,10 +199,10 @@ validate_worker() {
     compose_for "$selected_release" "$selected_image" "$selected_worker" config --quiet
 }
 
-if [[ $previous_worker != - ]]; then
+if [[ -n $previous_release ]] && { [[ $previous_worker != - ]] || is_bundled "$previous_release"; }; then
     validate_worker "$previous_release" "$previous_image" "$previous_worker"
 fi
-if [[ $worker != - ]]; then
+if [[ $worker != - ]] || is_bundled "$release"; then
     validate_worker "$release" "$image" "$worker"
 else
     compose_for "$release" "$image" "$worker" config --quiet
@@ -202,8 +235,13 @@ apply_release() {
     apply_app "$selected_release" "$selected_image" "$selected_worker" || return 1
     if [[ $selected_worker != - ]]; then
         apply_worker "$selected_release" "$selected_image" "$selected_worker" || return 1
-    elif [[ $remove_image_worker != - ]]; then
-        remove_worker "$remove_release" "$remove_image" "$remove_image_worker" || return 1
+    else
+        if is_bundled "$selected_release"; then
+            probe_worker "$selected_release" "$selected_image" "$selected_worker" sub2api || return 1
+        fi
+        if [[ $remove_image_worker != - ]]; then
+            remove_worker "$remove_release" "$remove_image" "$remove_image_worker" || return 1
+        fi
     fi
     # Verify actual running IDs/revisions before accepting a new release or a
     # restored pair. Health alone does not prove which immutable image is live.

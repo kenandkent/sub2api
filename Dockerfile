@@ -4,7 +4,8 @@
 # =============================================================================
 # Stage 1: Build frontend
 # Stage 2: Build Go backend with embedded frontend
-# Stage 3: Final minimal image
+# Stage 3: PostgreSQL client and minimal runtime
+# Stage 4: Bundled OpenCode Free runtime (opt-in) or default app image
 # =============================================================================
 
 ARG NODE_IMAGE=node:24-alpine
@@ -98,6 +99,12 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
     -o /app/sub2api \
     ./cmd/server
 
+# Build the supervisor only when the bundled target needs it.
+FROM backend-builder AS bundled-builder
+RUN --mount=type=cache,id=sub2api-gobuild,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    -trimpath -ldflags="-s -w" -o /app/opencode-supervisor ./cmd/opencode-supervisor
+
 # -----------------------------------------------------------------------------
 # Stage 3: PostgreSQL Client (version-matched with docker-compose)
 # -----------------------------------------------------------------------------
@@ -106,7 +113,7 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 # -----------------------------------------------------------------------------
 # Stage 4: Final Runtime Image
 # -----------------------------------------------------------------------------
-FROM ${ALPINE_IMAGE}
+FROM ${ALPINE_IMAGE} AS runtime
 
 # Identity defaults are explicitly unknown for ad hoc builds. Supported local
 # builds supply a shared source fingerprint and dirty flag for app and worker.
@@ -173,3 +180,30 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # Run the application (entrypoint fixes /app/data ownership then execs as sub2api)
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["/app/sub2api"]
+
+# The official Alpine build supplies the matching musl binary for each target.
+FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS bun-runtime
+
+FROM runtime AS bundled
+LABEL io.sub2api.opencode-free.mode="bundled"
+RUN apk add --no-cache tini libgcc libstdc++
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
+RUN test "$(bun --version)" = "1.4.2"
+COPY --from=bundled-builder /app/opencode-supervisor /app/opencode-supervisor
+COPY deploy/opencode/worker/chatBody.ts deploy/opencode/worker/index.ts \
+     deploy/opencode/worker/manifest.generated.ts deploy/opencode/worker/profiles.ts \
+     deploy/opencode/worker/worker.ts /app/worker/
+COPY deploy/opencode/profiles/*.json /app/profiles/
+
+# Check the same loopback endpoint as the supervisor when the worker is enabled.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD wget -q -T 4 -O /dev/null http://localhost:${SERVER_PORT:-8080}/health || exit 1; \
+        case "${OPENCODE_FREE_BUN_ENABLED:-false}" in \
+            1|t|T|true|TRUE|True) wget -q -T 4 -O /dev/null http://127.0.0.1:19090/health/ready ;; \
+        esac
+
+ENTRYPOINT ["/sbin/tini", "--", "/app/docker-entrypoint.sh", "/app/opencode-supervisor"]
+CMD ["/app/sub2api"]
+
+# Retain the standalone runtime for Docker builds without an explicit target.
+FROM runtime AS standalone

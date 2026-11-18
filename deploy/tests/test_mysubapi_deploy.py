@@ -14,6 +14,7 @@ OLD_IMAGE = "ghcr.io/kenandkent/sub2api@sha256:" + "1" * 64
 NEW_IMAGE = "ghcr.io/kenandkent/sub2api@sha256:" + "2" * 64
 OLD_WORKER = "ghcr.io/kenandkent/sub2api-opencode-free-worker@sha256:" + "3" * 64
 NEW_WORKER = "ghcr.io/kenandkent/sub2api-opencode-free-worker@sha256:" + "4" * 64
+BUNDLED_OVERLAY = "docker-compose.opencode-bundled.production.yml"
 
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import fcntl, json, os, sys, time
@@ -32,6 +33,7 @@ with log.open("a+") as file:
     file.flush()
     fcntl.flock(file, fcntl.LOCK_UN)
 scenario = os.environ.get("SCENARIO", "success")
+bundled = any(arg.endswith("docker-compose.opencode-bundled.production.yml") for arg in args)
 if args[0] == "ps":
     service = args[-1].split("=", 2)[-1]
     ups = [(i, r) for i, r in enumerate(records) if "up" in r["args"] and r["args"][-1] == service]
@@ -44,14 +46,19 @@ if args[:2] == ["container", "inspect"]:
     reference = last["worker" if service == "opencode-free-worker" else "image"]
     image_id = reference.split("@")[-1]
     if scenario == "identity-image-mismatch" and reference.endswith("2" * 64): image_id = "sha256:" + "9" * 64
-    print(json.dumps([image_id, True]))
+    health = "unhealthy" if scenario == "bundled-unhealthy" and reference.endswith("2" * 64) else "healthy"
+    print(json.dumps([image_id, True] + ([health] if ".State.Health" in args[-2] else [])))
     sys.exit(0)
 if args[:2] == ["image", "inspect"]:
     reference = args[-1]
     new = reference.endswith(("2" * 64, "4" * 64))
     revision = ("b" if new else "a") * 40
     if (scenario == "identity-revision-mismatch" and reference.endswith("2" * 64)) or (scenario == "worker-identity-mismatch" and reference.endswith("4" * 64)): revision = "c" * 40
-    print(json.dumps([reference.split("@")[-1], revision, "false", "sha256:" + ("b" if new else "a") * 64]))
+    release = ("b" * 40 + "-20-1") if new else ("a" * 40 + "-10-1")
+    overlay = log.parent / "releases" / release / "docker-compose.opencode-bundled.production.yml"
+    mode = "bundled" if overlay.is_file() and scenario != "bundled-label-missing" else None
+    fields = [reference.split("@")[-1], revision, "false", "sha256:" + ("b" if new else "a") * 64]
+    print(json.dumps(fields + ([mode] if "io.sub2api.opencode-free.mode" in args[-2] else [])))
     sys.exit(0)
 if args[:2] == ["context", "show"]:
     print("remote" if scenario == "custom-context" else "default")
@@ -101,7 +108,11 @@ if "exec" in args and "opencode-free-worker" in args:
     if token != "t" * 32 or (scenario == "worker-probe-fail" and record["worker"].endswith("4" * 64)):
         sys.exit(1)
 if "exec" in args and "sub2api" in args:
-    if "OPENCODE_FREE_BUN_TOKEN" in " ".join(args):
+    if "/v1/transport/chat" in " ".join(args):
+        assert bundled and args[args.index("exec") + 3] == "bun"
+        if sys.stdin.read() != "t" * 32 or (scenario == "bundled-probe-fail" and record["image"].endswith("2" * 64)):
+            sys.exit(1)
+    elif "OPENCODE_FREE_BUN_TOKEN" in " ".join(args):
         if record["image"].endswith("2" * 64) and scenario == "app-token-wrong":
             print("w" * 32, end="")
         elif record["image"].endswith("2" * 64) and scenario == "app-token-missing":
@@ -174,6 +185,64 @@ class DeploymentTests(unittest.TestCase):
 
     def app_updates(self):
         return [r for r in self.records() if "up" in r["args"] and r["args"][-1] == "sub2api"]
+
+    def use_bundled(self, release):
+        directory = self.root / "releases" / release
+        (directory / BUNDLED_OVERLAY).write_text("services: {}\n")
+        (directory / "docker-compose.opencode-free.production.yml").unlink()
+
+    def test_bundled_cutover_probes_app_before_removing_sidecar(self):
+        self.use_bundled(NEW)
+        self.state.write_text(f"{OLD} {OLD_IMAGE} {OLD_WORKER}\n")
+        result = self.run_deploy(worker="-")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.state.read_text(), f"{NEW} {NEW_IMAGE} -\n")
+        calls = self.records()
+        probe = next(i for i, r in enumerate(calls)
+                     if "/v1/transport/chat" in " ".join(r["args"]) and "sub2api" in r["args"])
+        removal = next(i for i, r in enumerate(calls)
+                       if "rm" in r["args"] and r["args"][-1] == "opencode-free-worker")
+        self.assertLess(probe, removal)
+        self.assertIn("x-sub2api-dispatched", " ".join(calls[probe]["args"]))
+        self.assertTrue(any(arg.endswith(BUNDLED_OVERLAY) for arg in self.app_updates()[0]["args"]))
+        self.assertTrue(any(OLD in arg for arg in calls[removal]["args"]))
+        self.assertFalse(any("pull" in r["args"] and r["args"][-1] == "opencode-free-worker" for r in calls))
+
+    def test_bundled_failure_restores_old_app_then_sidecar(self):
+        self.use_bundled(NEW)
+        previous_state = f"{OLD} {OLD_IMAGE} {OLD_WORKER}\n"
+        self.state.write_text(previous_state)
+        for scenario in ("bundled-probe-fail", "bundled-label-missing", "bundled-unhealthy"):
+            with self.subTest(scenario=scenario):
+                self.log.unlink(missing_ok=True)
+                result = self.run_deploy(scenario, worker="-")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Previous application restored", result.stderr)
+                self.assertEqual(self.state.read_text(), previous_state)
+                calls = self.records()
+                old_app = next(i for i, r in enumerate(calls) if r in self.app_updates() and r["image"] == OLD_IMAGE)
+                old_worker = next(i for i, r in enumerate(calls)
+                                  if "up" in r["args"] and r["args"][-1] == "opencode-free-worker")
+                self.assertLess(old_app, old_worker)
+                self.assertEqual(calls[old_worker]["worker"], OLD_WORKER)
+                self.assertIn("--force-recreate", calls[old_worker]["args"])
+
+    def test_bundled_preflight_rejects_invalid_token_before_replacing_app(self):
+        self.use_bundled(NEW)
+        result = self.run_deploy("short-token", worker="-")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OPENCODE_FREE_BUN_TOKEN", result.stderr)
+        self.assertEqual(self.app_updates(), [])
+
+    def test_failed_sidecar_deployment_restores_bundled_app(self):
+        self.use_bundled(OLD)
+        previous_state = f"{OLD} {OLD_IMAGE} -\n"
+        self.state.write_text(previous_state)
+        result = self.run_deploy("worker-probe-fail", worker=NEW_WORKER)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Previous application restored", result.stderr)
+        self.assertEqual(self.state.read_text(), previous_state)
+        self.assertTrue(any(r["image"] == OLD_IMAGE and "bun" in r["args"] for r in self.records()))
 
     def test_success_backs_up_before_app_and_commits_state_after_probes(self):
         result = self.run_deploy(login=True)

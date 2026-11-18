@@ -28,8 +28,8 @@ class IdentityTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="identity-test-", dir=ROOT / ".cache")
         self.root = Path(self.temp.name)
         (self.root / "current-deployment").write_text(f"{RELEASE} {APP} {WORKER}\n")
-        self.running = {"sub2api": [APP_ID, True], "opencode-free-worker": [WORKER_ID, True]}
-        self.images = {APP: [APP_ID, SHA, "false", SOURCE], WORKER: [WORKER_ID, SHA, "false", SOURCE]}
+        self.running = {"sub2api": [APP_ID, True, "healthy"], "opencode-free-worker": [WORKER_ID, True, "healthy"]}
+        self.images = {APP: [APP_ID, SHA, "false", SOURCE, None], WORKER: [WORKER_ID, SHA, "false", SOURCE, None]}
         self.calls = []
 
     def tearDown(self):
@@ -41,13 +41,15 @@ class IdentityTests(unittest.TestCase):
             return "default"
         if args[0] == "ps":
             service = args[-1].split("=", 2)[-1]
-            if service not in self.running:
+            if service not in self.running or (args[1] == "-q" and not self.running[service][1]):
                 return ""
             return service + "-container"
         if args[:2] == ["container", "inspect"]:
-            return json.dumps(self.running[args[-1].removesuffix("-container")])
+            count = 3 if ".State.Health" in args[-2] else 2
+            return json.dumps(self.running[args[-1].removesuffix("-container")][:count])
         if args[:2] == ["image", "inspect"]:
-            return json.dumps(self.images[args[-1]])
+            count = 5 if "io.sub2api.opencode-free.mode" in args[-2] else 4
+            return json.dumps(self.images[args[-1]][:count])
         self.fail(f"unexpected Docker command: {args}")
 
     def run_verify(self, *args):
@@ -74,7 +76,7 @@ class IdentityTests(unittest.TestCase):
     def test_wrong_or_missing_revision_and_dirty_source_fail(self):
         for revision, dirty in [("b" * 40, "false"), (None, None), (SHA, "true"), (SHA, "unexpected")]:
             with self.subTest(revision=revision, dirty=dirty):
-                self.images[WORKER] = [WORKER_ID, revision, dirty, SOURCE]
+                self.images[WORKER] = [WORKER_ID, revision, dirty, SOURCE, None]
                 code, output = self.run_verify()
                 self.assertEqual(code, 1, output)
                 self.assertIn("opencode-free-worker", output)
@@ -88,14 +90,14 @@ class IdentityTests(unittest.TestCase):
     def test_two_field_legacy_state_and_legacy_labels_remain_supported(self):
         (self.root / "current-deployment").write_text(f"{RELEASE} {APP}\n")
         del self.running["opencode-free-worker"]
-        self.images[APP] = [APP_ID, SHA, None, None]
+        self.images[APP] = [APP_ID, SHA, None, None, None]
         code, output = self.run_verify()
         self.assertEqual(code, 0, output)
         self.assertIn("legacy", output)
 
     def test_legacy_pair_without_custom_source_labels_is_supported(self):
-        self.images[APP][2:] = [None, None]
-        self.images[WORKER][2:] = [None, None]
+        self.images[APP][2:] = [None, None, None]
+        self.images[WORKER][2:] = [None, None, None]
         code, output = self.run_verify()
         self.assertEqual(code, 0, output)
 
@@ -104,6 +106,43 @@ class IdentityTests(unittest.TestCase):
         code, output = self.run_verify()
         self.assertEqual(code, 1)
         self.assertIn("unexpected", output)
+
+    def use_bundled(self):
+        (self.root / "current-deployment").write_text(f"{RELEASE} {APP} -\n")
+        self.images[APP][4] = "bundled"
+        directory = self.root / "releases" / RELEASE
+        directory.mkdir(parents=True)
+        (directory / "docker-compose.opencode-bundled.production.yml").touch()
+        del self.running["opencode-free-worker"]
+
+    def test_bundled_identity_requires_matching_manifest_label_and_health(self):
+        self.use_bundled()
+        code, output = self.run_verify()
+        self.assertEqual(code, 0, output)
+        self.assertIn("Deployment identity verified", output)
+        self.running["sub2api"][2] = "unhealthy"
+        code, output = self.run_verify()
+        self.assertEqual(code, 1)
+        self.assertIn("healthy", output)
+        self.running["sub2api"][2] = "healthy"
+        self.images[APP][4] = None
+        code, output = self.run_verify()
+        self.assertEqual(code, 1)
+        self.assertIn("mode", output)
+
+    def test_bundled_identity_rejects_stopped_standalone_worker(self):
+        self.use_bundled()
+        self.running["opencode-free-worker"] = [WORKER_ID, False, "unhealthy"]
+        code, output = self.run_verify()
+        self.assertEqual(code, 1)
+        self.assertIn("unexpected", output)
+
+    def test_bundled_image_requires_retained_overlay(self):
+        self.use_bundled()
+        (self.root / "releases" / RELEASE / "docker-compose.opencode-bundled.production.yml").unlink()
+        code, output = self.run_verify()
+        self.assertEqual(code, 1)
+        self.assertIn("mode", output)
 
     def test_stopped_or_missing_app_fails(self):
         self.running["sub2api"][1] = False

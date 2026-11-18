@@ -6,10 +6,10 @@
 
 1. 向 `mysubapi` 推送、向该分支提 PR，或手动触发时，并行执行部署回归、后端单元测试、后端集成及真实基础设施网关测试、前端 lint/typecheck/全量 Vitest。网关回归使用临时 PostgreSQL/Redis 和替身模型上游，不调用真实供应商。CI 不再先跑一次关键测试集；本地的关键测试入口继续保留。
 2. 仅原仓库 `kenandkent/sub2api` 的 `mysubapi` 分支能发布镜像；PR 不发布和部署。
-3. 镜像构建与上述检查同时开始，从同一提交构建应用和 Bun worker 的 `linux/amd64` 镜像，适配目标服务器的 `x86_64` 架构。构建阶段只发布 `sha-<commit>` 候选标签；worker 镜像还会在无外网的隔离容器中验证启动、共享网络、正确/错误鉴权及“未派发上游”的结果。根 Dockerfile 仍支持手动构建其他架构。
-4. 默认部署应用和 Bun worker，部署必须等待所有检查、镜像构建及 worker smoke 成功；任一检查失败或取消都不会部署。部署前检查本次 SHA 是否仍是分支最新提交，跳过已被后续提交取代的部署。
+3. 镜像构建与上述检查同时开始，使用根 Dockerfile 的 `bundled` 目标构建一个 `linux/amd64` 应用镜像，镜像包含 Sub2API 和 Bun worker。构建阶段发布 `sha-<commit>` 候选标签，并使用无外网的容器验证应用与 worker 启动、内部鉴权和测试请求未派发上游。
+4. 部署合并镜像必须等待所有检查、镜像构建及容器 smoke 成功；任一检查失败或取消都不会部署。部署前检查本次 SHA 是否仍是分支最新提交，跳过已被后续提交取代的部署。
 5. SSH 上传发布文件到唯一的 `incoming/<SHA>-<run>-<attempt>`，再切换为 `releases/<id>`；镜像始终按 `@sha256:...` 部署，不使用可变标签定位版本。
-6. SSH 部署成功后再次核对分支 HEAD；仍为当前提交时，才把应用和 worker 的 `mysubapi` 标签提升到本次部署使用的镜像摘要。已知过期提交跳过标签提升。GitHub 分支检查和 GHCR 标签写入没有跨系统原子事务；两镜像的标签更新也非原子操作，生产版本以服务器 `current-deployment` 中的摘要为准。标签更新失败会使 job 报错，已完成的服务器部署不会因此自动回滚。
+6. SSH 部署成功后再次核对分支 HEAD；仍为当前提交时，才将应用的 `mysubapi` 标签指向本次部署的镜像摘要。已知过期提交跳过标签提升。GitHub 分支检查和 GHCR 标签写入分开执行，生产版本以服务器 `current-deployment` 中的摘要为准。标签更新失败会使 job 报错，已完成的服务器部署不会因此自动回滚。
 
 各 CI job 使用独立并发组，新推送可以取消同一分支/PR 的旧检查或候选构建。生产部署使用独立并发锁并保持 `cancel-in-progress: false`，不会因为新一轮 CI 取消旧检查而中断正在执行的 SSH 部署。
 
@@ -51,7 +51,7 @@ python3 -B deploy/check-mysubapi-ci.py --completed --timeout 2400 --interval 60
 
 部署 job 使用 `mysubapi-production` Environment，可在 GitHub 中配置其分支限制和人工审批。Repository secret 会直接供该 job 使用，不必复制到 Environment。符合仓库和分支限制的 push 在检查和镜像发布成功后会进入部署；Environment 配置的审批和分支限制仍然生效。
 
-应用和 worker 候选镜像由镜像 job 的 `GITHUB_TOKEN` 以 `packages:write` 发布。部署 job 同样需要 `packages:write`，用于成功部署后的标签提升；服务器拉取使用同一短期 token 经 SSH stdin 登录 GHCR。无需永久 GHCR 密码；若包已存在，分别检查应用包和 `sub2api-opencode-free-worker` 包的 Actions 仓库访问权限，避免 pull 返回 403。标签提升的 Docker 认证保存在 job 工作区的独立目录。
+合并镜像由镜像 job 的 `GITHUB_TOKEN` 以 `packages:write` 发布。部署 job 同样需要 `packages:write` 来提升标签，服务器通过 SSH stdin 接收短期 token 并登录 GHCR。历史 worker 镜像及发布文件继续供旧版回滚使用。
 
 ## 构建缓存与耗时
 
@@ -77,17 +77,17 @@ Docker 的 GHA 层缓存默认不跨运行保存 `RUN --mount=type=cache` 的内
 
 这些配置由服务器维护，CI 不上传或覆盖开发机 `.env`。只有 Compose 明确透传的环境变量会进入容器；不要假定模板中每项都自动生效。新安装先使用与实际 PostgreSQL 容量匹配的应用连接池，例如 `DATABASE_MAX_OPEN_CONNS=50`、`DATABASE_MAX_IDLE_CONNS=10`；模板的高并发示例不是对容器实际连接上限的保证。
 
-该分支生产部署默认运行应用、PostgreSQL、Redis 和 Bun worker **四个容器**。Compose 项目名为 `mysubapi`；固定容器名沿用 `sub2api`、`sub2api-postgres`、`sub2api-redis`。首次接管已有服务前核实容器归属、数据库版本和数据路径；不要创建冲突项目或覆盖其他目录。
+该分支生产部署默认运行包含 Bun worker 的应用、PostgreSQL 和 Redis **三个容器**。Compose 项目名为 `mysubapi`；固定容器名沿用 `sub2api`、`sub2api-postgres`、`sub2api-redis`。首次接管已有服务前核实容器归属、数据库版本和数据路径；不要创建冲突项目或覆盖其他目录。
 
 ## Bun worker
 
 分支生产部署包含现有 Bun transport；它**不扩大已有模型/工具能力，也不代表官方已允许第三方调用免费聊天模型**。当前兼容范围另见 `deploy/opencode/COMPATIBILITY.md`。
 
-生产部署必须提供同一提交构建的 worker 镜像摘要，缺少摘要时不能部署。生产 overlay 只拉取该摘要，不在服务器编译；它共享应用网络命名空间、仅监听 `127.0.0.1:19090`、不发布端口，不读取 PostgreSQL/JWT 等其他秘密，使用只读文件系统和临时 `/tmp`。应用每次重建后 worker 强制重建，避免留在旧网络命名空间。
+生产使用发布目录中的 `docker-compose.opencode-bundled.production.yml` 启用镜像内的 Bun worker。应用通过 `127.0.0.1:19090` 访问 worker，该端口只在应用容器内监听。容器的健康检查同时检查 Go 的 `/health` 和 worker 的 `/health/ready`。
 
-应用和 worker 从同一私有变量取令牌；部署还从实际运行中的应用容器通过匿名管道读取令牌，向 worker 发送无效空请求，必须得到已鉴权的400及 `x-sub2api-dispatched:false`。探针不调用任何真实模型，令牌不放命令参数、发布状态或日志。
+部署用应用的内部令牌对 worker 发空请求，检查正确令牌得到 HTTP 400，错误令牌得到 HTTP 401，两者均应为 `x-sub2api-dispatched:false`。探针的令牌经 stdin 传递，发布记录只包含镜像摘要。
 
-通用 Compose 和手动部署 helper 仍支持不提供 worker 摘要的三容器配置，以兼容既有用法及旧版本回滚。回滚需要的旧配置必须保留；若缺失，部署会在替换应用前拒绝。
+合并版本的 `current-deployment` 第三字段为 `-`，代表没有单独的 worker 镜像。部署脚本以发布目录内的合并 Compose 文件识别内置 worker，并继续读取旧发布的独立 worker 摘要和对应 Compose 文件。切换成功后移除旧 worker 容器；回滚到双容器版本时，在旧应用启动后重建它的 worker。
 
 ## 数据、验证与失败恢复
 
@@ -95,7 +95,7 @@ Docker 的 GHA 层缓存默认不跨运行保存 `RUN --mount=type=cache` 的内
 
 部署锁覆盖拉取、配置预检、依赖就绪、备份、应用/worker替换和恢复。镜像拉取最多三次，每次默认180秒；先验证当前及可回滚配置，再拉取全部所需镜像。依赖 `up` 可能启动或重建 PostgreSQL/Redis，不能把“应用尚未替换”理解为依赖绝不改变。
 
-SQL查询通过后生成非空、私有权限的 `pg_dump -Fc` 备份，再更新应用。容器健康、`/setup/status` 初始化状态、`/api/v1/settings/public` 站点名称、worker 鉴权空请求，以及实际运行身份均通过后才原子更新 `current-deployment`。worker 必须返回400且 `x-sub2api-dispatched:false`。这些探针不会登录或调用真实模型；`/health` 也不持续检查数据库/Redis 连接。新状态是 `RELEASE_ID APP_DIGEST WORKER_DIGEST_OR_-`，兼容读取旧的两字段状态。
+SQL查询通过后生成非空、私有权限的 `pg_dump -Fc` 备份，再更新应用。容器健康、`/setup/status` 初始化状态、`/api/v1/settings/public` 站点名称、worker 鉴权空请求，以及实际运行身份均通过后才原子更新 `current-deployment`。worker 鉴权探针必须匹配预期状态码及 `x-sub2api-dispatched:false`。这些探针不会登录或调用真实模型；`/health` 也不持续检查数据库/Redis 连接。新状态是 `RELEASE_ID APP_DIGEST WORKER_DIGEST_OR_-`，兼容读取旧的两字段状态。
 
 在服务器上可随时执行只读身份核验：
 
@@ -103,9 +103,11 @@ SQL查询通过后生成非空、私有权限的 `pg_dump -Fc` 备份，再更�
 python3 -B /home/workspace/subapi/releases/<release-id>/verify-deployment.py /home/workspace/subapi
 ```
 
-核验器读取 `current-deployment`，检查 Compose 容器归属、运行镜像 ID 与指定 digest 的本地镜像 ID、OCI revision 与 release 提交，以及应用/worker 的配对源码标签；标记为 dirty 的镜像会失败。兼容旧镜像的 OCI 标签时明确提示 `legacy source labels absent`，不声称具有新版源码指纹。命令不会拉取镜像、重启容器或读取私有环境内容，最终成功行是 `Deployment identity verified: <release>`；不匹配时非零退出。部署和失败后的恢复都执行同样的身份核验。
+核验器读取 `current-deployment`，检查 Compose 容器归属、运行镜像 ID 与指定 digest 的本地镜像 ID、OCI revision 与 release 提交，以及合并镜像标记和三个容器的部署状态。对于保留的独立 worker 版本，检查应用与 worker 的源码标签是否配对。标记为 dirty 的镜像会失败。兼容旧镜像的 OCI 标签时明确提示 `legacy source labels absent`，不声称具有新版源码指纹。命令不会拉取镜像、重启容器或读取私有环境内容，最终成功行是 `Deployment identity verified: <release>`；不匹配时非零退出。部署和失败后的恢复都执行同样的身份核验。
 
 替换失败会尝试用旧发布的应用和 worker 摘要恢复，仍以失败退出；不会把回滚成功当本次发布成功。**数据库迁移不自动逆转**，旧二进制可能不兼容新 schema。保留备份，依照 `MARKETPLACE_RUNBOOK.md` 的迁移边界选择兼容版本，不能盲目恢复旧数据库或镜像。发布、备份和旧镜像不会自动删除，也不执行全局 Docker prune。
+
+从合并版本手动回滚到旧版时，使用当前支持合并模式的 `deploy-mysubapi.sh` 和 `verify-deployment.py`，传入旧版发布 ID 及保留的两个镜像摘要。这样若手动回滚失败，部署脚本仍能读懂合并发布的 Compose 文件并恢复内置 worker。
 
 ## 本地验证
 
@@ -113,12 +115,12 @@ python3 -B /home/workspace/subapi/releases/<release-id>/verify-deployment.py /ho
 python3 -B -m unittest discover -s deploy/tests -p 'test_*.py'
 sh deploy/tests/docker-compose-production-test.sh
 bash -n deploy/deploy-mysubapi.sh
-# 构建本机架构的现有 worker；测试禁止外网且不调用真实模型
-docker build -f deploy/opencode/worker/Dockerfile -t sub2api-opencode-free-worker:ci-verify .
-WORKER_SMOKE_IMAGE=sub2api-opencode-free-worker:ci-verify python3 -B deploy/tests/opencode_worker_smoke.py
+# 构建本机架构的合并镜像
+docker build --target bundled -t sub2api:bundled-verify .
+BUNDLED_SMOKE_IMAGE=sub2api:bundled-verify python3 -B deploy/tests/opencode_worker_smoke.py
 ```
 
-脚本回归注入拉取、旧配置、备份、启动、鉴权及回滚失败；SSH步骤通过本地替身验证 pin、路径、两镜像参数、Secret不输出和失败即停止。真实 worker smoke 是隔离网络下的运行时验证；它不能替代线上 GHCR 权限、SSH 私钥可用性或生产完整 Compose 验收。
+脚本回归注入拉取、旧配置、备份、启动、鉴权及回滚失败；SSH步骤通过本地替身验证 主机固定公钥、发布路径、单镜像参数、Secret 不输出和失败即停止。真实 worker smoke 是隔离网络下的运行时验证；它不能替代线上 GHCR 权限、SSH 私钥可用性或生产完整 Compose 验收。
 
 发布前 dump 与每日生产备份独立管理。生产每日 03:30（Asia/Shanghai）的备份、14 天保留、手动拉取至本项目私有目录和隔离恢复检查见 [生产备份](PRODUCTION_BACKUP.md)；现有发布前 dump 不纳入该每日备份的清理范围。
 
